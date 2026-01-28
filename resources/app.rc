@@ -4,7 +4,18 @@
 #include <windows.h>
 
 // Application icon
-// IDI_ICON1 ICON "icons/app.ico"
+IDI_ICON1 ICON "app.ico"
+
+// Toolbar Icons
+icon_add_url ICON "icon_add_url.ico"
+icon_resume ICON "icon_resume.ico"
+icon_pause ICON "icon_pause.ico"
+icon_delete ICON "icon_delete.ico"
+icon_options ICON "icon_options.ico"
+icon_scheduler ICON "icon_scheduler.ico"
+icon_grabber ICON "icon_grabber.ico"
+icon_stop_queue ICON "icon_stop_queue.ico"
+// icon_start_queue missing ico
 
 // Version information
 VS_VERSION_INFO VERSIONINFO
