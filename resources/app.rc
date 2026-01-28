@@ -1,0 +1,37 @@
+// Last Download Manager Resource File
+// For Windows application
+
+#include <windows.h>
+
+// Application icon
+// IDI_ICON1 ICON "icons/app.ico"
+
+// Version information
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION 1,0,0,0
+PRODUCTVERSION 1,0,0,0
+FILEFLAGSMASK 0x3fL
+FILEFLAGS 0x0L
+FILEOS VOS__WINDOWS32
+FILETYPE VFT_APP
+FILESUBTYPE VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904b0"
+        BEGIN
+            VALUE "CompanyName", "Last Download Manager"
+            VALUE "FileDescription", "Last Download Manager"
+            VALUE "FileVersion", "1.0.0.0"
+            VALUE "InternalName", "LastDM"
+            VALUE "LegalCopyright", "Copyright (C) 2026"
+            VALUE "OriginalFilename", "LastDM.exe"
+            VALUE "ProductName", "Last Download Manager"
+            VALUE "ProductVersion", "1.0.0.0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END
