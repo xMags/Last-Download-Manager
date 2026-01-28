@@ -50,12 +50,23 @@ wxBEGIN_EVENT_TABLE(MainWindow, wxFrame) EVT_MENU(
       m_downloadsTable(nullptr), m_toolbar(nullptr), m_statusBar(nullptr),
       m_updateTimer(nullptr), m_taskBarIcon(nullptr) {
   // Set window icon from PNG file
+  // Set window icon from PNG file
   wxString exePath = wxStandardPaths::Get().GetExecutablePath();
+
+  // Try finding icon in ./resources/ (release layout)
   wxFileName iconPath(exePath);
   iconPath.SetFullName("icon_32.png");
-  iconPath.AppendDir("..");
   iconPath.AppendDir("resources");
   iconPath.Normalize();
+
+  if (!wxFileExists(iconPath.GetFullPath())) {
+    // Fallback: Try ../resources/ (dev layout)
+    iconPath = wxFileName(exePath);
+    iconPath.SetFullName("icon_32.png");
+    iconPath.AppendDir("..");
+    iconPath.AppendDir("resources");
+    iconPath.Normalize();
+  }
 
   if (wxFileExists(iconPath.GetFullPath())) {
     wxIcon appIcon;
@@ -164,13 +175,32 @@ void MainWindow::CreateToolBar() {
 
   // Helper lambda to load toolbar icon
   auto loadIcon = [](const wxString &name) -> wxBitmap {
-    // Get executable path and construct icon path relative to it
+    // Try embedded resource first (Permanent Cure)
+    wxIcon resIcon(name, wxBITMAP_TYPE_ICO_RESOURCE);
+    if (resIcon.IsOk()) {
+      wxBitmap bmp(resIcon);
+      wxImage img = bmp.ConvertToImage();
+      img.Rescale(32, 32, wxIMAGE_QUALITY_HIGH);
+      return wxBitmap(img);
+    }
+
+    // Fallback: Get executable path and construct icon path relative to it
     wxString exePath = wxStandardPaths::Get().GetExecutablePath();
+
+    // Try ./resources first
     wxFileName iconPath(exePath);
     iconPath.SetFullName(name + ".png");
-    iconPath.AppendDir("..");
     iconPath.AppendDir("resources");
     iconPath.Normalize();
+
+    if (!wxFileExists(iconPath.GetFullPath())) {
+      // Try ../resources
+      iconPath = wxFileName(exePath);
+      iconPath.SetFullName(name + ".png");
+      iconPath.AppendDir("..");
+      iconPath.AppendDir("resources");
+      iconPath.Normalize();
+    }
 
     wxString path = iconPath.GetFullPath();
     wxImage img(path, wxBITMAP_TYPE_PNG);
@@ -457,11 +487,21 @@ void MainWindow::OnIconize(wxIconizeEvent &event) {
       m_taskBarIcon = new LastDMTaskBarIcon(this);
       wxIcon trayIcon;
       wxString exePath = wxStandardPaths::Get().GetExecutablePath();
+
+      // Try ./resources first
       wxFileName iconPath(exePath);
       iconPath.SetFullName("icon_32.png");
-      iconPath.AppendDir("..");
       iconPath.AppendDir("resources");
       iconPath.Normalize();
+
+      if (!wxFileExists(iconPath.GetFullPath())) {
+        // Try ../resources
+        iconPath = wxFileName(exePath);
+        iconPath.SetFullName("icon_32.png");
+        iconPath.AppendDir("..");
+        iconPath.AppendDir("resources");
+        iconPath.Normalize();
+      }
       if (wxFileExists(iconPath.GetFullPath())) {
         trayIcon.LoadFile(iconPath.GetFullPath(), wxBITMAP_TYPE_PNG);
       }
