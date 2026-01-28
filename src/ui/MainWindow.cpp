@@ -48,7 +48,7 @@ wxBEGIN_EVENT_TABLE(MainWindow, wxFrame) EVT_MENU(
               wxSize(1050, 700)),
       m_splitter(nullptr), m_categoriesPanel(nullptr),
       m_downloadsTable(nullptr), m_toolbar(nullptr), m_statusBar(nullptr),
-      m_updateTimer(nullptr) {
+      m_updateTimer(nullptr), m_taskBarIcon(nullptr) {
   // Set window icon from PNG file
   wxString exePath = wxStandardPaths::Get().GetExecutablePath();
   wxFileName iconPath(exePath);

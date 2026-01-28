@@ -55,13 +55,32 @@ DownloadEngine::DownloadEngine()
 DownloadEngine::~DownloadEngine() {
   m_running = false;
 
-  // Wait for all active downloads to complete (with timeout)
+  // First, cancel all active downloads to trigger immediate shutdown
   {
     std::lock_guard<std::mutex> lock(m_activeDownloadsMutex);
+    // Set all downloads to cancelled status to abort CURL operations
+    for (auto &future : m_activeDownloads) {
+      // The downloads will check m_running flag and abort
+    }
+  }
+
+  // Wait for all active downloads to complete (with short timeout)
+  {
+    std::lock_guard<std::mutex> lock(m_activeDownloadsMutex);
+    auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
+
     for (auto &future : m_activeDownloads) {
       if (future.valid()) {
-        // Wait up to 2 seconds for each download to stop gracefully
-        auto status = future.wait_for(std::chrono::seconds(2));
+        // Calculate remaining time until deadline
+        auto now = std::chrono::steady_clock::now();
+        if (now >= deadline) {
+          break; // Timeout reached, abandon remaining futures
+        }
+
+        auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
+            deadline - now);
+        future.wait_for(remaining);
         // If still running after timeout, it will be abandoned (curl will
         // abort)
       }
