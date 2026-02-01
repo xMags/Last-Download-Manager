@@ -61,6 +61,8 @@ void CategoriesPanel::CreateImageList() {
                                             wxSize(16, 16))); // 9: grabber
   m_imageList->Add(wxArtProvider::GetBitmap(wxART_LIST_VIEW, wxART_LIST,
                                             wxSize(16, 16))); // 10: queues
+  m_imageList->Add(wxArtProvider::GetBitmap(
+      wxART_GO_FORWARD, wxART_LIST, wxSize(16, 16))); // 11: images
 
   m_treeCtrl->SetImageList(m_imageList);
 }
@@ -78,6 +80,7 @@ void CategoriesPanel::CreateCategories() {
   m_musicId = m_treeCtrl->AppendItem(m_allDownloadsId, "Music", 4, 4);
   m_programsId = m_treeCtrl->AppendItem(m_allDownloadsId, "Programs", 5, 5);
   m_videoId = m_treeCtrl->AppendItem(m_allDownloadsId, "Video", 6, 6);
+  m_imagesId = m_treeCtrl->AppendItem(m_allDownloadsId, "Images", 11, 11);
 
   // Status categories
   m_unfinishedId = m_treeCtrl->AppendItem(m_rootId, "Unfinished", 7, 7);
@@ -120,6 +123,8 @@ void CategoriesPanel::UpdateCategoryCount(const wxString &category, int count) {
     itemId = m_programsId;
   else if (category == "Video")
     itemId = m_videoId;
+  else if (category == "Images")
+    itemId = m_imagesId;
   else if (category == "Unfinished")
     itemId = m_unfinishedId;
   else if (category == "Finished")

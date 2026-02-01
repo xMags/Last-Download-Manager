@@ -19,6 +19,9 @@ public:
   MainWindow();
   ~MainWindow();
 
+  // Helper to process URL (used by DnD)
+  void ProcessUrl(const wxString &url);
+
 private:
   // UI Components
   wxSplitterWindow *m_splitter;
