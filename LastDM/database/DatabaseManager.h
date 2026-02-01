@@ -2,9 +2,11 @@
 
 #include "../core/Download.h"
 #include <memory>
-#include <sqlite3.h>
+#include <mutex>
 #include <string>
 #include <vector>
+#include <wx/xml/xml.h>
+
 
 class DatabaseManager {
 public:
@@ -39,21 +41,28 @@ public:
   bool ClearHistory();
   bool ClearCompleted();
 
-  // Transaction support for batch operations
-  bool BeginTransaction();
-  bool CommitTransaction();
-  bool RollbackTransaction();
+  // Transaction support (No-op in XML version, kept for API compatibility)
+  bool BeginTransaction() { return true; }
+  bool CommitTransaction() { return SaveDatabase(); }
+  bool RollbackTransaction() { return true; }
 
 private:
   DatabaseManager();
   ~DatabaseManager();
 
-  sqlite3 *m_db;
   std::string m_dbPath;
+  std::mutex m_mutex;
 
-  bool CreateTables();
-  bool ExecuteSQL(const std::string &sql);
+  // In-memory data
+  struct AppData {
+    std::vector<std::shared_ptr<Download>> downloads;
+    std::vector<std::string> categories;
+    std::vector<std::pair<std::string, std::string>> settings;
+  } m_data;
 
-  // Helper to parse a download row from SQLite statement (#7 - DRY)
-  std::unique_ptr<Download> ParseDownloadFromStatement(sqlite3_stmt *stmt);
+  bool LoadDatabase();
+  bool SaveDatabase();
+
+  // Helpers
+  void CreateDefaultCategories();
 };

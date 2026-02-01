@@ -28,6 +28,7 @@ private:
   wxTreeItemId m_musicId;
   wxTreeItemId m_programsId;
   wxTreeItemId m_videoId;
+  wxTreeItemId m_imagesId;
   wxTreeItemId m_unfinishedId;
   wxTreeItemId m_finishedId;
   wxTreeItemId m_grabberProjectsId;

@@ -1,5 +1,7 @@
 # Build directories
 build/
+bin/
+obj/
 out/
 cmake-build-*/
 x64/
@@ -9,18 +11,22 @@ x86/
 !release/
 
 # IDE files
+# Visual Studio
 .vs/
-.vscode/
+out/
+x64/
+x86/
+Debug/
+Release/
 *.user
 *.suo
-*.sln
-*.vcxproj*
+*.pdb
+*.iobj
+*.ipdb
+*.log
+*.tlog
 
-# CMake generated
-CMakeCache.txt
-CMakeFiles/
-cmake_install.cmake
-Makefile
+# CMake generated (Removed)
 
 # Compiled files
 *.obj

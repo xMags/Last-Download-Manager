@@ -1,0 +1,207 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Source Files">
+      <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
+      <Extensions>cpp;c;cc;cxx;c++;cppm;ixx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
+    </Filter>
+    <Filter Include="Header Files">
+      <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
+      <Extensions>h;hh;hpp;hxx;h++;hm;inl;inc;ipp;xsd</Extensions>
+    </Filter>
+    <Filter Include="Resource Files">
+      <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
+      <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
+    </Filter>
+    <Filter Include="Source Files\core">
+      <UniqueIdentifier>{2e81ab8a-1111-4444-8888-2e81ab8a1111}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\core">
+      <UniqueIdentifier>{2e81ab8a-2222-4444-8888-2e81ab8a2222}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\ui">
+      <UniqueIdentifier>{3e81ab8a-1111-4444-8888-3e81ab8a1111}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\ui">
+      <UniqueIdentifier>{3e81ab8a-2222-4444-8888-3e81ab8a2222}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\database">
+      <UniqueIdentifier>{4e81ab8a-1111-4444-8888-4e81ab8a1111}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\database">
+      <UniqueIdentifier>{4e81ab8a-2222-4444-8888-4e81ab8a2222}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\utils">
+      <UniqueIdentifier>{5e81ab8a-1111-4444-8888-5e81ab8a1111}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\utils">
+      <UniqueIdentifier>{5e81ab8a-2222-4444-8888-5e81ab8a2222}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="main.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="core\Download.cpp">
+      <Filter>Source Files\core</Filter>
+    </ClCompile>
+    <ClCompile Include="core\DownloadEngine.cpp">
+      <Filter>Source Files\core</Filter>
+    </ClCompile>
+    <ClCompile Include="core\DownloadManager.cpp">
+      <Filter>Source Files\core</Filter>
+    </ClCompile>
+    <ClCompile Include="database\DatabaseManager.cpp">
+      <Filter>Source Files\database</Filter>
+    </ClCompile>
+    <ClCompile Include="ui\MainWindow.cpp">
+      <Filter>Source Files\ui</Filter>
+    </ClCompile>
+    <ClCompile Include="ui\CategoriesPanel.cpp">
+      <Filter>Source Files\ui</Filter>
+    </ClCompile>
+    <ClCompile Include="ui\DownloadsTable.cpp">
+      <Filter>Source Files\ui</Filter>
+    </ClCompile>
+    <ClCompile Include="ui\OptionsDialog.cpp">
+      <Filter>Source Files\ui</Filter>
+    </ClCompile>
+    <ClCompile Include="ui\SchedulerDialog.cpp">
+      <Filter>Source Files\ui</Filter>
+    </ClCompile>
+    <ClCompile Include="ui\SpeedGraphPanel.cpp">
+      <Filter>Source Files\ui</Filter>
+    </ClCompile>
+    <ClCompile Include="utils\Settings.cpp">
+      <Filter>Source Files\utils</Filter>
+    </ClCompile>
+    <ClCompile Include="utils\ThemeManager.cpp">
+      <Filter>Source Files\utils</Filter>
+    </ClCompile>
+    <ClCompile Include="utils\HashUtils.cpp">
+      <Filter>Source Files\utils</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="core\Download.h">
+      <Filter>Header Files\core</Filter>
+    </ClInclude>
+    <ClInclude Include="core\DownloadEngine.h">
+      <Filter>Header Files\core</Filter>
+    </ClInclude>
+    <ClInclude Include="core\DownloadManager.h">
+      <Filter>Header Files\core</Filter>
+    </ClInclude>
+    <ClInclude Include="database\DatabaseManager.h">
+      <Filter>Header Files\database</Filter>
+    </ClInclude>
+    <ClInclude Include="ui\MainWindow.h">
+      <Filter>Header Files\ui</Filter>
+    </ClInclude>
+    <ClInclude Include="ui\CategoriesPanel.h">
+      <Filter>Header Files\ui</Filter>
+    </ClInclude>
+    <ClInclude Include="ui\DownloadsTable.h">
+      <Filter>Header Files\ui</Filter>
+    </ClInclude>
+    <ClInclude Include="ui\OptionsDialog.h">
+      <Filter>Header Files\ui</Filter>
+    </ClInclude>
+    <ClInclude Include="ui\SchedulerDialog.h">
+      <Filter>Header Files\ui</Filter>
+    </ClInclude>
+    <ClInclude Include="ui\SpeedGraphPanel.h">
+      <Filter>Header Files\ui</Filter>
+    </ClInclude>
+    <ClInclude Include="utils\Settings.h">
+      <Filter>Header Files\utils</Filter>
+    </ClInclude>
+    <ClInclude Include="utils\ThemeManager.h">
+      <Filter>Header Files\utils</Filter>
+    </ClInclude>
+    <ClInclude Include="utils\HashUtils.h">
+      <Filter>Header Files\utils</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="resources\app.rc">
+      <Filter>Resource Files</Filter>
+    </ResourceCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\.gitignore" />
+    <None Include="..\README.md" />
+    <None Include="resources\cacert.pem" />
+  </ItemGroup>
+  <ItemGroup>
+    <Image Include="resources\app.ico">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="resources\app_icon.ico">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="resources\icon_32.png">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="resources\icon_add_url.ico">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="resources\icon_add_url.png">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="resources\icon_delete.ico">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="resources\icon_delete.png">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="resources\icon_grabber.ico">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="resources\icon_grabber.png">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="resources\icon_options.ico">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="resources\icon_options.png">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="resources\icon_pause.ico">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="resources\icon_pause.png">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="resources\icon_resume.ico">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="resources\icon_resume.png">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="resources\icon_scheduler.ico">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="resources\icon_scheduler.png">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="resources\icon_start_queue.png">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="resources\icon_stop_queue.ico">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="resources\icon_stop_queue.png">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="resources\Interface.png">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="resources\LDM Github Readme.png">
+      <Filter>Resource Files</Filter>
+    </Image>
+  </ItemGroup>
+  <ItemGroup>
+    <Manifest Include="resources\LastDM.manifest" />
+  </ItemGroup>
+</Project>

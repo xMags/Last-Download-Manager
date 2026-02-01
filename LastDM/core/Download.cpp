@@ -173,6 +173,13 @@ std::string Download::DetermineCategory(const std::string &filename) const {
     return "Video";
   }
 
+  // Images
+  if (ext == "jpg" || ext == "jpeg" || ext == "png" || ext == "gif" ||
+      ext == "bmp" || ext == "webp" || ext == "svg" || ext == "ico" ||
+      ext == "tiff" || ext == "tif") {
+    return "Images";
+  }
+
   // Programs
   if (ext == "exe" || ext == "msi" || ext == "dmg" || ext == "deb" ||
       ext == "rpm" || ext == "apk") {

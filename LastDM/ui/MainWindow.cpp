@@ -3,9 +3,27 @@
 #include "../utils/ThemeManager.h"
 #include "OptionsDialog.h"
 #include "SchedulerDialog.h"
+#include <wx/dnd.h>
 #include <wx/filename.h>
 #include <wx/msgdlg.h>
 #include <wx/stdpaths.h>
+
+// Drop target for URLs
+class URLDropTarget : public wxTextDropTarget {
+public:
+  URLDropTarget(MainWindow *parent) : m_parent(parent) {}
+
+  bool OnDropText(wxCoord x, wxCoord y, const wxString &text) override {
+    if (m_parent) {
+      m_parent->ProcessUrl(text);
+      return true;
+    }
+    return false;
+  }
+
+private:
+  MainWindow *m_parent;
+};
 
 wxBEGIN_EVENT_TABLE(MainWindow, wxFrame) EVT_MENU(
     wxID_EXIT, MainWindow::OnExit) EVT_MENU(wxID_ABOUT, MainWindow::OnAbout)
@@ -49,30 +67,34 @@ wxBEGIN_EVENT_TABLE(MainWindow, wxFrame) EVT_MENU(
       m_splitter(nullptr), m_categoriesPanel(nullptr),
       m_downloadsTable(nullptr), m_toolbar(nullptr), m_statusBar(nullptr),
       m_updateTimer(nullptr), m_taskBarIcon(nullptr) {
-  // Set window icon from PNG file
-  // Set window icon from PNG file
-  wxString exePath = wxStandardPaths::Get().GetExecutablePath();
+  // Set drop target
+  SetDropTarget(new URLDropTarget(this));
 
-  // Try finding icon in ./resources/ (release layout)
-  wxFileName iconPath(exePath);
-  iconPath.SetFullName("icon_32.png");
-  iconPath.AppendDir("resources");
-  iconPath.Normalize();
-
-  if (!wxFileExists(iconPath.GetFullPath())) {
-    // Fallback: Try ../resources/ (dev layout)
-    iconPath = wxFileName(exePath);
-    iconPath.SetFullName("icon_32.png");
-    iconPath.AppendDir("..");
+  // Set window icon
+  wxIcon appIcon("IDI_ICON1", wxBITMAP_TYPE_ICO_RESOURCE);
+  if (appIcon.IsOk()) {
+    SetIcon(appIcon);
+  } else {
+    // Fallback to loading from file
+    wxString exePath = wxStandardPaths::Get().GetExecutablePath();
+    wxFileName iconPath(exePath);
+    iconPath.SetFullName("app_icon.ico");
     iconPath.AppendDir("resources");
-    iconPath.Normalize();
-  }
+    iconPath.Normalize(wxPATH_NORM_DOTS | wxPATH_NORM_ABSOLUTE | wxPATH_NORM_TILDE);
 
-  if (wxFileExists(iconPath.GetFullPath())) {
-    wxIcon appIcon;
-    appIcon.LoadFile(iconPath.GetFullPath(), wxBITMAP_TYPE_PNG);
-    if (appIcon.IsOk()) {
-      SetIcon(appIcon);
+    if (!wxFileExists(iconPath.GetFullPath())) {
+      iconPath = wxFileName(exePath);
+      iconPath.SetFullName("app_icon.ico");
+      iconPath.AppendDir("..");
+      iconPath.AppendDir("resources");
+      iconPath.Normalize(wxPATH_NORM_DOTS | wxPATH_NORM_ABSOLUTE | wxPATH_NORM_TILDE);
+    }
+
+    if (wxFileExists(iconPath.GetFullPath())) {
+      appIcon.LoadFile(iconPath.GetFullPath(), wxBITMAP_TYPE_ICO);
+      if (appIcon.IsOk()) {
+        SetIcon(appIcon);
+      }
     }
   }
 
@@ -191,7 +213,7 @@ void MainWindow::CreateToolBar() {
     wxFileName iconPath(exePath);
     iconPath.SetFullName(name + ".png");
     iconPath.AppendDir("resources");
-    iconPath.Normalize();
+    iconPath.Normalize(wxPATH_NORM_DOTS | wxPATH_NORM_ABSOLUTE | wxPATH_NORM_TILDE);
 
     if (!wxFileExists(iconPath.GetFullPath())) {
       // Try ../resources
@@ -199,7 +221,7 @@ void MainWindow::CreateToolBar() {
       iconPath.SetFullName(name + ".png");
       iconPath.AppendDir("..");
       iconPath.AppendDir("resources");
-      iconPath.Normalize();
+      iconPath.Normalize(wxPATH_NORM_DOTS | wxPATH_NORM_ABSOLUTE | wxPATH_NORM_TILDE);
     }
 
     wxString path = iconPath.GetFullPath();
@@ -312,33 +334,36 @@ void MainWindow::OnAddUrl(wxCommandEvent &event) {
 
   if (dialog.ShowModal() == wxID_OK) {
     wxString url = dialog.GetValue();
-    if (!url.IsEmpty()) {
-      // Add download to the manager
-      DownloadManager &manager = DownloadManager::GetInstance();
-      int downloadId = manager.AddDownload(url.ToStdString());
+    ProcessUrl(url);
+  }
+}
 
-      // Check for validation error
-      if (downloadId < 0) {
-        wxMessageBox(
-            "Invalid URL. Please enter a valid HTTP, HTTPS, or FTP URL.",
-            "Invalid URL", wxOK | wxICON_ERROR, this);
-        m_statusBar->SetStatusText("Invalid URL entered", 0);
-        return;
-      }
+void MainWindow::ProcessUrl(const wxString &url) {
+  if (!url.IsEmpty()) {
+    // Add download to the manager
+    DownloadManager &manager = DownloadManager::GetInstance();
+    int downloadId = manager.AddDownload(url.ToStdString());
 
-      // Get the download object and add to table
-      auto download = manager.GetDownload(downloadId);
-      if (download) {
-        m_downloadsTable->AddDownload(download);
+    // Check for validation error
+    if (downloadId < 0) {
+      wxMessageBox("Invalid URL. Please enter a valid HTTP, HTTPS, or FTP URL.",
+                   "Invalid URL", wxOK | wxICON_ERROR, this);
+      m_statusBar->SetStatusText("Invalid URL entered", 0);
+      return;
+    }
 
-        // Start the download automatically
-        manager.StartDownload(downloadId);
+    // Get the download object and add to table
+    auto download = manager.GetDownload(downloadId);
+    if (download) {
+      m_downloadsTable->AddDownload(download);
 
-        // Update status bar
-        m_statusBar->SetStatusText("Downloading: " + url, 0);
-        m_statusBar->SetStatusText(
-            wxString::Format("Downloads: %d", manager.GetTotalDownloads()), 1);
-      }
+      // Start the download automatically
+      manager.StartDownload(downloadId);
+
+      // Update status bar
+      m_statusBar->SetStatusText("Downloading: " + url, 0);
+      m_statusBar->SetStatusText(
+          wxString::Format("Downloads: %d", manager.GetTotalDownloads()), 1);
     }
   }
 }
@@ -490,20 +515,20 @@ void MainWindow::OnIconize(wxIconizeEvent &event) {
 
       // Try ./resources first
       wxFileName iconPath(exePath);
-      iconPath.SetFullName("icon_32.png");
+      iconPath.SetFullName("app_icon.ico");
       iconPath.AppendDir("resources");
-      iconPath.Normalize();
+      iconPath.Normalize(wxPATH_NORM_DOTS | wxPATH_NORM_ABSOLUTE | wxPATH_NORM_TILDE);
 
       if (!wxFileExists(iconPath.GetFullPath())) {
         // Try ../resources
         iconPath = wxFileName(exePath);
-        iconPath.SetFullName("icon_32.png");
+        iconPath.SetFullName("app_icon.ico");
         iconPath.AppendDir("..");
         iconPath.AppendDir("resources");
-        iconPath.Normalize();
+        iconPath.Normalize(wxPATH_NORM_DOTS | wxPATH_NORM_ABSOLUTE | wxPATH_NORM_TILDE);
       }
       if (wxFileExists(iconPath.GetFullPath())) {
-        trayIcon.LoadFile(iconPath.GetFullPath(), wxBITMAP_TYPE_PNG);
+        trayIcon.LoadFile(iconPath.GetFullPath(), wxBITMAP_TYPE_ICO);
       }
       if (!trayIcon.IsOk()) {
         trayIcon = wxArtProvider::GetIcon(wxART_EXECUTABLE_FILE);

@@ -1,6 +1,7 @@
 #include "DownloadManager.h"
 #include "../database/DatabaseManager.h"
 #include "../utils/Settings.h"
+#include <KnownFolders.h>
 #include <Shlobj.h>
 #include <algorithm>
 #include <iostream>
@@ -34,11 +35,24 @@ DownloadManager::DownloadManager()
   m_engine = std::make_unique<DownloadEngine>();
 
   // Set default save path to Downloads folder
-  char path[MAX_PATH];
-  if (SUCCEEDED(SHGetFolderPathA(NULL, CSIDL_PERSONAL, NULL, 0, path))) {
-    m_defaultSavePath = std::string(path) + "\\Downloads";
+  PWSTR path = NULL;
+  if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_Downloads, 0, NULL, &path))) {
+    // Convert to std::string (ANSI)
+    int len = WideCharToMultiByte(CP_ACP, 0, path, -1, NULL, 0, NULL, NULL);
+    if (len > 0) {
+      std::vector<char> buf(len);
+      WideCharToMultiByte(CP_ACP, 0, path, -1, buf.data(), len, NULL, NULL);
+      m_defaultSavePath = buf.data();
+    }
+    CoTaskMemFree(path);
   } else {
-    m_defaultSavePath = "C:\\Downloads";
+    // Fallback to Profile/Downloads
+    char pathA[MAX_PATH];
+    if (SUCCEEDED(SHGetFolderPathA(NULL, CSIDL_PROFILE, NULL, 0, pathA))) {
+      m_defaultSavePath = std::string(pathA) + "\\Downloads";
+    } else {
+      m_defaultSavePath = "C:\\Downloads";
+    }
   }
 
   // Create category folders on startup
@@ -84,7 +98,7 @@ void DownloadManager::EnsureCategoryFoldersExist() {
 
   // Create category subfolders
   std::vector<std::string> categories = {"Compressed", "Documents", "Music",
-                                         "Programs", "Video"};
+                                         "Programs", "Video", "Images"};
 
   for (const auto &category : categories) {
     std::string folderPath = m_defaultSavePath + "\\" + category;

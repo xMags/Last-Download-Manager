@@ -2,7 +2,6 @@
 
 #include "Download.h"
 #include <atomic>
-#include <curl/curl.h>
 #include <functional>
 #include <future>
 #include <memory>
@@ -10,6 +9,11 @@
 #include <string>
 #include <thread>
 #include <vector>
+#define WIN32_LEAN_AND_MEAN
+#include <Windows.h>
+#include <wininet.h>
+
+#pragma comment(lib, "wininet.lib")
 
 class DownloadEngine {
 public:
@@ -52,24 +56,24 @@ public:
   void SetSSLVerification(bool verify) { m_verifySSL = verify; }
   bool GetSSLVerification() const { return m_verifySSL; }
 
-  // CA bundle configuration for proper SSL verification
+  // CA bundle configuration (No longer needed for WinINet, kept for API compatibility if needed, but ignored)
   void SetCABundlePath(const std::string &path) { m_caBundlePath = path; }
   std::string GetCABundlePath() const { return m_caBundlePath; }
   void SetUseNativeCAStore(bool use) { m_useNativeCAStore = use; }
   bool GetUseNativeCAStore() const { return m_useNativeCAStore; }
 
 private:
-  // CURL handles
-  CURLM *m_multiHandle;
+  // WinINet handles
+  HINTERNET m_hSession;
 
   // Settings
   int m_maxConnections;
   int64_t m_speedLimit;
   std::string m_userAgent;
   std::string m_proxyUrl;
-  bool m_verifySSL;           // SSL peer verification setting
-  std::string m_caBundlePath; // Path to CA certificate bundle (cacert.pem)
-  bool m_useNativeCAStore; // Use Windows native CA store (CURLSSLOPT_NATIVE_CA)
+  bool m_verifySSL;           
+  std::string m_caBundlePath; 
+  bool m_useNativeCAStore; 
 
   // Callbacks
   ProgressCallback m_progressCallback;
@@ -88,16 +92,5 @@ private:
 
   // Helper methods
   bool PerformDownload(std::shared_ptr<Download> download);
-  bool DownloadChunk(std::shared_ptr<Download> download, int chunkIndex,
-                     CURL *easyHandle);
-
-  // CURL callbacks
-  static size_t WriteCallback(void *ptr, size_t size, size_t nmemb,
-                              void *userdata);
-  static int ProgressCallback_CURL(void *clientp, curl_off_t dltotal,
-                                   curl_off_t dlnow, curl_off_t ultotal,
-                                   curl_off_t ulnow);
-
-  // Initialize CURL with common options
-  CURL *CreateEasyHandle(const std::string &url);
+  
 };
