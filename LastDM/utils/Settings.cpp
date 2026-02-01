@@ -11,9 +11,8 @@ Settings::Settings()
     : m_autoStart(true), m_minimizeToTray(true), m_showNotifications(true),
       m_maxConnections(8), m_maxSimultaneousDownloads(3), m_speedLimit(0),
       m_useProxy(false), m_proxyPort(8080) {
-  // Set default download folder
-  m_downloadFolder = wxStandardPaths::Get().GetDocumentsDir() +
-                     wxFileName::GetPathSeparator() + "Downloads";
+  // Set default download folder to Windows Downloads folder
+  m_downloadFolder = wxStandardPaths::Get().GetUserDir(wxStandardPaths::Dir_Downloads);
 
   Load();
 }

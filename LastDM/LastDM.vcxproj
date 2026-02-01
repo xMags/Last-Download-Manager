@@ -63,7 +63,7 @@
       <ActionMode>true</ActionMode>
       <AdditionalIncludeDirectories>$(ProjectDir);$(WXWIN)\include;$(WXWIN)\lib\vc_x64_lib\mswud;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp17</LanguageStandard>
-      <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
+      <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -84,13 +84,13 @@
       <ActionMode>true</ActionMode>
       <AdditionalIncludeDirectories>$(ProjectDir);$(WXWIN)\include;$(WXWIN)\lib\vc_x64_lib\mswu;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp17</LanguageStandard>
-      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
-      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <GenerateDebugInformation>false</GenerateDebugInformation>
       <AdditionalLibraryDirectories>$(WXWIN)\lib\vc_x64_lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalDependencies>wxmsw33u_core.lib;wxbase33u.lib;wxbase33u_xml.lib;wxmsw33u_adv.lib;wxpng.lib;wxjpeg.lib;wxtiff.lib;wxzlib.lib;wxexpat.lib;wxregexu.lib;wxwebp.lib;wininet.lib;comctl32.lib;rpcrt4.lib;ws2_32.lib;bcrypt.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
@@ -165,3 +165,4 @@
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
 </Project>
+
