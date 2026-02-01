@@ -134,9 +134,6 @@
     <None Include="resources\cacert.pem" />
   </ItemGroup>
   <ItemGroup>
-    <Image Include="resources\app.ico">
-      <Filter>Resource Files</Filter>
-    </Image>
     <Image Include="resources\app_icon.ico">
       <Filter>Resource Files</Filter>
     </Image>
@@ -198,6 +195,9 @@
       <Filter>Resource Files</Filter>
     </Image>
     <Image Include="resources\LDM Github Readme.png">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="resources\icon_start_queue.ico">
       <Filter>Resource Files</Filter>
     </Image>
   </ItemGroup>
