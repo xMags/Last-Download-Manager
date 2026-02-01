@@ -12,6 +12,16 @@ Download::Download(int id, const std::string &url, const std::string &savePath)
   UpdateLastTryTime();
 }
 
+std::string Download::GetFilename() const {
+  std::lock_guard<std::mutex> lock(m_metadataMutex);
+  return m_filename;
+}
+
+std::string Download::GetSavePath() const {
+  std::lock_guard<std::mutex> lock(m_metadataMutex);
+  return m_savePath;
+}
+
 std::string Download::GetStatusString() const {
   switch (m_status.load()) {
   case DownloadStatus::Queued:
@@ -31,22 +41,79 @@ std::string Download::GetStatusString() const {
   }
 }
 
+std::string Download::GetCategory() const {
+  std::lock_guard<std::mutex> lock(m_metadataMutex);
+  return m_category;
+}
+
+std::string Download::GetDescription() const {
+  std::lock_guard<std::mutex> lock(m_metadataMutex);
+  return m_description;
+}
+
 double Download::GetProgress() const {
-  if (m_totalSize <= 0)
+  int64_t totalSize = m_totalSize.load();
+  if (totalSize <= 0)
     return 0.0;
-  return static_cast<double>(m_downloadedSize.load()) / m_totalSize * 100.0;
+  return static_cast<double>(m_downloadedSize.load()) / totalSize * 100.0;
 }
 
 int Download::GetTimeRemaining() const {
   double speed = m_speed.load();
-  if (speed <= 0 || m_totalSize <= 0)
+  int64_t totalSize = m_totalSize.load();
+  if (speed <= 0 || totalSize <= 0)
     return -1;
 
-  int64_t remaining = m_totalSize - m_downloadedSize.load();
+  int64_t remaining = totalSize - m_downloadedSize.load();
   if (remaining <= 0)
     return 0;
 
   return static_cast<int>(remaining / speed);
+}
+
+std::string Download::GetLastTryTime() const {
+  std::lock_guard<std::mutex> lock(m_metadataMutex);
+  return m_lastTryTime;
+}
+
+std::string Download::GetErrorMessage() const {
+  std::lock_guard<std::mutex> lock(m_metadataMutex);
+  return m_errorMessage;
+}
+
+std::string Download::GetExpectedChecksum() const {
+  std::lock_guard<std::mutex> lock(m_metadataMutex);
+  return m_expectedChecksum;
+}
+
+std::string Download::GetCalculatedChecksum() const {
+  std::lock_guard<std::mutex> lock(m_metadataMutex);
+  return m_calculatedChecksum;
+}
+
+void Download::SetFilename(const std::string &filename) {
+  std::lock_guard<std::mutex> lock(m_metadataMutex);
+  m_filename = filename;
+}
+
+void Download::SetCategory(const std::string &category) {
+  std::lock_guard<std::mutex> lock(m_metadataMutex);
+  m_category = category;
+}
+
+void Download::SetDescription(const std::string &desc) {
+  std::lock_guard<std::mutex> lock(m_metadataMutex);
+  m_description = desc;
+}
+
+void Download::SetErrorMessage(const std::string &msg) {
+  std::lock_guard<std::mutex> lock(m_metadataMutex);
+  m_errorMessage = msg;
+}
+
+void Download::SetSavePath(const std::string &path) {
+  std::lock_guard<std::mutex> lock(m_metadataMutex);
+  m_savePath = path;
 }
 
 void Download::UpdateLastTryTime() {
@@ -57,25 +124,41 @@ void Download::UpdateLastTryTime() {
 
   std::stringstream ss;
   ss << std::put_time(&tm, "%Y-%m-%d %H:%M");
-  m_lastTryTime = ss.str();
+  {
+    std::lock_guard<std::mutex> lock(m_metadataMutex);
+    m_lastTryTime = ss.str();
+  }
+}
+
+void Download::SetExpectedChecksum(const std::string &hash, int type) {
+  std::lock_guard<std::mutex> lock(m_metadataMutex);
+  m_expectedChecksum = hash;
+  m_checksumType = type;
+}
+
+void Download::SetCalculatedChecksum(const std::string &hash) {
+  std::lock_guard<std::mutex> lock(m_metadataMutex);
+  m_calculatedChecksum = hash;
 }
 
 void Download::InitializeChunks(int numConnections) {
   std::lock_guard<std::mutex> lock(m_chunksMutex);
   m_chunks.clear();
 
-  if (m_totalSize <= 0 || numConnections <= 1) {
+  int64_t totalSize = m_totalSize.load();
+  if (totalSize <= 0 || numConnections <= 1) {
     // Single chunk for unknown size or single connection
-    m_chunks.emplace_back(0, m_totalSize > 0 ? m_totalSize - 1 : INT64_MAX);
+    m_chunks.emplace_back(0, totalSize > 0 ? totalSize - 1 : INT64_MAX);
     return;
   }
 
-  int64_t chunkSize = m_totalSize / numConnections;
+  int64_t chunkSize = totalSize / numConnections;
   int64_t startByte = 0;
 
   for (int i = 0; i < numConnections; ++i) {
-    int64_t endByte =
-        (i == numConnections - 1) ? m_totalSize - 1 : startByte + chunkSize - 1;
+    int64_t endByte = (i == numConnections - 1)
+                          ? totalSize - 1
+                          : startByte + chunkSize - 1;
     m_chunks.emplace_back(startByte, endByte);
     startByte = endByte + 1;
   }

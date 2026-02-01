@@ -55,8 +55,7 @@ DownloadManager::DownloadManager()
     }
   }
 
-  // Create category folders on startup
-  EnsureCategoryFoldersExist();
+  ApplySettings(Settings::GetInstance());
 
   // Setup callbacks
   m_engine->SetProgressCallback(
@@ -103,6 +102,30 @@ void DownloadManager::EnsureCategoryFoldersExist() {
   for (const auto &category : categories) {
     std::string folderPath = m_defaultSavePath + "\\" + category;
     CreateDirectoryA(folderPath.c_str(), NULL);
+  }
+}
+
+void DownloadManager::ApplySettings(const Settings &settings) {
+  if (!settings.GetDownloadFolder().empty()) {
+    m_defaultSavePath = settings.GetDownloadFolder().ToStdString();
+  }
+
+  m_maxSimultaneousDownloads = settings.GetMaxSimultaneousDownloads();
+  EnsureCategoryFoldersExist();
+
+  if (m_engine) {
+    m_engine->SetMaxConnections(std::max(1, settings.GetMaxConnections()));
+
+    int speedLimitKb = settings.GetSpeedLimit();
+    int64_t speedLimitBytes =
+        speedLimitKb > 0 ? static_cast<int64_t>(speedLimitKb) * 1024 : 0;
+    m_engine->SetSpeedLimit(speedLimitBytes);
+
+    if (settings.GetUseProxy()) {
+      m_engine->SetProxy(settings.GetProxyHost(), settings.GetProxyPort());
+    } else {
+      m_engine->SetProxy("", 0);
+    }
   }
 }
 

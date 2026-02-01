@@ -62,6 +62,7 @@ public:
     m_maxSimultaneousDownloads = max;
   }
   void SetDefaultSavePath(const std::string &path) { m_defaultSavePath = path; }
+  void ApplySettings(const class Settings &settings);
 
   // Callbacks for UI updates
   using DownloadUpdateCallback = std::function<void(int downloadId)>;
