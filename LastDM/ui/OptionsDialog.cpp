@@ -1,4 +1,5 @@
 #include "OptionsDialog.h"
+#include "../core/DownloadManager.h"
 #include "../utils/Settings.h"
 #include "../utils/ThemeManager.h"
 
@@ -85,12 +86,13 @@ void OptionsDialog::CreateConnectionTab(wxNotebook *notebook) {
 
   wxFlexGridSizer *gridSizer = new wxFlexGridSizer(2, 2, 5, 10);
 
-  gridSizer->Add(
-      new wxStaticText(panel, wxID_ANY, "Max connections per download:"), 0,
-      wxALIGN_CENTER_VERTICAL);
+  gridSizer->Add(new wxStaticText(panel, wxID_ANY,
+                                  "Max connections per download (WinINet: 1):"),
+                0, wxALIGN_CENTER_VERTICAL);
   m_maxConnectionsSpin =
-      new wxSpinCtrl(panel, wxID_ANY, "8", wxDefaultPosition, wxSize(80, -1),
-                     wxSP_ARROW_KEYS, 1, 32, 8);
+      new wxSpinCtrl(panel, wxID_ANY, "1", wxDefaultPosition, wxSize(80, -1),
+                     wxSP_ARROW_KEYS, 1, 1, 1);
+  m_maxConnectionsSpin->Enable(false);
   gridSizer->Add(m_maxConnectionsSpin, 0);
 
   gridSizer->Add(
@@ -108,8 +110,9 @@ void OptionsDialog::CreateConnectionTab(wxNotebook *notebook) {
   wxStaticBoxSizer *speedBox =
       new wxStaticBoxSizer(wxVERTICAL, panel, "Speed Limit");
   wxBoxSizer *speedSizer = new wxBoxSizer(wxHORIZONTAL);
-  speedSizer->Add(new wxStaticText(panel, wxID_ANY,
-                                   "Max download speed (KB/s, 0=unlimited):"),
+  speedSizer->Add(new wxStaticText(
+                      panel, wxID_ANY,
+                      "Max download speed per download (KB/s, 0=unlimited):"),
                   0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 10);
   m_speedLimitSpin =
       new wxSpinCtrl(panel, wxID_ANY, "0", wxDefaultPosition, wxSize(100, -1),
@@ -259,6 +262,8 @@ void OptionsDialog::SaveSettings() {
   settings.SetProxyPort(m_proxyPortSpin->GetValue());
 
   settings.Save();
+
+  DownloadManager::GetInstance().ApplySettings(settings);
 }
 
 void OptionsDialog::OnOK(wxCommandEvent &event) {
