@@ -41,20 +41,16 @@ public:
   using CompletionCallback = std::function<void(int downloadId, bool success,
                                                 const std::string &error)>;
 
-  void SetProgressCallback(ProgressCallback callback) {
-    m_progressCallback = callback;
-  }
-  void SetCompletionCallback(CompletionCallback callback) {
-    m_completionCallback = callback;
-  }
+  void SetProgressCallback(ProgressCallback callback);
+  void SetCompletionCallback(CompletionCallback callback);
 
   // Settings
   void SetMaxConnections(int connections) { m_maxConnections = connections; }
-  void SetSpeedLimit(int64_t bytesPerSecond) { m_speedLimit = bytesPerSecond; }
-  void SetUserAgent(const std::string &userAgent) { m_userAgent = userAgent; }
+  void SetSpeedLimit(int64_t bytesPerSecond);
+  void SetUserAgent(const std::string &userAgent);
   void SetProxy(const std::string &proxyHost, int proxyPort);
-  void SetSSLVerification(bool verify) { m_verifySSL = verify; }
-  bool GetSSLVerification() const { return m_verifySSL; }
+  void SetSSLVerification(bool verify);
+  bool GetSSLVerification() const;
 
   // CA bundle configuration (No longer needed for WinINet, kept for API compatibility if needed, but ignored)
   void SetCABundlePath(const std::string &path) { m_caBundlePath = path; }
@@ -63,21 +59,44 @@ public:
   bool GetUseNativeCAStore() const { return m_useNativeCAStore; }
 
 private:
-  // WinINet handles
-  HINTERNET m_hSession;
+  struct SessionEntry {
+    HINTERNET handle = nullptr;
+    std::atomic<int> activeCount{0};
+    std::atomic<bool> closing{false};
+    std::mutex handleMutex;
+  };
+
+  struct EngineState {
+    std::mutex sessionMutex;
+    std::shared_ptr<SessionEntry> session;
+    std::vector<std::shared_ptr<SessionEntry>> retiredSessions;
+
+    std::atomic<bool> running{false};
+    std::atomic<int64_t> speedLimitBytes{0};
+    std::string userAgent;
+    std::string proxyUrl;
+    std::atomic<bool> verifySSL{true};
+
+    std::mutex callbackMutex;
+    ProgressCallback progressCallback;
+    CompletionCallback completionCallback;
+  };
+
+  struct SessionUsage {
+    explicit SessionUsage(std::shared_ptr<SessionEntry> entry);
+    ~SessionUsage();
+    HINTERNET handle() const;
+
+  private:
+    std::shared_ptr<SessionEntry> m_entry;
+  };
 
   // Settings
   int m_maxConnections;
-  int64_t m_speedLimit;
-  std::string m_userAgent;
-  std::string m_proxyUrl;
-  bool m_verifySSL;           
-  std::string m_caBundlePath; 
-  bool m_useNativeCAStore; 
+  std::string m_caBundlePath;
+  bool m_useNativeCAStore;
 
-  // Callbacks
-  ProgressCallback m_progressCallback;
-  CompletionCallback m_completionCallback;
+  std::shared_ptr<EngineState> m_state;
 
   // Active download tracking for safe thread management
   std::vector<std::future<bool>> m_activeDownloads;
@@ -85,14 +104,24 @@ private:
 
   // Worker thread
   std::thread m_workerThread;
-  std::atomic<bool> m_running;
-
   // Cleanup completed futures
   void CleanupCompletedDownloads();
 
-  bool ReinitializeSession();
+  static void ConfigureSessionTimeouts(HINTERNET session);
+  static HINTERNET OpenSession(const std::string &userAgent,
+                               const std::string &proxyUrl);
+  static void CloseSessionHandle(const std::shared_ptr<SessionEntry> &entry);
+  static void CloseSessionIfIdle(const std::shared_ptr<SessionEntry> &entry);
+  static bool ParseContentRangeStart(const std::string &value,
+                                     int64_t &startOut);
+
+  static void CleanupRetiredSessions(
+      const std::shared_ptr<EngineState> &state);
+
+  bool ReinitializeSession(const std::string &proxyUrl);
 
   // Helper methods
-  bool PerformDownload(std::shared_ptr<Download> download);
+  static bool PerformDownload(std::shared_ptr<EngineState> state,
+                              std::shared_ptr<Download> download);
   
 };

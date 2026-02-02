@@ -46,7 +46,7 @@ public:
   std::string GetUrl() const { return m_url; }
   std::string GetFilename() const;
   std::string GetSavePath() const;
-  int64_t GetTotalSize() const { return m_totalSize; }
+  int64_t GetTotalSize() const { return m_totalSize.load(); }
   int64_t GetDownloadedSize() const { return m_downloadedSize.load(); }
   DownloadStatus GetStatus() const { return m_status.load(); }
   std::string GetStatusString() const;
@@ -77,7 +77,7 @@ public:
 
   // Setters
   void SetFilename(const std::string &filename);
-  void SetTotalSize(int64_t size) { m_totalSize = size; }
+  void SetTotalSize(int64_t size) { m_totalSize.store(size); }
   void SetDownloadedSize(int64_t size) { m_downloadedSize = size; }
   void SetStatus(DownloadStatus status) { m_status = status; }
   void SetCategory(const std::string &category);
@@ -110,7 +110,7 @@ private:
   std::string m_url;
   std::string m_filename;
   std::string m_savePath;
-  int64_t m_totalSize;
+  std::atomic<int64_t> m_totalSize;
   std::atomic<int64_t> m_downloadedSize;
   std::atomic<DownloadStatus> m_status;
   std::string m_category;
