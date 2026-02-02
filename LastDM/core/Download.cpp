@@ -52,17 +52,19 @@ std::string Download::GetDescription() const {
 }
 
 double Download::GetProgress() const {
-  if (m_totalSize <= 0)
+  int64_t totalSize = m_totalSize.load();
+  if (totalSize <= 0)
     return 0.0;
-  return static_cast<double>(m_downloadedSize.load()) / m_totalSize * 100.0;
+  return static_cast<double>(m_downloadedSize.load()) / totalSize * 100.0;
 }
 
 int Download::GetTimeRemaining() const {
   double speed = m_speed.load();
-  if (speed <= 0 || m_totalSize <= 0)
+  int64_t totalSize = m_totalSize.load();
+  if (speed <= 0 || totalSize <= 0)
     return -1;
 
-  int64_t remaining = m_totalSize - m_downloadedSize.load();
+  int64_t remaining = totalSize - m_downloadedSize.load();
   if (remaining <= 0)
     return 0;
 
@@ -143,18 +145,20 @@ void Download::InitializeChunks(int numConnections) {
   std::lock_guard<std::mutex> lock(m_chunksMutex);
   m_chunks.clear();
 
-  if (m_totalSize <= 0 || numConnections <= 1) {
+  int64_t totalSize = m_totalSize.load();
+  if (totalSize <= 0 || numConnections <= 1) {
     // Single chunk for unknown size or single connection
-    m_chunks.emplace_back(0, m_totalSize > 0 ? m_totalSize - 1 : INT64_MAX);
+    m_chunks.emplace_back(0, totalSize > 0 ? totalSize - 1 : INT64_MAX);
     return;
   }
 
-  int64_t chunkSize = m_totalSize / numConnections;
+  int64_t chunkSize = totalSize / numConnections;
   int64_t startByte = 0;
 
   for (int i = 0; i < numConnections; ++i) {
-    int64_t endByte =
-        (i == numConnections - 1) ? m_totalSize - 1 : startByte + chunkSize - 1;
+    int64_t endByte = (i == numConnections - 1)
+                          ? totalSize - 1
+                          : startByte + chunkSize - 1;
     m_chunks.emplace_back(startByte, endByte);
     startByte = endByte + 1;
   }
