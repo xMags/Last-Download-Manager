@@ -12,6 +12,16 @@ Download::Download(int id, const std::string &url, const std::string &savePath)
   UpdateLastTryTime();
 }
 
+std::string Download::GetFilename() const {
+  std::lock_guard<std::mutex> lock(m_metadataMutex);
+  return m_filename;
+}
+
+std::string Download::GetSavePath() const {
+  std::lock_guard<std::mutex> lock(m_metadataMutex);
+  return m_savePath;
+}
+
 std::string Download::GetStatusString() const {
   switch (m_status.load()) {
   case DownloadStatus::Queued:
@@ -29,6 +39,16 @@ std::string Download::GetStatusString() const {
   default:
     return "Unknown";
   }
+}
+
+std::string Download::GetCategory() const {
+  std::lock_guard<std::mutex> lock(m_metadataMutex);
+  return m_category;
+}
+
+std::string Download::GetDescription() const {
+  std::lock_guard<std::mutex> lock(m_metadataMutex);
+  return m_description;
 }
 
 double Download::GetProgress() const {
@@ -49,6 +69,51 @@ int Download::GetTimeRemaining() const {
   return static_cast<int>(remaining / speed);
 }
 
+std::string Download::GetLastTryTime() const {
+  std::lock_guard<std::mutex> lock(m_metadataMutex);
+  return m_lastTryTime;
+}
+
+std::string Download::GetErrorMessage() const {
+  std::lock_guard<std::mutex> lock(m_metadataMutex);
+  return m_errorMessage;
+}
+
+std::string Download::GetExpectedChecksum() const {
+  std::lock_guard<std::mutex> lock(m_metadataMutex);
+  return m_expectedChecksum;
+}
+
+std::string Download::GetCalculatedChecksum() const {
+  std::lock_guard<std::mutex> lock(m_metadataMutex);
+  return m_calculatedChecksum;
+}
+
+void Download::SetFilename(const std::string &filename) {
+  std::lock_guard<std::mutex> lock(m_metadataMutex);
+  m_filename = filename;
+}
+
+void Download::SetCategory(const std::string &category) {
+  std::lock_guard<std::mutex> lock(m_metadataMutex);
+  m_category = category;
+}
+
+void Download::SetDescription(const std::string &desc) {
+  std::lock_guard<std::mutex> lock(m_metadataMutex);
+  m_description = desc;
+}
+
+void Download::SetErrorMessage(const std::string &msg) {
+  std::lock_guard<std::mutex> lock(m_metadataMutex);
+  m_errorMessage = msg;
+}
+
+void Download::SetSavePath(const std::string &path) {
+  std::lock_guard<std::mutex> lock(m_metadataMutex);
+  m_savePath = path;
+}
+
 void Download::UpdateLastTryTime() {
   auto now = std::chrono::system_clock::now();
   std::time_t time = std::chrono::system_clock::to_time_t(now);
@@ -57,7 +122,21 @@ void Download::UpdateLastTryTime() {
 
   std::stringstream ss;
   ss << std::put_time(&tm, "%Y-%m-%d %H:%M");
-  m_lastTryTime = ss.str();
+  {
+    std::lock_guard<std::mutex> lock(m_metadataMutex);
+    m_lastTryTime = ss.str();
+  }
+}
+
+void Download::SetExpectedChecksum(const std::string &hash, int type) {
+  std::lock_guard<std::mutex> lock(m_metadataMutex);
+  m_expectedChecksum = hash;
+  m_checksumType = type;
+}
+
+void Download::SetCalculatedChecksum(const std::string &hash) {
+  std::lock_guard<std::mutex> lock(m_metadataMutex);
+  m_calculatedChecksum = hash;
 }
 
 void Download::InitializeChunks(int numConnections) {

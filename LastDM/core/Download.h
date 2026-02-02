@@ -44,19 +44,19 @@ public:
   // Getters
   int GetId() const { return m_id; }
   std::string GetUrl() const { return m_url; }
-  std::string GetFilename() const { return m_filename; }
-  std::string GetSavePath() const { return m_savePath; }
+  std::string GetFilename() const;
+  std::string GetSavePath() const;
   int64_t GetTotalSize() const { return m_totalSize; }
   int64_t GetDownloadedSize() const { return m_downloadedSize.load(); }
   DownloadStatus GetStatus() const { return m_status.load(); }
   std::string GetStatusString() const;
-  std::string GetCategory() const { return m_category; }
-  std::string GetDescription() const { return m_description; }
+  std::string GetCategory() const;
+  std::string GetDescription() const;
   double GetProgress() const;
   double GetSpeed() const { return m_speed.load(); }
   int GetTimeRemaining() const;
-  std::string GetLastTryTime() const { return m_lastTryTime; }
-  std::string GetErrorMessage() const { return m_errorMessage; }
+  std::string GetLastTryTime() const;
+  std::string GetErrorMessage() const;
 
   // Retry support
   int GetRetryCount() const { return m_retryCount; }
@@ -68,23 +68,23 @@ public:
   int GetRetryDelayMs() const; // Get current delay in milliseconds
 
   // Checksum support
-  std::string GetExpectedChecksum() const { return m_expectedChecksum; }
-  std::string GetCalculatedChecksum() const { return m_calculatedChecksum; }
+  std::string GetExpectedChecksum() const;
+  std::string GetCalculatedChecksum() const;
   int GetChecksumType() const {
     return m_checksumType;
   } // 0=None, 1=MD5, 2=SHA256
   bool IsChecksumVerified() const { return m_checksumVerified; }
 
   // Setters
-  void SetFilename(const std::string &filename) { m_filename = filename; }
+  void SetFilename(const std::string &filename);
   void SetTotalSize(int64_t size) { m_totalSize = size; }
   void SetDownloadedSize(int64_t size) { m_downloadedSize = size; }
   void SetStatus(DownloadStatus status) { m_status = status; }
-  void SetCategory(const std::string &category) { m_category = category; }
-  void SetDescription(const std::string &desc) { m_description = desc; }
+  void SetCategory(const std::string &category);
+  void SetDescription(const std::string &desc);
   void SetSpeed(double speed) { m_speed = speed; }
-  void SetErrorMessage(const std::string &msg) { m_errorMessage = msg; }
-  void SetSavePath(const std::string &path) { m_savePath = path; }
+  void SetErrorMessage(const std::string &msg);
+  void SetSavePath(const std::string &path);
   void UpdateLastTryTime();
 
   // Retry support
@@ -93,13 +93,8 @@ public:
   void ResetRetry();     // Reset retry count (on success or user restart)
 
   // Checksum support
-  void SetExpectedChecksum(const std::string &hash, int type) {
-    m_expectedChecksum = hash;
-    m_checksumType = type;
-  }
-  void SetCalculatedChecksum(const std::string &hash) {
-    m_calculatedChecksum = hash;
-  }
+  void SetExpectedChecksum(const std::string &hash, int type);
+  void SetCalculatedChecksum(const std::string &hash);
   void SetChecksumVerified(bool verified) { m_checksumVerified = verified; }
 
   // Chunk management
@@ -137,6 +132,7 @@ private:
 
   std::vector<DownloadChunk> m_chunks;
   mutable std::mutex m_chunksMutex;
+  mutable std::mutex m_metadataMutex;
 
   std::string ExtractFilenameFromUrl(const std::string &url) const;
   std::string DetermineCategory(const std::string &filename) const;
