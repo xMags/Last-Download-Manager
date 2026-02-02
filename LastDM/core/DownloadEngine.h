@@ -90,6 +90,8 @@ private:
   // Cleanup completed futures
   void CleanupCompletedDownloads();
 
+  bool ReinitializeSession();
+
   // Helper methods
   bool PerformDownload(std::shared_ptr<Download> download);
   
