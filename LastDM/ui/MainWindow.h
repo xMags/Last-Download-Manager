@@ -56,6 +56,8 @@ private:
   void OnAddUrl(wxCommandEvent &event);
   void OnResume(wxCommandEvent &event);
   void OnPause(wxCommandEvent &event);
+  void OnStop(wxCommandEvent &event);
+  void OnStopAll(wxCommandEvent &event);
   void OnDelete(wxCommandEvent &event);
   void OnOptions(wxCommandEvent &event);
   void OnScheduler(wxCommandEvent &event);
