@@ -31,40 +31,51 @@ DownloadEngine::DownloadEngine()
     InternetSetOption(m_hSession, INTERNET_OPTION_RECEIVE_TIMEOUT, &timeout,
                       sizeof(DWORD));
   }
+
+  m_running = (m_hSession != nullptr);
 }
 
 DownloadEngine::~DownloadEngine() {
   m_running = false;
 
-  // Cancel actives
+  HINTERNET sessionToClose = nullptr;
   {
     std::lock_guard<std::mutex> lock(m_activeDownloadsMutex);
-    for (auto &future : m_activeDownloads) {
-      // Futures will finish as loop checks m_running or download status
-    }
+    sessionToClose = m_hSession;
+    m_hSession = nullptr;
   }
 
-  // Wait for downloads
+  if (sessionToClose) {
+    InternetCloseHandle(sessionToClose);
+  }
+
+  std::vector<std::future<bool>> activeDownloads;
   {
     std::lock_guard<std::mutex> lock(m_activeDownloadsMutex);
-    if (!m_activeDownloads.empty()) {
-      // Simple wait logic similar to before, but simplified for WinINet
-      // structure Since WinINet handles are synchronous in this implementation
-      // (wrapped in async), closing the handles would force them to return.
-      // However, for now, we rely on the loops checking status.
-      // A forced close of m_hSession usually invalidates child handles too.
+    activeDownloads.swap(m_activeDownloads);
+  }
+
+  auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+  for (auto &future : activeDownloads) {
+    if (!future.valid()) {
+      continue;
     }
-    m_activeDownloads.clear();
+
+    auto now = std::chrono::steady_clock::now();
+    if (now >= deadline) {
+      break;
+    }
+
+    auto remaining =
+        std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now);
+    future.wait_for(remaining);
   }
 
   if (m_workerThread.joinable()) {
     m_workerThread.join();
   }
 
-  if (m_hSession) {
-    InternetCloseHandle(m_hSession);
-    m_hSession = nullptr;
-  }
+  m_hSession = nullptr;
 }
 
 bool DownloadEngine::GetFileInfo(const std::string &url, int64_t &fileSize,
@@ -167,19 +178,77 @@ void DownloadEngine::CancelDownload(std::shared_ptr<Download> download) {
 }
 
 void DownloadEngine::SetProxy(const std::string &proxyHost, int proxyPort) {
-  // Storing it, but applying it would require resetting m_hSession with
-  // INTERNET_OPEN_TYPE_PROXY For now, this simple implementation might not
-  // fully support dynamic proxy switching without re-init.
   if (proxyHost.empty()) {
-    m_proxyUrl = "";
-  } else {
-    m_proxyUrl = proxyHost + ":" + std::to_string(proxyPort);
-    // Note: Real implementations would need to re-create m_hSession here.
+    m_proxyUrl.clear();
+    ReinitializeSession();
+    return;
+  }
+
+  if (proxyPort <= 0 || proxyPort > 65535) {
+    std::cerr << "Invalid proxy port: " << proxyPort
+              << " (must be 1-65535)" << std::endl;
+    m_proxyUrl.clear();
+    ReinitializeSession();
+    return;
+  }
+
+  bool validHost = true;
+  for (char c : proxyHost) {
+    if (std::isspace(static_cast<unsigned char>(c))) {
+      validHost = false;
+      break;
+    }
+  }
+
+  if (!validHost) {
+    std::cerr << "Invalid proxy host format: " << proxyHost << std::endl;
+    m_proxyUrl.clear();
+    ReinitializeSession();
+    return;
+  }
+
+  m_proxyUrl = proxyHost + ":" + std::to_string(proxyPort);
+  if (!ReinitializeSession()) {
+    std::cerr << "Failed to apply proxy settings" << std::endl;
   }
 }
 
+bool DownloadEngine::ReinitializeSession() {
+  HINTERNET newSession = InternetOpenA(
+      m_userAgent.c_str(),
+      m_proxyUrl.empty() ? INTERNET_OPEN_TYPE_PRECONFIG
+                         : INTERNET_OPEN_TYPE_PROXY,
+      m_proxyUrl.empty() ? NULL : m_proxyUrl.c_str(), NULL, 0);
+
+  if (!newSession) {
+    m_running = false;
+    return false;
+  }
+
+  DWORD timeout = Config::CONNECT_TIMEOUT_MS;
+  InternetSetOption(newSession, INTERNET_OPTION_CONNECT_TIMEOUT, &timeout,
+                    sizeof(DWORD));
+  timeout = Config::RECEIVE_TIMEOUT_MS;
+  InternetSetOption(newSession, INTERNET_OPTION_RECEIVE_TIMEOUT, &timeout,
+                    sizeof(DWORD));
+
+  HINTERNET oldSession = nullptr;
+  {
+    std::lock_guard<std::mutex> lock(m_activeDownloadsMutex);
+    oldSession = m_hSession;
+    m_hSession = newSession;
+  }
+
+  if (oldSession) {
+    InternetCloseHandle(oldSession);
+  }
+
+  m_running = true;
+  return true;
+}
+
 bool DownloadEngine::PerformDownload(std::shared_ptr<Download> download) {
-  if (!download || !m_hSession)
+  if (!download || !m_hSession || !m_running)
     return false;
 
   std::string url = download->GetUrl();
@@ -239,6 +308,32 @@ bool DownloadEngine::PerformDownload(std::shared_ptr<Download> download) {
     return false;
   }
 
+  if (shouldResume) {
+    DWORD statusCode = 0;
+    DWORD statusSize = sizeof(statusCode);
+    if (HttpQueryInfoA(hUrl, HTTP_QUERY_STATUS_CODE | HTTP_QUERY_FLAG_NUMBER,
+                       &statusCode, &statusSize, NULL)) {
+      if (statusCode != 206) {
+        InternetCloseHandle(hUrl);
+        shouldResume = false;
+        existingSize = 0;
+        download->SetDownloadedSize(0);
+        headers.clear();
+
+        hUrl = InternetOpenUrlA(m_hSession, url.c_str(), NULL, -1, flags, 0);
+        if (!hUrl) {
+          download->SetStatus(DownloadStatus::Error);
+          download->SetErrorMessage("Failed to restart download. Error: " +
+                                    std::to_string(GetLastError()));
+          if (m_completionCallback)
+            m_completionCallback(download->GetId(), false,
+                                 "Connection failed");
+          return false;
+        }
+      }
+    }
+  }
+
   // Open output file
   std::ofstream file;
   if (shouldResume) {
@@ -258,15 +353,16 @@ bool DownloadEngine::PerformDownload(std::shared_ptr<Download> download) {
   DWORD bytesRead = 0;
   char buffer[8192]; // 8KB buffer
   auto lastSpeedUpdate = std::chrono::steady_clock::now();
+  auto lastThrottleUpdate = lastSpeedUpdate;
   int64_t lastBytes = shouldResume ? existingSize : 0;
 
   do {
     // Check Status
-    if (download->GetStatus() == DownloadStatus::Cancelled ||
+    if (!m_running || download->GetStatus() == DownloadStatus::Cancelled ||
         download->GetStatus() == DownloadStatus::Paused) {
       file.close();
       InternetCloseHandle(hUrl);
-      if (m_completionCallback)
+      if (m_running && m_completionCallback)
         m_completionCallback(download->GetId(), false, "User Aborted");
       return false;
     }
@@ -274,6 +370,16 @@ bool DownloadEngine::PerformDownload(std::shared_ptr<Download> download) {
     if (InternetReadFile(hUrl, buffer, sizeof(buffer), &bytesRead)) {
       if (bytesRead > 0) {
         file.write(buffer, bytesRead);
+        if (file.fail()) {
+          file.close();
+          InternetCloseHandle(hUrl);
+          download->SetStatus(DownloadStatus::Error);
+          download->SetErrorMessage(
+              "Disk write failed - check available disk space");
+          if (m_completionCallback)
+            m_completionCallback(download->GetId(), false, "File I/O Error");
+          return false;
+        }
 
         int64_t currentSize = download->GetDownloadedSize() + bytesRead;
         download->SetDownloadedSize(currentSize);
@@ -298,9 +404,17 @@ bool DownloadEngine::PerformDownload(std::shared_ptr<Download> download) {
 
         // Simple speed limit (blocking)
         if (m_speedLimit > 0) {
-          double limitMsPerKB = 1000.0 / (m_speedLimit / 1024.0);
-          // Not implementing precise throttling here to keep it simple,
-          // but in a real app you'd sleep here based on bytesRead
+          auto now = std::chrono::steady_clock::now();
+          auto elapsedMs =
+              std::chrono::duration_cast<std::chrono::milliseconds>(
+                  now - lastThrottleUpdate)
+                  .count();
+          double targetMs = (bytesRead * 1000.0) / m_speedLimit;
+          if (elapsedMs < targetMs) {
+            std::this_thread::sleep_for(
+                std::chrono::milliseconds(static_cast<int>(targetMs - elapsedMs)));
+          }
+          lastThrottleUpdate = std::chrono::steady_clock::now();
         }
       }
     } else {
