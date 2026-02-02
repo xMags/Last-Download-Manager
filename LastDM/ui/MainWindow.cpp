@@ -29,7 +29,9 @@ wxBEGIN_EVENT_TABLE(MainWindow, wxFrame) EVT_MENU(
     wxID_EXIT, MainWindow::OnExit) EVT_MENU(wxID_ABOUT, MainWindow::OnAbout)
     EVT_MENU(ID_ADD_URL, MainWindow::OnAddUrl) EVT_MENU(
         ID_RESUME, MainWindow::OnResume) EVT_MENU(ID_PAUSE, MainWindow::OnPause)
-        EVT_MENU(ID_DELETE, MainWindow::OnDelete) EVT_MENU(
+        EVT_MENU(ID_STOP, MainWindow::OnStop) EVT_MENU(
+            ID_STOP_ALL, MainWindow::OnStopAll) EVT_MENU(
+            ID_DELETE, MainWindow::OnDelete) EVT_MENU(
             ID_OPTIONS, MainWindow::OnOptions) EVT_TOOL(ID_ADD_URL,
                                                         MainWindow::OnAddUrl)
             EVT_TOOL(ID_RESUME, MainWindow::OnResume) EVT_TOOL(
@@ -317,8 +319,8 @@ void MainWindow::OnExit(wxCommandEvent &event) { Close(true); }
 void MainWindow::OnAbout(wxCommandEvent &event) {
   wxMessageBox("Last Download Manager\n\n"
                "Version 1.0\n\n"
-               "A powerful download manager built with wxWidgets, libcurl, and "
-               "SQLite.\n\n"
+               "A powerful download manager built with wxWidgets, WinINet, and "
+               "XML storage.\n\n"
                "Features:\n"
                "- Multi-threaded downloads\n"
                "- Pause/Resume support\n"
@@ -386,6 +388,21 @@ void MainWindow::OnPause(wxCommandEvent &event) {
   } else {
     m_statusBar->SetStatusText("No download selected", 0);
   }
+}
+
+void MainWindow::OnStop(wxCommandEvent &event) {
+  int selectedId = m_downloadsTable->GetSelectedDownloadId();
+  if (selectedId >= 0) {
+    DownloadManager::GetInstance().CancelDownload(selectedId);
+    m_statusBar->SetStatusText("Download stopped", 0);
+  } else {
+    m_statusBar->SetStatusText("No download selected", 0);
+  }
+}
+
+void MainWindow::OnStopAll(wxCommandEvent &event) {
+  DownloadManager::GetInstance().CancelAllDownloads();
+  m_statusBar->SetStatusText("All downloads stopped", 0);
 }
 
 void MainWindow::OnDelete(wxCommandEvent &event) {
