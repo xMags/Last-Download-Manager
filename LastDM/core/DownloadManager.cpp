@@ -38,10 +38,11 @@ DownloadManager::DownloadManager()
   PWSTR path = NULL;
   if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_Downloads, 0, NULL, &path))) {
     // Convert to std::string (ANSI)
-    int len = WideCharToMultiByte(CP_ACP, 0, path, -1, NULL, 0, NULL, NULL);
+    int len =
+        WideCharToMultiByte(CP_UTF8, 0, path, -1, NULL, 0, NULL, NULL);
     if (len > 0) {
       std::vector<char> buf(len);
-      WideCharToMultiByte(CP_ACP, 0, path, -1, buf.data(), len, NULL, NULL);
+      WideCharToMultiByte(CP_UTF8, 0, path, -1, buf.data(), len, NULL, NULL);
       m_defaultSavePath = buf.data();
     }
     CoTaskMemFree(path);
@@ -106,10 +107,7 @@ void DownloadManager::EnsureCategoryFoldersExist() {
 }
 
 void DownloadManager::ApplySettings(const Settings &settings) {
-  if (!settings.GetDownloadFolder().empty()) {
-    m_defaultSavePath = settings.GetDownloadFolder().ToStdString();
-  }
-
+  // Always use system Downloads folder, ignore saved setting
   m_maxSimultaneousDownloads = settings.GetMaxSimultaneousDownloads();
   EnsureCategoryFoldersExist();
 
@@ -152,29 +150,8 @@ void DownloadManager::SaveAllDownloadsToDatabase() {
   DatabaseManager &db = DatabaseManager::GetInstance();
 
   std::lock_guard<std::mutex> lock(m_downloadsMutex);
-
-  // Use transaction for batch save - all succeed or all fail
-  if (!db.BeginTransaction()) {
-    std::cerr << "Database error: Failed to begin transaction" << std::endl;
-    return;
-  }
-
-  int failedCount = 0;
-  for (const auto &download : m_downloads) {
-    if (!db.SaveDownload(*download)) {
-      failedCount++;
-      std::cerr << "Database error: Failed to save download ID "
-                << download->GetId() << " (" << download->GetFilename() << ")"
-                << std::endl;
-    }
-  }
-
-  if (failedCount > 0) {
-    std::cerr << "Database warning: " << failedCount
-              << " download(s) failed to save, rolling back" << std::endl;
-    db.RollbackTransaction();
-  } else {
-    db.CommitTransaction();
+  if (!db.SyncAllDownloads(m_downloads)) {
+    std::cerr << "Database error: Failed to save downloads" << std::endl;
   }
 }
 
@@ -238,6 +215,13 @@ void DownloadManager::RemoveDownload(int downloadId, bool deleteFile) {
     if (deleteFile) {
       std::string filePath = (*it)->GetSavePath() + "\\" + (*it)->GetFilename();
       DeleteFileA(filePath.c_str());
+      
+      // Also delete any .partN files that may exist
+      auto chunks = (*it)->GetChunksCopy();
+      for (size_t i = 0; i < chunks.size(); ++i) {
+        std::string partPath = filePath + ".part" + std::to_string(i);
+        DeleteFileA(partPath.c_str());
+      }
     }
 
     // Remove from database
@@ -268,17 +252,22 @@ void DownloadManager::StartDownload(int downloadId) {
 }
 
 void DownloadManager::PauseDownload(int downloadId) {
-  std::lock_guard<std::mutex> lock(m_downloadsMutex);
+  std::shared_ptr<Download> download;
+  {
+    std::lock_guard<std::mutex> lock(m_downloadsMutex);
+    auto it = std::find_if(m_downloads.begin(), m_downloads.end(),
+                           [downloadId](const std::shared_ptr<Download> &d) {
+                             return d->GetId() == downloadId;
+                           });
+    if (it != m_downloads.end()) {
+      download = *it;
+    }
+  }
 
-  auto it = std::find_if(m_downloads.begin(), m_downloads.end(),
-                         [downloadId](const std::shared_ptr<Download> &d) {
-                           return d->GetId() == downloadId;
-                         });
-
-  if (it != m_downloads.end()) {
-    m_engine->PauseDownload(*it);
+  if (download) {
+    m_engine->PauseDownload(download);
     // Save updated status
-    DatabaseManager::GetInstance().UpdateDownload(**it);
+    DatabaseManager::GetInstance().UpdateDownload(*download);
   }
 }
 
@@ -303,17 +292,22 @@ void DownloadManager::ResumeDownload(int downloadId) {
 }
 
 void DownloadManager::CancelDownload(int downloadId) {
-  std::lock_guard<std::mutex> lock(m_downloadsMutex);
+  std::shared_ptr<Download> download;
+  {
+    std::lock_guard<std::mutex> lock(m_downloadsMutex);
+    auto it = std::find_if(m_downloads.begin(), m_downloads.end(),
+                           [downloadId](const std::shared_ptr<Download> &d) {
+                             return d->GetId() == downloadId;
+                           });
+    if (it != m_downloads.end()) {
+      download = *it;
+    }
+  }
 
-  auto it = std::find_if(m_downloads.begin(), m_downloads.end(),
-                         [downloadId](const std::shared_ptr<Download> &d) {
-                           return d->GetId() == downloadId;
-                         });
-
-  if (it != m_downloads.end()) {
-    m_engine->CancelDownload(*it);
+  if (download) {
+    m_engine->CancelDownload(download);
     // Save updated status
-    DatabaseManager::GetInstance().UpdateDownload(**it);
+    DatabaseManager::GetInstance().UpdateDownload(*download);
   }
 }
 
@@ -336,23 +330,35 @@ void DownloadManager::StartAllDownloads() {
 }
 
 void DownloadManager::PauseAllDownloads() {
-  std::lock_guard<std::mutex> lock(m_downloadsMutex);
-
-  for (const auto &download : m_downloads) {
-    if (download->GetStatus() == DownloadStatus::Downloading) {
-      m_engine->PauseDownload(download);
+  std::vector<std::shared_ptr<Download>> toPause;
+  {
+    std::lock_guard<std::mutex> lock(m_downloadsMutex);
+    for (const auto &download : m_downloads) {
+      if (download->GetStatus() == DownloadStatus::Downloading) {
+        toPause.push_back(download);
+      }
     }
+  }
+
+  for (const auto &download : toPause) {
+    m_engine->PauseDownload(download);
   }
 }
 
 void DownloadManager::CancelAllDownloads() {
-  std::lock_guard<std::mutex> lock(m_downloadsMutex);
-
-  for (const auto &download : m_downloads) {
-    if (download->GetStatus() == DownloadStatus::Downloading ||
-        download->GetStatus() == DownloadStatus::Paused) {
-      m_engine->CancelDownload(download);
+  std::vector<std::shared_ptr<Download>> toCancel;
+  {
+    std::lock_guard<std::mutex> lock(m_downloadsMutex);
+    for (const auto &download : m_downloads) {
+      if (download->GetStatus() == DownloadStatus::Downloading ||
+          download->GetStatus() == DownloadStatus::Paused) {
+        toCancel.push_back(download);
+      }
     }
+  }
+
+  for (const auto &download : toCancel) {
+    m_engine->CancelDownload(download);
   }
 }
 
@@ -434,8 +440,13 @@ double DownloadManager::GetTotalSpeed() const {
 
 void DownloadManager::OnDownloadProgress(int downloadId, int64_t downloaded,
                                          int64_t total, double speed) {
-  if (m_updateCallback) {
-    m_updateCallback(downloadId);
+  DownloadUpdateCallback callback;
+  {
+    std::lock_guard<std::mutex> lock(m_callbackMutex);
+    callback = m_updateCallback;
+  }
+  if (callback) {
+    callback(downloadId);
   }
 }
 
@@ -447,39 +458,52 @@ void DownloadManager::OnDownloadComplete(int downloadId, bool success,
     DatabaseManager::GetInstance().UpdateDownload(*download);
   }
 
-  if (m_updateCallback) {
-    m_updateCallback(downloadId);
+  DownloadUpdateCallback callback;
+  {
+    std::lock_guard<std::mutex> lock(m_callbackMutex);
+    callback = m_updateCallback;
+  }
+  if (callback) {
+    callback(downloadId);
   }
 
   // If queue is running, check if we can start more
-  if (m_isQueueRunning && success) {
+  if (m_isQueueRunning.load() && success) {
     ProcessQueue();
   }
 }
 
 // Queue management
 void DownloadManager::StartQueue() {
-  m_isQueueRunning = true;
+  m_isQueueRunning.store(true);
   ProcessQueue();
 }
 
 void DownloadManager::StopQueue() {
-  m_isQueueRunning = false;
+  m_isQueueRunning.store(false);
   // Note: We don't necessarily stop active downloads, just stop starting new
   // ones
 }
 
 void DownloadManager::ProcessQueue() {
-  if (!m_isQueueRunning)
+  if (!m_isQueueRunning.load())
     return;
 
-  int activeCount = GetActiveDownloads();
+  // Lock once to avoid TOCTOU race between GetActiveDownloads and starting downloads
+  std::lock_guard<std::mutex> lock(m_downloadsMutex);
+
+  // Count active downloads while holding the lock
+  int activeCount = 0;
+  for (const auto &download : m_downloads) {
+    if (download->GetStatus() == DownloadStatus::Downloading) {
+      activeCount++;
+    }
+  }
+
   if (activeCount >= m_maxSimultaneousDownloads)
     return;
 
   // Find queued downloads to start
-  std::lock_guard<std::mutex> lock(m_downloadsMutex);
-
   for (auto &download : m_downloads) {
     if (activeCount >= m_maxSimultaneousDownloads)
       break;
@@ -514,7 +538,7 @@ void DownloadManager::CheckSchedule() {
   // Let's match SchedulerDialog which gives full DateTime but user might expect
   // daily For now, assume exact time match within 1 second grace
 
-  if (m_schedStartEnabled && !m_isQueueRunning) {
+  if (m_schedStartEnabled && !m_isQueueRunning.load()) {
     if (now.GetHour() == m_schedStartTime.GetHour() &&
         now.GetMinute() == m_schedStartTime.GetMinute() &&
         now.GetSecond() == m_schedStartTime.GetSecond()) {
@@ -522,7 +546,7 @@ void DownloadManager::CheckSchedule() {
     }
   }
 
-  if (m_schedStopEnabled && m_isQueueRunning) {
+  if (m_schedStopEnabled && m_isQueueRunning.load()) {
     if (now.GetHour() == m_schedStopTime.GetHour() &&
         now.GetMinute() == m_schedStopTime.GetMinute() &&
         now.GetSecond() == m_schedStopTime.GetSecond()) {
@@ -539,7 +563,7 @@ void DownloadManager::CheckSchedule() {
 
 void DownloadManager::OnSchedulerTimer(wxTimerEvent &event) {
   CheckSchedule();
-  if (m_isQueueRunning) {
+  if (m_isQueueRunning.load()) {
     ProcessQueue();
   }
 }

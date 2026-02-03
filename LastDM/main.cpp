@@ -5,6 +5,10 @@
 #include <wx/image.h>
 #include <wx/wx.h>
 
+#ifdef _WIN32
+#include <Windows.h>
+#endif
+
 class LastDMApp : public wxApp {
 public:
   virtual bool OnInit() override {
@@ -16,7 +20,9 @@ public:
     wxInitAllImageHandlers();
 
     // Enable high DPI support
+#ifdef _WIN32
     SetProcessDPIAware();
+#endif
 
     // Create and show main window
     MainWindow *mainWindow = new MainWindow();

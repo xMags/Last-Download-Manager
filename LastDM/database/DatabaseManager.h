@@ -26,6 +26,8 @@ public:
   bool DeleteDownload(int downloadId);
   std::unique_ptr<Download> LoadDownload(int downloadId);
   std::vector<std::unique_ptr<Download>> LoadAllDownloads();
+  bool SyncAllDownloads(
+      const std::vector<std::shared_ptr<Download>> &downloads);
 
   // Category operations
   std::vector<std::string> GetCategories();
@@ -43,7 +45,10 @@ public:
 
   // Transaction support (No-op in XML version, kept for API compatibility)
   bool BeginTransaction() { return true; }
-  bool CommitTransaction() { return SaveDatabase(); }
+  bool CommitTransaction() { 
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return SaveDatabase(); 
+  }
   bool RollbackTransaction() { return true; }
 
 private:

@@ -40,7 +40,10 @@ bool DatabaseManager::Initialize(const std::string &dbPath) {
   return true;
 }
 
-void DatabaseManager::Close() { SaveDatabase(); }
+void DatabaseManager::Close() { 
+  std::lock_guard<std::mutex> lock(m_mutex);
+  SaveDatabase(); 
+}
 
 bool DatabaseManager::LoadDatabase() {
   wxXmlDocument doc;
@@ -55,6 +58,22 @@ bool DatabaseManager::LoadDatabase() {
   if (!root || root->GetName() != "LastDM")
     return false;
 
+  // Safe parsing helpers to avoid crashes on corrupted XML
+  auto safeStoi = [](const std::string &s, int defaultVal = 0) -> int {
+    try {
+      return std::stoi(s);
+    } catch (...) {
+      return defaultVal;
+    }
+  };
+  auto safeStoll = [](const std::string &s, int64_t defaultVal = 0) -> int64_t {
+    try {
+      return std::stoll(s);
+    } catch (...) {
+      return defaultVal;
+    }
+  };
+
   wxXmlNode *child = root->GetChildren();
   while (child) {
     if (child->GetName() == "Downloads") {
@@ -62,7 +81,7 @@ bool DatabaseManager::LoadDatabase() {
       while (downloadNode) {
         if (downloadNode->GetName() == "Download") {
           int id =
-              std::stoi(downloadNode->GetAttribute("id", "0").ToStdString());
+              safeStoi(downloadNode->GetAttribute("id", "0").ToStdString());
           std::string url = downloadNode->GetAttribute("url", "").ToStdString();
           std::string savePath =
               downloadNode->GetAttribute("save_path", "").ToStdString();
@@ -70,10 +89,10 @@ bool DatabaseManager::LoadDatabase() {
           auto download = std::make_shared<Download>(id, url, savePath);
           download->SetFilename(
               downloadNode->GetAttribute("filename", "").ToStdString());
-          download->SetTotalSize(std::stoll(
+          download->SetTotalSize(safeStoll(
               downloadNode->GetAttribute("total_size", "0").ToStdString()));
           download->SetDownloadedSize(
-              std::stoll(downloadNode->GetAttribute("downloaded_size", "0")
+              safeStoll(downloadNode->GetAttribute("downloaded_size", "0")
                              .ToStdString()));
           download->SetCategory(
               downloadNode->GetAttribute("category", "").ToStdString());
@@ -90,11 +109,42 @@ bool DatabaseManager::LoadDatabase() {
             download->SetStatus(DownloadStatus::Error);
           else if (statusStr == "Cancelled")
             download->SetStatus(DownloadStatus::Cancelled);
+          else if (statusStr == "Downloading")
+            // App likely crashed mid-download - set to Paused for explicit resume
+            download->SetStatus(DownloadStatus::Paused);
           else
             download->SetStatus(DownloadStatus::Queued);
 
           download->SetErrorMessage(
               downloadNode->GetAttribute("error_message", "").ToStdString());
+
+          // Load chunk metadata if present
+          std::vector<DownloadChunk> chunks;
+          wxXmlNode *downloadChild = downloadNode->GetChildren();
+          while (downloadChild) {
+            if (downloadChild->GetName() == "Chunks") {
+              wxXmlNode *chunkNode = downloadChild->GetChildren();
+              while (chunkNode) {
+                if (chunkNode->GetName() == "Chunk") {
+                  int64_t start = safeStoll(
+                      chunkNode->GetAttribute("start", "0").ToStdString());
+                  int64_t end = safeStoll(
+                      chunkNode->GetAttribute("end", "0").ToStdString());
+                  DownloadChunk chunk(start, end);
+                  chunk.currentByte = safeStoll(
+                      chunkNode->GetAttribute("current", "0").ToStdString());
+                  chunk.completed =
+                      chunkNode->GetAttribute("completed", "0") == "1";
+                  chunks.push_back(chunk);
+                }
+                chunkNode = chunkNode->GetNext();
+              }
+            }
+            downloadChild = downloadChild->GetNext();
+          }
+          if (!chunks.empty()) {
+            download->SetChunks(chunks);
+          }
 
           m_data.downloads.push_back(download);
         }
@@ -147,6 +197,19 @@ bool DatabaseManager::SaveDatabase() {
     node->AddAttribute("category", download->GetCategory());
     node->AddAttribute("description", download->GetDescription());
     node->AddAttribute("error_message", download->GetErrorMessage());
+
+    auto chunks = download->GetChunksCopy();
+    if (!chunks.empty()) {
+      wxXmlNode *chunksNode = new wxXmlNode(node, wxXML_ELEMENT_NODE, "Chunks");
+      for (const auto &chunk : chunks) {
+        wxXmlNode *chunkNode =
+            new wxXmlNode(chunksNode, wxXML_ELEMENT_NODE, "Chunk");
+        chunkNode->AddAttribute("start", std::to_string(chunk.startByte));
+        chunkNode->AddAttribute("end", std::to_string(chunk.endByte));
+        chunkNode->AddAttribute("current", std::to_string(chunk.currentByte));
+        chunkNode->AddAttribute("completed", chunk.completed ? "1" : "0");
+      }
+    }
   }
 
   // Categories
@@ -185,6 +248,7 @@ bool DatabaseManager::SaveDownload(const Download &download) {
     (*it)->SetStatus(download.GetStatus());
     (*it)->SetDownloadedSize(download.GetDownloadedSize());
     (*it)->SetErrorMessage(download.GetErrorMessage());
+    (*it)->SetChunks(download.GetChunksCopy());
     // Copy other fields if needed, but usually only status/progress changes
     // frequently.
   } else {
@@ -198,8 +262,39 @@ bool DatabaseManager::SaveDownload(const Download &download) {
     newDownload->SetTotalSize(download.GetTotalSize());
     newDownload->SetDownloadedSize(download.GetDownloadedSize());
     newDownload->SetStatus(download.GetStatus());
+    newDownload->SetChunks(download.GetChunksCopy());
     m_data.downloads.push_back(newDownload);
   }
+  return SaveDatabase();
+}
+
+bool DatabaseManager::SyncAllDownloads(
+    const std::vector<std::shared_ptr<Download>> &downloads) {
+  std::lock_guard<std::mutex> lock(m_mutex);
+
+  m_data.downloads.clear();
+  m_data.downloads.reserve(downloads.size());
+
+  for (const auto &download : downloads) {
+    if (!download) {
+      continue;
+    }
+
+    auto copy = std::make_shared<Download>(download->GetId(),
+                                           download->GetUrl(),
+                                           download->GetSavePath());
+    copy->SetFilename(download->GetFilename());
+    copy->SetCategory(download->GetCategory());
+    copy->SetDescription(download->GetDescription());
+    copy->SetTotalSize(download->GetTotalSize());
+    copy->SetDownloadedSize(download->GetDownloadedSize());
+    copy->SetStatus(download->GetStatus());
+    copy->SetErrorMessage(download->GetErrorMessage());
+    copy->SetChunks(download->GetChunksCopy());
+
+    m_data.downloads.push_back(copy);
+  }
+
   return SaveDatabase();
 }
 
@@ -240,6 +335,7 @@ std::unique_ptr<Download> DatabaseManager::LoadDownload(int downloadId) {
     copy->SetDownloadedSize(d->GetDownloadedSize());
     copy->SetStatus(d->GetStatus());
     copy->SetErrorMessage(d->GetErrorMessage());
+    copy->SetChunks(d->GetChunksCopy());
     return copy;
   }
   return nullptr;
@@ -258,6 +354,7 @@ std::vector<std::unique_ptr<Download>> DatabaseManager::LoadAllDownloads() {
     copy->SetDownloadedSize(d->GetDownloadedSize());
     copy->SetStatus(d->GetStatus());
     copy->SetErrorMessage(d->GetErrorMessage());
+    copy->SetChunks(d->GetChunksCopy());
     result.push_back(std::move(copy));
   }
   return result;

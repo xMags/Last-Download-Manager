@@ -43,7 +43,10 @@ public:
 
   // Getters
   int GetId() const { return m_id; }
-  std::string GetUrl() const { return m_url; }
+  std::string GetUrl() const {
+    std::lock_guard<std::mutex> lock(m_metadataMutex);
+    return m_url;
+  }
   std::string GetFilename() const;
   std::string GetSavePath() const;
   int64_t GetTotalSize() const { return m_totalSize.load(); }
@@ -59,10 +62,11 @@ public:
   std::string GetErrorMessage() const;
 
   // Retry support
-  int GetRetryCount() const { return m_retryCount; }
-  int GetMaxRetries() const { return m_maxRetries; }
+  int GetRetryCount() const { return m_retryCount.load(); }
+  int GetMaxRetries() const { return m_maxRetries.load(); }
   bool ShouldRetry() const;
   std::chrono::steady_clock::time_point GetNextRetryTime() const {
+    std::lock_guard<std::mutex> lock(m_metadataMutex);
     return m_nextRetryTime;
   }
   int GetRetryDelayMs() const; // Get current delay in milliseconds
@@ -71,9 +75,13 @@ public:
   std::string GetExpectedChecksum() const;
   std::string GetCalculatedChecksum() const;
   int GetChecksumType() const {
+    std::lock_guard<std::mutex> lock(m_metadataMutex);
     return m_checksumType;
   } // 0=None, 1=MD5, 2=SHA256
-  bool IsChecksumVerified() const { return m_checksumVerified; }
+  bool IsChecksumVerified() const { 
+    std::lock_guard<std::mutex> lock(m_metadataMutex);
+    return m_checksumVerified; 
+  }
 
   // Setters
   void SetFilename(const std::string &filename);
@@ -82,24 +90,29 @@ public:
   void SetStatus(DownloadStatus status) { m_status = status; }
   void SetCategory(const std::string &category);
   void SetDescription(const std::string &desc);
-  void SetSpeed(double speed) { m_speed = speed; }
+  void SetSpeed(double speed);
+  void ResetSpeed();
   void SetErrorMessage(const std::string &msg);
   void SetSavePath(const std::string &path);
   void UpdateLastTryTime();
 
   // Retry support
-  void SetMaxRetries(int maxRetries) { m_maxRetries = maxRetries; }
+  void SetMaxRetries(int maxRetries) { m_maxRetries.store(maxRetries); }
   void IncrementRetry(); // Increment retry count and calculate next retry time
   void ResetRetry();     // Reset retry count (on success or user restart)
 
   // Checksum support
   void SetExpectedChecksum(const std::string &hash, int type);
   void SetCalculatedChecksum(const std::string &hash);
-  void SetChecksumVerified(bool verified) { m_checksumVerified = verified; }
+  void SetChecksumVerified(bool verified) { 
+    std::lock_guard<std::mutex> lock(m_metadataMutex);
+    m_checksumVerified = verified; 
+  }
 
   // Chunk management
   void InitializeChunks(int numConnections);
-  std::vector<DownloadChunk> &GetChunks() { return m_chunks; }
+  std::vector<DownloadChunk> GetChunksCopy() const;
+  void SetChunks(const std::vector<DownloadChunk> &chunks);
   void UpdateChunkProgress(int chunkIndex, int64_t currentByte);
 
   // Progress calculation
@@ -116,13 +129,15 @@ private:
   std::string m_category;
   std::string m_description;
   std::atomic<double> m_speed;
+  std::atomic<double> m_smoothedSpeed{0.0};  // EMA smoothed speed
+  std::atomic<int> m_speedSampleCount{0};    // Sample count for initial ramp-up
   std::string m_lastTryTime;
   std::string m_errorMessage;
 
   // Retry tracking for exponential backoff
-  int m_retryCount = 0; // Current retry attempt (0 = first try)
-  int m_maxRetries = 5; // Maximum retry attempts
-  std::chrono::steady_clock::time_point m_nextRetryTime; // When to retry next
+  std::atomic<int> m_retryCount{0}; // Current retry attempt (0 = first try)
+  std::atomic<int> m_maxRetries{5}; // Maximum retry attempts
+  std::chrono::steady_clock::time_point m_nextRetryTime; // When to retry next (protected by m_metadataMutex)
 
   // Checksum verification
   std::string m_expectedChecksum;   // User-provided expected hash

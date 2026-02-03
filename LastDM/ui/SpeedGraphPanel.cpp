@@ -1,6 +1,7 @@
 #include "SpeedGraphPanel.h"
 #include <wx/graphics.h>
 #include <wx/dcgraph.h>
+#include <wx/thread.h>
 #include <algorithm>
 #include <cmath>
 #include <memory>
@@ -21,6 +22,12 @@ SpeedGraphPanel::SpeedGraphPanel(wxWindow *parent, wxWindowID id)
 }
 
 void SpeedGraphPanel::UpdateSpeed(double speedBps) {
+    // Ensure UI updates happen on the main thread
+    if (!wxThread::IsMain()) {
+        CallAfter([this, speedBps]() { UpdateSpeed(speedBps); });
+        return;
+    }
+    
     // Add new speed to history
     m_speedHistory.push_back(speedBps);
 

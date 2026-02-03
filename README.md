@@ -10,14 +10,16 @@ A modern, feature-rich download manager built with C++ and wxWidgets.
 
 ## Features
 
-- 🚀 **Multi-threaded Downloads** - Fast parallel downloading with multiple connections (using WinINet)
-- 📊 **Real-time Speed Graph** - Visual download speed monitoring
-- 📁 **Category Management** - Organize downloads by type (Documents, Videos, Music, etc.)
-- ⏰ **Scheduler** - Schedule downloads for specific times
-- ✅ **Checksum Verification** - MD5/SHA256 hash verification
-- 🎨 **Modern UI** - Clean and intuitive interface with Dark Mode support
-- 🔔 **System Tray** - Minimize to system tray with notifications
-- 💾 **Persistent Downloads** - Resume interrupted downloads (XML-based storage)
+- **Multi-Segment Downloads** - Accelerated downloading with parallel connections using WinINet
+- **Auto-Retry & Resume** - Automatic retry on network failures with exponential backoff; interrupted downloads resume from where they left off
+- **Real-time Speed Graph** - Visual download speed monitoring with gradient visualization
+- **Category Management** - Automatic file categorization (Documents, Videos, Music, Images, Programs, Compressed)
+- **Scheduler** - Schedule downloads to start/stop at specific times
+- **Checksum Verification** - MD5 and SHA256 hash verification for downloaded files
+- **Modern UI** - Clean interface with Dark Mode support
+- **System Tray Integration** - Minimize to system tray with notification support
+- **Crash Recovery** - Periodic database saves ensure progress is preserved even after unexpected shutdowns
+- **Detailed Error Reporting** - Human-readable error messages for network failures
 
 ## Requirements
 
@@ -27,7 +29,7 @@ A modern, feature-rich download manager built with C++ and wxWidgets.
 
 ## Dependencies
 
-This project primarily depends on **wxWidgets**. It uses native Windows APIs (**WinINet**) for networking, so no external CURL dependency is required.
+This project uses **wxWidgets** for the UI and native Windows APIs (**WinINet**) for networking. No external libcurl dependency is required.
 
 ### Setting up wxWidgets
 
@@ -50,13 +52,41 @@ LastDM-Download-Manager/
 ├── LastDM.sln              # Visual Studio Solution
 ├── LastDM/                 # Main project directory
 │   ├── main.cpp            # Application entry point
-│   ├── core/               # Download engine (WinINet)
+│   ├── core/               # Download engine (WinINet-based)
+│   │   ├── Download.cpp/h        # Download data model
+│   │   ├── DownloadEngine.cpp/h  # Network operations & retry logic
+│   │   └── DownloadManager.cpp/h # Queue management
 │   ├── ui/                 # User interface components (wxWidgets)
-│   ├── database/           # XML-based data persistence
+│   │   ├── MainWindow.cpp/h      # Main application window
+│   │   ├── DownloadsTable.cpp/h  # Download list view
+│   │   ├── CategoriesPanel.cpp/h # Category sidebar
+│   │   └── SpeedGraphPanel.cpp/h # Speed visualization
+│   ├── database/           # SQLite-based data persistence
 │   ├── utils/              # Utilities (settings, themes, hash)
 │   └── resources/          # Icons, manifests, and assets
 └── bin/                    # Compiled binaries output
 ```
+
+## Technical Details
+
+### Retry Strategy
+
+LastDM implements a two-level retry system:
+
+1. **Chunk-Level Retry** - Each download segment retries up to 3 times with 500ms base delay
+2. **Download-Level Retry** - The entire download retries up to 5 times with exponential backoff (2-32 seconds)
+
+### Resume Capability
+
+- Part files (`.part0`, `.part1`, etc.) are preserved on failure
+- Downloads can be resumed manually even after all automatic retries are exhausted
+- Content-Range headers are validated to prevent data corruption
+
+### Thread Safety
+
+- Atomic operations for status, sizes, and speed values
+- Mutex protection for metadata, chunks, and database operations
+- RAII-style session management for WinINet handles
 
 ## License
 

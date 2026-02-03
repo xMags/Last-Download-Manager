@@ -64,7 +64,7 @@ void CategoriesPanel::CreateImageList() {
   m_imageList->Add(wxArtProvider::GetBitmap(
       wxART_GO_FORWARD, wxART_LIST, wxSize(16, 16))); // 11: images
 
-  m_treeCtrl->SetImageList(m_imageList);
+  m_treeCtrl->AssignImageList(m_imageList);
 }
 
 void CategoriesPanel::CreateCategories() {

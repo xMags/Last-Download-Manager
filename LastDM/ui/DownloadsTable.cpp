@@ -25,7 +25,7 @@ wxBEGIN_EVENT_TABLE(DownloadsTable, wxPanel) EVT_LIST_ITEM_SELECTED(
 
                                             DownloadsTable::DownloadsTable(
                                                 wxWindow *parent)
-    : wxPanel(parent, wxID_ANY), m_contextMenuIndex(-1) {
+    : wxPanel(parent, wxID_ANY), m_contextMenuDownloadId(-1) {
   wxBoxSizer *sizer = new wxBoxSizer(wxVERTICAL);
 
   // Create list control
@@ -133,10 +133,14 @@ void DownloadsTable::UpdateRow(long row, std::shared_ptr<Download> download) {
   m_listCtrl->SetItem(row, 0, download->GetFilename());
   m_listCtrl->SetItem(row, 1, FormatFileSize(download->GetTotalSize()));
 
+  DownloadStatus status = download->GetStatus();
+
   // Calculate and display progress percentage
   int progress = download->GetProgress();
   wxString progressStr;
-  if (progress >= 0) {
+  if (status == DownloadStatus::Completed) {
+    progressStr = "100%";
+  } else if (progress >= 0) {
     progressStr = wxString::Format("%d%%", progress);
   } else {
     progressStr = "-";
@@ -144,15 +148,27 @@ void DownloadsTable::UpdateRow(long row, std::shared_ptr<Download> download) {
   m_listCtrl->SetItem(row, 2, progressStr);
 
   m_listCtrl->SetItem(row, 3, download->GetStatusString());
-  m_listCtrl->SetItem(row, 4, FormatTime(download->GetTimeRemaining()));
-  m_listCtrl->SetItem(row, 5, FormatSpeed(download->GetSpeed()));
+
+  wxString timeLeft;
+  if (status == DownloadStatus::Completed) {
+    timeLeft = "-";
+  } else {
+    timeLeft = FormatTime(download->GetTimeRemaining());
+  }
+  m_listCtrl->SetItem(row, 4, timeLeft);
+
+  wxString speedStr;
+  if (status == DownloadStatus::Completed) {
+    speedStr = "-";
+  } else {
+    speedStr = FormatSpeed(download->GetSpeed());
+  }
+  m_listCtrl->SetItem(row, 5, speedStr);
   m_listCtrl->SetItem(row, 6, download->GetLastTryTime());
 
   // Set row color based on status
   // Set row color based on status
   wxColour bgColor;
-  DownloadStatus status = download->GetStatus();
-
   if (ThemeManager::GetInstance().IsDarkMode()) {
     // In dark mode, row background is control background, but we might want
     // slight tint Actually, simple list control usually handles selection, but
@@ -254,21 +270,40 @@ std::vector<int> DownloadsTable::GetSelectedDownloadIds() const {
 void DownloadsTable::OnItemSelected(wxListEvent &event) { event.Skip(); }
 
 void DownloadsTable::OnItemActivated(wxListEvent &event) {
-  // Double-click: Open file
+  // Double-click behavior based on status
   long index = event.GetIndex();
   if (index >= 0 && index < static_cast<long>(m_filteredDownloads.size())) {
     auto download = m_filteredDownloads[index];
+
     if (download->GetStatus() == DownloadStatus::Completed) {
+      // Open completed file
       std::string filePath =
           download->GetSavePath() + "\\" + download->GetFilename();
       ShellExecuteA(NULL, "open", filePath.c_str(), NULL, NULL, SW_SHOWNORMAL);
+    } else if (download->GetStatus() == DownloadStatus::Error) {
+      // Show error details
+      wxString errorMsg = download->GetErrorMessage();
+      if (errorMsg.IsEmpty()) {
+        errorMsg = "Unknown error occurred";
+      }
+
+      wxMessageBox(
+          wxString::Format("Download failed:\n\n%s\n\nURL: %s", errorMsg,
+                           download->GetUrl()),
+          "Download Error - " + download->GetFilename(),
+          wxOK | wxICON_ERROR, this);
     }
   }
   event.Skip();
 }
 
 void DownloadsTable::OnItemRightClick(wxListEvent &event) {
-  m_contextMenuIndex = event.GetIndex();
+  long index = event.GetIndex();
+  if (index >= 0 && index < static_cast<long>(m_filteredDownloads.size())) {
+    m_contextMenuDownloadId = m_filteredDownloads[index]->GetId();
+  } else {
+    m_contextMenuDownloadId = -1;
+  }
 
   // Create context menu
   wxMenu contextMenu;
@@ -286,10 +321,18 @@ void DownloadsTable::OnItemRightClick(wxListEvent &event) {
 
 void DownloadsTable::OnColumnClick(wxListEvent &event) { event.Skip(); }
 
+std::shared_ptr<Download> DownloadsTable::FindDownloadById(int downloadId) const {
+  for (const auto &download : m_downloads) {
+    if (download->GetId() == downloadId) {
+      return download;
+    }
+  }
+  return nullptr;
+}
+
 void DownloadsTable::OnContextOpen(wxCommandEvent &event) {
-  if (m_contextMenuIndex >= 0 &&
-      m_contextMenuIndex < static_cast<long>(m_filteredDownloads.size())) {
-    auto download = m_filteredDownloads[m_contextMenuIndex];
+  auto download = FindDownloadById(m_contextMenuDownloadId);
+  if (download) {
     std::string filePath =
         download->GetSavePath() + "\\" + download->GetFilename();
     ShellExecuteA(NULL, "open", filePath.c_str(), NULL, NULL, SW_SHOWNORMAL);
@@ -297,9 +340,8 @@ void DownloadsTable::OnContextOpen(wxCommandEvent &event) {
 }
 
 void DownloadsTable::OnContextOpenFolder(wxCommandEvent &event) {
-  if (m_contextMenuIndex >= 0 &&
-      m_contextMenuIndex < static_cast<long>(m_filteredDownloads.size())) {
-    auto download = m_filteredDownloads[m_contextMenuIndex];
+  auto download = FindDownloadById(m_contextMenuDownloadId);
+  if (download) {
     std::string filePath =
         download->GetSavePath() + "\\" + download->GetFilename();
 
@@ -311,27 +353,20 @@ void DownloadsTable::OnContextOpenFolder(wxCommandEvent &event) {
 }
 
 void DownloadsTable::OnContextResume(wxCommandEvent &event) {
-  if (m_contextMenuIndex >= 0 &&
-      m_contextMenuIndex < static_cast<long>(m_filteredDownloads.size())) {
-    int downloadId = m_filteredDownloads[m_contextMenuIndex]->GetId();
-    DownloadManager::GetInstance().ResumeDownload(downloadId);
+  if (m_contextMenuDownloadId >= 0) {
+    DownloadManager::GetInstance().ResumeDownload(m_contextMenuDownloadId);
   }
 }
 
 void DownloadsTable::OnContextPause(wxCommandEvent &event) {
-  if (m_contextMenuIndex >= 0 &&
-      m_contextMenuIndex < static_cast<long>(m_filteredDownloads.size())) {
-    int downloadId = m_filteredDownloads[m_contextMenuIndex]->GetId();
-    DownloadManager::GetInstance().PauseDownload(downloadId);
+  if (m_contextMenuDownloadId >= 0) {
+    DownloadManager::GetInstance().PauseDownload(m_contextMenuDownloadId);
   }
 }
 
 void DownloadsTable::OnContextDelete(wxCommandEvent &event) {
-  if (m_contextMenuIndex >= 0 &&
-      m_contextMenuIndex < static_cast<long>(m_filteredDownloads.size())) {
-
-    auto download = m_filteredDownloads[m_contextMenuIndex];
-
+  auto download = FindDownloadById(m_contextMenuDownloadId);
+  if (download) {
     // Create a custom dialog with checkbox
     wxDialog dlg(this, wxID_ANY, "Delete Download", wxDefaultPosition,
                  wxDefaultSize, wxDEFAULT_DIALOG_STYLE);
@@ -371,17 +406,13 @@ void DownloadsTable::OnContextDelete(wxCommandEvent &event) {
 }
 
 void DownloadsTable::OnContextDeleteWithFile(wxCommandEvent &event) {
-  // Same as OnContextDelete but with checkbox pre-checked
-  if (m_contextMenuIndex >= 0 &&
-      m_contextMenuIndex < static_cast<long>(m_filteredDownloads.size())) {
-    int downloadId = m_filteredDownloads[m_contextMenuIndex]->GetId();
-
+  if (m_contextMenuDownloadId >= 0) {
     int result = wxMessageBox(
         "Are you sure you want to delete this download AND the file?",
         "Confirm Delete", wxYES_NO | wxICON_WARNING);
     if (result == wxYES) {
-      DownloadManager::GetInstance().RemoveDownload(downloadId, true);
-      RemoveDownload(downloadId);
+      DownloadManager::GetInstance().RemoveDownload(m_contextMenuDownloadId, true);
+      RemoveDownload(m_contextMenuDownloadId);
     }
   }
 }

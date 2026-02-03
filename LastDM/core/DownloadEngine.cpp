@@ -11,7 +11,42 @@
 namespace Config {
 constexpr long CONNECT_TIMEOUT_MS = 30000;
 constexpr long RECEIVE_TIMEOUT_MS = 30000;
+constexpr int64_t MIN_SIZE_FOR_MULTIPART = 1024 * 1024;
+constexpr int64_t MIN_PART_SIZE = 512 * 1024;
+constexpr int MAX_PARALLEL_SEGMENTS = 8;
+constexpr int MAX_CHUNK_RETRIES = 3;
+constexpr int MAX_DOWNLOAD_RETRIES = 5;  // Download-level auto-retry
+constexpr int BASE_CHUNK_RETRY_MS = 500;
+constexpr int BASE_DOWNLOAD_RETRY_MS = 2000;  // Longer delay between download retries
+constexpr int64_t LARGE_BUFFER_THRESHOLD = 8 * 1024 * 1024;
+constexpr int SPEED_UPDATE_INTERVAL_MS = 1000;  // Update speed every 1 second
 } // namespace Config
+
+// Helper to get WinINet error description
+static std::string GetWinINetError(DWORD errorCode) {
+  char buffer[512] = {0};
+  DWORD len = sizeof(buffer);
+  
+  if (InternetGetLastResponseInfoA(&errorCode, buffer, &len) && len > 0) {
+    return std::string(buffer, len);
+  }
+  
+  // Fallback to common error descriptions
+  switch (errorCode) {
+    case ERROR_INTERNET_TIMEOUT: return "Connection timed out";
+    case ERROR_INTERNET_NAME_NOT_RESOLVED: return "Server name could not be resolved";
+    case ERROR_INTERNET_CANNOT_CONNECT: return "Cannot connect to server";
+    case ERROR_INTERNET_CONNECTION_ABORTED: return "Connection aborted";
+    case ERROR_INTERNET_CONNECTION_RESET: return "Connection reset by server";
+    case ERROR_INTERNET_DISCONNECTED: return "Internet disconnected";
+    case ERROR_INTERNET_SERVER_UNREACHABLE: return "Server unreachable";
+    case ERROR_INTERNET_OPERATION_CANCELLED: return "Operation cancelled";
+    case ERROR_INTERNET_INVALID_URL: return "Invalid URL";
+    case ERROR_INTERNET_SEC_CERT_DATE_INVALID: return "SSL certificate date invalid";
+    case ERROR_INTERNET_SEC_CERT_CN_INVALID: return "SSL certificate name mismatch";
+    default: return "Error code: " + std::to_string(errorCode);
+  }
+}
 
 void DownloadEngine::ConfigureSessionTimeouts(HINTERNET session) {
   if (!session) {
@@ -78,7 +113,9 @@ DownloadEngine::SessionUsage::~SessionUsage() {
 }
 
 HINTERNET DownloadEngine::SessionUsage::handle() const {
-  return m_entry ? m_entry->handle : nullptr;
+  if (!m_entry) return nullptr;
+  std::lock_guard<std::mutex> lock(m_entry->handleMutex);
+  return m_entry->handle;
 }
 
 bool DownloadEngine::ParseContentRangeStart(const std::string &value,
@@ -299,6 +336,15 @@ bool DownloadEngine::GetFileInfo(const std::string &url, int64_t &fileSize,
     fileSize = -1;
   }
 
+  DWORD statusCode = 0;
+  DWORD statusSize = sizeof(statusCode);
+  if (HttpQueryInfoA(hFile, HTTP_QUERY_STATUS_CODE | HTTP_QUERY_FLAG_NUMBER,
+                     &statusCode, &statusSize, NULL) &&
+      statusCode == 416) {
+    InternetCloseHandle(hFile);
+    return false;
+  }
+
   // Accept-Ranges
   char rangesBuffer[64] = {0};
   bufferSize = sizeof(rangesBuffer);
@@ -314,6 +360,42 @@ bool DownloadEngine::GetFileInfo(const std::string &url, int64_t &fileSize,
   return true;
 }
 
+int64_t DownloadEngine::GetExistingFileSize(const std::string &filePath) {
+  std::ifstream checkFile(filePath, std::ios::binary | std::ios::ate);
+  if (!checkFile.is_open()) {
+    return 0;
+  }
+  return checkFile.tellg();
+}
+
+bool DownloadEngine::PreallocateFile(const std::string &filePath,
+                                     int64_t size) {
+  if (size <= 0) {
+    return false;
+  }
+
+  HANDLE fileHandle =
+      CreateFileA(filePath.c_str(), GENERIC_WRITE, FILE_SHARE_READ, NULL,
+                  OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+  if (fileHandle == INVALID_HANDLE_VALUE) {
+    return false;
+  }
+
+  LARGE_INTEGER distance;
+  distance.QuadPart = size;
+  if (!SetFilePointerEx(fileHandle, distance, NULL, FILE_BEGIN)) {
+    CloseHandle(fileHandle);
+    return false;
+  }
+  if (!SetEndOfFile(fileHandle)) {
+    CloseHandle(fileHandle);
+    return false;
+  }
+
+  CloseHandle(fileHandle);
+  return true;
+}
+
 bool DownloadEngine::StartDownload(std::shared_ptr<Download> download) {
   if (!download)
     return false;
@@ -322,20 +404,7 @@ bool DownloadEngine::StartDownload(std::shared_ptr<Download> download) {
   if (!state || !state->running.load())
     return false;
 
-  int64_t fileSize;
-  bool resumable;
-
-  if (GetFileInfo(download->GetUrl(), fileSize, resumable)) {
-    download->SetTotalSize(fileSize);
-  }
-
-  // For this simple WinINet implementation, we stick to 1 connection per
-  // download for simplicity unless we implement complex range merging which is
-  // complex with raw WinINet API. The original code had multi-chunk logic but
-  // was complex. We will preserve the single-stream logic for stability in this
-  // migration.
-
-  download->InitializeChunks(1);
+  download->ResetSpeed();
   download->SetStatus(DownloadStatus::Downloading);
   download->UpdateLastTryTime();
 
@@ -343,11 +412,54 @@ bool DownloadEngine::StartDownload(std::shared_ptr<Download> download) {
 
   {
     std::lock_guard<std::mutex> lock(m_activeDownloadsMutex);
-    m_activeDownloads.push_back(std::async(std::launch::async,
-                                           [state, download]() {
-                                             return PerformDownload(state,
-                                                                    download);
-                                           }));
+    m_activeDownloads.push_back(
+        std::async(std::launch::async, [this, state, download]() {
+          int64_t fileSize = -1;
+          bool resumable = false;
+
+          if (GetFileInfo(download->GetUrl(), fileSize, resumable)) {
+            download->SetTotalSize(fileSize);
+          }
+
+          int connections = std::max(1, m_maxConnections);
+          if (connections > Config::MAX_PARALLEL_SEGMENTS) {
+            connections = Config::MAX_PARALLEL_SEGMENTS;
+          }
+
+          if (fileSize > 0 && fileSize < Config::MIN_SIZE_FOR_MULTIPART) {
+            connections = 1;
+          } else if (fileSize > 0) {
+            int64_t maxBySize = fileSize / Config::MIN_PART_SIZE;
+            if (maxBySize < 1) {
+              maxBySize = 1;
+            }
+            if (connections > static_cast<int>(maxBySize)) {
+              connections = static_cast<int>(maxBySize);
+            }
+          }
+
+          bool useMultiSegment = resumable && fileSize > 0 && connections > 1;
+          
+          // Check if we have existing chunks (for resume)
+          auto existingChunks = download->GetChunksCopy();
+          bool hasExistingChunks = !existingChunks.empty() && 
+                                   existingChunks[0].startByte == 0;
+          
+          // Only reinitialize chunks if:
+          // 1. No existing chunks, OR
+          // 2. Chunk count matches desired connections for multi-segment, OR
+          // 3. Switching from multi to single or vice versa
+          if (!hasExistingChunks || 
+              (useMultiSegment && existingChunks.size() != static_cast<size_t>(connections)) ||
+              (!useMultiSegment && existingChunks.size() != 1)) {
+            download->InitializeChunks(useMultiSegment ? connections : 1);
+          }
+
+          if (useMultiSegment) {
+            return PerformMultiSegmentDownload(state, download, connections);
+          }
+          return PerformDownload(state, download);
+        }));
   }
 
   return true;
@@ -356,15 +468,31 @@ bool DownloadEngine::StartDownload(std::shared_ptr<Download> download) {
 void DownloadEngine::PauseDownload(std::shared_ptr<Download> download) {
   if (download) {
     download->SetStatus(DownloadStatus::Paused);
+    // Close all tracked handles for this download atomically
+    if (m_state) {
+      std::lock_guard<std::mutex> lock(m_state->requestHandlesMutex);
+      auto it = m_state->requestHandles.find(download->GetId());
+      if (it != m_state->requestHandles.end()) {
+        for (HINTERNET h : it->second) {
+          if (h) InternetCloseHandle(h);
+        }
+        m_state->requestHandles.erase(it);
+      }
+    }
   }
 }
+
 
 void DownloadEngine::ResumeDownload(std::shared_ptr<Download> download) {
   if (!download)
     return;
   if (download->GetStatus() == DownloadStatus::Completed)
     return;
-  if (download->GetStatus() == DownloadStatus::Paused) {
+  if (download->GetStatus() == DownloadStatus::Paused ||
+      download->GetStatus() == DownloadStatus::Error) {
+    // Reset error state and retry count before resuming
+    download->ResetRetry();
+    download->SetErrorMessage("");
     StartDownload(download);
   }
 }
@@ -372,6 +500,17 @@ void DownloadEngine::ResumeDownload(std::shared_ptr<Download> download) {
 void DownloadEngine::CancelDownload(std::shared_ptr<Download> download) {
   if (download) {
     download->SetStatus(DownloadStatus::Cancelled);
+    // Close all tracked handles for this download atomically
+    if (m_state) {
+      std::lock_guard<std::mutex> lock(m_state->requestHandlesMutex);
+      auto it = m_state->requestHandles.find(download->GetId());
+      if (it != m_state->requestHandles.end()) {
+        for (HINTERNET h : it->second) {
+          if (h) InternetCloseHandle(h);
+        }
+        m_state->requestHandles.erase(it);
+      }
+    }
   }
 }
 
@@ -385,21 +524,23 @@ void DownloadEngine::SetProxy(const std::string &proxyHost, int proxyPort) {
     if (proxyPort <= 0 || proxyPort > 65535) {
       std::cerr << "Invalid proxy port: " << proxyPort
                 << " (must be 1-65535)" << std::endl;
-    } else {
-      bool validHost = true;
-      for (char c : proxyHost) {
-        if (std::isspace(static_cast<unsigned char>(c))) {
-          validHost = false;
-          break;
-        }
-      }
-
-      if (!validHost) {
-        std::cerr << "Invalid proxy host format: " << proxyHost << std::endl;
-      } else {
-        newProxyUrl = proxyHost + ":" + std::to_string(proxyPort);
+      return;  // Don't change proxy settings on invalid input
+    }
+    
+    bool validHost = true;
+    for (char c : proxyHost) {
+      if (std::isspace(static_cast<unsigned char>(c))) {
+        validHost = false;
+        break;
       }
     }
+
+    if (!validHost) {
+      std::cerr << "Invalid proxy host format: " << proxyHost << std::endl;
+      return;  // Don't change proxy settings on invalid input
+    }
+    
+    newProxyUrl = proxyHost + ":" + std::to_string(proxyPort);
   }
 
   if (!ReinitializeSession(newProxyUrl)) {
@@ -481,12 +622,7 @@ bool DownloadEngine::PerformDownload(std::shared_ptr<EngineState> state,
   std::string filePath = savePath + "\\" + download->GetFilename();
 
   // Check existing size for resume
-  int64_t existingSize = 0;
-  std::ifstream checkFile(filePath, std::ios::binary | std::ios::ate);
-  if (checkFile.is_open()) {
-    existingSize = checkFile.tellg();
-    checkFile.close();
-  }
+  int64_t existingSize = GetExistingFileSize(filePath);
 
   bool shouldResume = (existingSize > 0 && download->GetDownloadedSize() > 0 &&
                        download->GetStatus() == DownloadStatus::Downloading);
@@ -510,28 +646,35 @@ bool DownloadEngine::PerformDownload(std::shared_ptr<EngineState> state,
 
   HINTERNET hUrl = InternetOpenUrlA(
       hSession, url.c_str(), headers.empty() ? NULL : headers.c_str(),
-      headers.empty() ? -1 : headers.length(), flags, 0);
+      headers.empty() ? -1 : static_cast<DWORD>(headers.length()), flags, 0);
 
   if (!hUrl) {
-    download->SetStatus(DownloadStatus::Error);
-    download->SetErrorMessage("Failed to open URL. Error: " +
-                              std::to_string(GetLastError()));
-
-    // Retry Logic
-    if (download->ShouldRetry()) {
+    DWORD err = GetLastError();
+    std::cerr << "[Download] Connection failed: " << GetWinINetError(err) << std::endl;
+    
+    // Auto-retry on connection failure
+    int retryCount = download->GetRetryCount();
+    if (retryCount < Config::MAX_DOWNLOAD_RETRIES) {
+      std::cerr << "[Download] Auto-retry " << (retryCount + 1) 
+                << "/" << Config::MAX_DOWNLOAD_RETRIES << std::endl;
       download->IncrementRetry();
       std::this_thread::sleep_for(
-          std::chrono::milliseconds(download->GetRetryDelayMs()));
-      if (download->GetStatus() == DownloadStatus::Cancelled)
+          std::chrono::milliseconds(Config::BASE_DOWNLOAD_RETRY_MS * (1 << std::min(retryCount, 4))));
+      if (download->GetStatus() == DownloadStatus::Cancelled ||
+          download->GetStatus() == DownloadStatus::Paused)
         return false;
-      download->SetStatus(DownloadStatus::Queued);
+      download->SetStatus(DownloadStatus::Downloading);
       return PerformDownload(state, download);
     }
 
+    download->SetStatus(DownloadStatus::Error);
+    download->SetErrorMessage("Connection failed: " + GetWinINetError(err));
     if (completionCallback)
       completionCallback(download->GetId(), false, "Connection failed");
     return false;
   }
+
+  TrackRequestHandle(state, download->GetId(), hUrl);
 
   if (shouldResume) {
     bool resumeValid = false;
@@ -552,7 +695,9 @@ bool DownloadEngine::PerformDownload(std::shared_ptr<EngineState> state,
     }
 
     if (!resumeValid) {
-      InternetCloseHandle(hUrl);
+      HINTERNET oldHandle = hUrl;
+      UntrackRequestHandle(state, download->GetId(), oldHandle);
+      InternetCloseHandle(oldHandle);
       shouldResume = false;
       existingSize = 0;
       download->SetDownloadedSize(0);
@@ -560,13 +705,30 @@ bool DownloadEngine::PerformDownload(std::shared_ptr<EngineState> state,
 
       hUrl = InternetOpenUrlA(hSession, url.c_str(), NULL, -1, flags, 0);
       if (!hUrl) {
+        DWORD err = GetLastError();
+        std::cerr << "[Download] Resume restart failed: " << GetWinINetError(err) << std::endl;
+        
+        // Auto-retry on restart failure
+        int retryCount = download->GetRetryCount();
+        if (retryCount < Config::MAX_DOWNLOAD_RETRIES) {
+          std::cerr << "[Download] Auto-retry " << (retryCount + 1) 
+                    << "/" << Config::MAX_DOWNLOAD_RETRIES << std::endl;
+          download->IncrementRetry();
+          std::this_thread::sleep_for(
+              std::chrono::milliseconds(Config::BASE_DOWNLOAD_RETRY_MS * (1 << std::min(retryCount, 4))));
+          if (download->GetStatus() == DownloadStatus::Cancelled ||
+              download->GetStatus() == DownloadStatus::Paused)
+            return false;
+          return PerformDownload(state, download);
+        }
+        
         download->SetStatus(DownloadStatus::Error);
-        download->SetErrorMessage("Failed to restart download. Error: " +
-                                  std::to_string(GetLastError()));
+        download->SetErrorMessage("Failed to restart download: " + GetWinINetError(err));
         if (completionCallback)
           completionCallback(download->GetId(), false, "Connection failed");
         return false;
       }
+      TrackRequestHandle(state, download->GetId(), hUrl);
     }
   }
 
@@ -579,6 +741,7 @@ bool DownloadEngine::PerformDownload(std::shared_ptr<EngineState> state,
   }
 
   if (!file.is_open()) {
+    UntrackRequestHandle(state, download->GetId(), hUrl);
     InternetCloseHandle(hUrl);
     download->SetStatus(DownloadStatus::Error);
     download->SetErrorMessage("File I/O Error");
@@ -587,7 +750,7 @@ bool DownloadEngine::PerformDownload(std::shared_ptr<EngineState> state,
 
   // Read Loop
   DWORD bytesRead = 0;
-  char buffer[8192]; // 8KB buffer
+  char buffer[65536]; // 64KB buffer
   auto lastSpeedUpdate = std::chrono::steady_clock::now();
   auto lastThrottleUpdate = lastSpeedUpdate;
   int64_t lastBytes = shouldResume ? existingSize : 0;
@@ -598,6 +761,7 @@ bool DownloadEngine::PerformDownload(std::shared_ptr<EngineState> state,
         download->GetStatus() == DownloadStatus::Cancelled ||
         download->GetStatus() == DownloadStatus::Paused) {
       file.close();
+      UntrackRequestHandle(state, download->GetId(), hUrl);
       InternetCloseHandle(hUrl);
       if (state->running.load() && completionCallback)
         completionCallback(download->GetId(), false, "User Aborted");
@@ -609,6 +773,7 @@ bool DownloadEngine::PerformDownload(std::shared_ptr<EngineState> state,
         file.write(buffer, bytesRead);
         if (file.fail()) {
           file.close();
+          UntrackRequestHandle(state, download->GetId(), hUrl);
           InternetCloseHandle(hUrl);
           download->SetStatus(DownloadStatus::Error);
           download->SetErrorMessage(
@@ -626,10 +791,14 @@ bool DownloadEngine::PerformDownload(std::shared_ptr<EngineState> state,
         auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
                            now - lastSpeedUpdate)
                            .count();
-        if (elapsed >= 500) {
-          double speed =
-              static_cast<double>(currentSize - lastBytes) / (elapsed / 1000.0);
-          download->SetSpeed(speed);
+        if (elapsed >= Config::SPEED_UPDATE_INTERVAL_MS) {
+          double speed = 0.0;
+          if (elapsed > 0) {
+            speed = static_cast<double>(currentSize - lastBytes) / (elapsed / 1000.0);
+          }
+          if (speed >= 0.0) {
+            download->SetSpeed(speed);
+          }
           lastSpeedUpdate = now;
           lastBytes = currentSize;
 
@@ -656,12 +825,30 @@ bool DownloadEngine::PerformDownload(std::shared_ptr<EngineState> state,
         }
       }
     } else {
-      // Read Error
+      // Read Error - attempt retry
+      DWORD err = GetLastError();
+      std::cerr << "[Download] Read failed: " << GetWinINetError(err) << std::endl;
       file.close();
+      UntrackRequestHandle(state, download->GetId(), hUrl);
       InternetCloseHandle(hUrl);
+      
+      // Auto-retry on read failure
+      int retryCount = download->GetRetryCount();
+      if (retryCount < Config::MAX_DOWNLOAD_RETRIES) {
+        std::cerr << "[Download] Auto-retry " << (retryCount + 1) 
+                  << "/" << Config::MAX_DOWNLOAD_RETRIES << std::endl;
+        download->IncrementRetry();
+        std::this_thread::sleep_for(
+            std::chrono::milliseconds(Config::BASE_DOWNLOAD_RETRY_MS * (1 << std::min(retryCount, 4))));
+        if (download->GetStatus() == DownloadStatus::Cancelled ||
+            download->GetStatus() == DownloadStatus::Paused)
+          return false;
+        download->SetStatus(DownloadStatus::Downloading);
+        return PerformDownload(state, download);
+      }
+      
       download->SetStatus(DownloadStatus::Error);
-      download->SetErrorMessage("Read Error: " +
-                                std::to_string(GetLastError()));
+      download->SetErrorMessage("Read failed: " + GetWinINetError(err));
       if (completionCallback)
         completionCallback(download->GetId(), false, "Read Error");
       return false;
@@ -670,10 +857,602 @@ bool DownloadEngine::PerformDownload(std::shared_ptr<EngineState> state,
   } while (bytesRead > 0);
 
   file.close();
+  UntrackRequestHandle(state, download->GetId(), hUrl);
   InternetCloseHandle(hUrl);
 
   download->SetStatus(DownloadStatus::Completed);
   download->ResetRetry();
+  if (completionCallback)
+    completionCallback(download->GetId(), true, "");
+
+  return true;
+}
+
+DownloadEngine::ChunkResult DownloadEngine::PerformChunkDownload(
+    std::shared_ptr<EngineState> state, std::shared_ptr<Download> download,
+    int chunkIndex, int64_t rangeStart, int64_t rangeEnd,
+    const std::string &partPath, int64_t speedLimitBytes, int64_t fileOffset) {
+  if (!state || !download || !state->running.load())
+    return ChunkResult::Failed;
+
+  std::shared_ptr<SessionEntry> sessionEntry;
+  {
+    std::lock_guard<std::mutex> lock(state->sessionMutex);
+    sessionEntry = state->session;
+  }
+  if (!sessionEntry || !sessionEntry->handle)
+    return ChunkResult::Failed;
+
+  SessionUsage sessionUsage(sessionEntry);
+  HINTERNET hSession = sessionUsage.handle();
+  if (!hSession)
+    return ChunkResult::Failed;
+
+  ProgressCallback progressCallback;
+  {
+    std::lock_guard<std::mutex> lock(state->callbackMutex);
+    progressCallback = state->progressCallback;
+  }
+
+  std::string url = download->GetUrl();
+  std::string headers = "Range: bytes=" + std::to_string(rangeStart) + "-" +
+                        std::to_string(rangeEnd);
+
+  DWORD flags = INTERNET_FLAG_NO_UI | INTERNET_FLAG_RELOAD |
+                INTERNET_FLAG_KEEP_CONNECTION;
+  if (!state->verifySSL.load())
+    flags |= (INTERNET_FLAG_IGNORE_CERT_CN_INVALID |
+              INTERNET_FLAG_IGNORE_CERT_DATE_INVALID);
+
+  HINTERNET hUrl = InternetOpenUrlA(
+      hSession, url.c_str(), headers.c_str(),
+      static_cast<DWORD>(headers.length()), flags, 0);
+
+  if (!hUrl) {
+    DWORD err = GetLastError();
+    std::cerr << "[Chunk " << chunkIndex << "] Connection failed: " 
+              << GetWinINetError(err) << std::endl;
+    return ChunkResult::NetworkError;
+  }
+
+  TrackRequestHandle(state, download->GetId(), hUrl);
+
+  DWORD statusCode = 0;
+  DWORD statusSize = sizeof(statusCode);
+  if (!HttpQueryInfoA(hUrl, HTTP_QUERY_STATUS_CODE | HTTP_QUERY_FLAG_NUMBER,
+                      &statusCode, &statusSize, NULL)) {
+    DWORD err = GetLastError();
+    std::cerr << "[Chunk " << chunkIndex << "] Failed to get HTTP status: " 
+              << GetWinINetError(err) << std::endl;
+    UntrackRequestHandle(state, download->GetId(), hUrl);
+    InternetCloseHandle(hUrl);
+    return ChunkResult::NetworkError;
+  }
+
+  if (statusCode == 429 || statusCode == 503) {
+    UntrackRequestHandle(state, download->GetId(), hUrl);
+    InternetCloseHandle(hUrl);
+    return ChunkResult::Throttled;
+  }
+
+  if (statusCode == 416) {
+    UntrackRequestHandle(state, download->GetId(), hUrl);
+    InternetCloseHandle(hUrl);
+    return ChunkResult::RangeUnsupported;
+  }
+
+  if (statusCode != 206) {
+    UntrackRequestHandle(state, download->GetId(), hUrl);
+    InternetCloseHandle(hUrl);
+    return ChunkResult::RangeUnsupported;
+  }
+
+  // Validate Content-Range header matches our request
+  char contentRange[256] = {0};
+  DWORD contentRangeSize = sizeof(contentRange);
+  if (HttpQueryInfoA(hUrl, HTTP_QUERY_CONTENT_RANGE, contentRange,
+                     &contentRangeSize, NULL)) {
+    // Parse "bytes START-END/TOTAL" format
+    int64_t serverStart = -1, serverEnd = -1;
+    if (sscanf_s(contentRange, "bytes %lld-%lld", &serverStart, &serverEnd) >= 2) {
+      if (serverStart != rangeStart) {
+        // Server returned different range than requested - data would be corrupted
+        UntrackRequestHandle(state, download->GetId(), hUrl);
+        InternetCloseHandle(hUrl);
+        return ChunkResult::Failed;
+      }
+    }
+  }
+
+  std::ofstream file(partPath, std::ios::binary | std::ios::in | std::ios::out);
+  bool truncated = false;
+  if (!file.is_open()) {
+    file.clear();
+    file.open(partPath, std::ios::binary | std::ios::trunc | std::ios::out);
+    truncated = true;
+  }
+  if (!file.is_open()) {
+    UntrackRequestHandle(state, download->GetId(), hUrl);
+    InternetCloseHandle(hUrl);
+    return ChunkResult::Failed;
+  }
+
+  // If we truncated the file but expected to resume at an offset, we'd corrupt data.
+  // Fail this chunk so the caller can retry properly.
+  if (truncated && fileOffset > 0) {
+    file.close();
+    UntrackRequestHandle(state, download->GetId(), hUrl);
+    InternetCloseHandle(hUrl);
+    return ChunkResult::Failed;
+  }
+
+  if (fileOffset > 0) {
+    file.seekp(fileOffset, std::ios::beg);
+    if (file.fail()) {
+      file.close();
+      UntrackRequestHandle(state, download->GetId(), hUrl);
+      InternetCloseHandle(hUrl);
+      return ChunkResult::Failed;
+    }
+  }
+
+  DWORD bytesRead = 0;
+  std::vector<char> buffer;
+  int64_t rangeLength = (rangeEnd - rangeStart) + 1;
+  if (rangeLength >= Config::LARGE_BUFFER_THRESHOLD) {
+    buffer.resize(256 * 1024);
+  } else {
+    buffer.resize(64 * 1024);
+  }
+  auto lastProgressUpdate = std::chrono::steady_clock::now();
+  auto lastThrottleUpdate = lastProgressUpdate;
+  int64_t totalBytes = 0;
+
+  do {
+    if (!state->running.load() ||
+        download->GetStatus() == DownloadStatus::Cancelled ||
+        download->GetStatus() == DownloadStatus::Paused) {
+      file.close();
+      UntrackRequestHandle(state, download->GetId(), hUrl);
+      InternetCloseHandle(hUrl);
+      return ChunkResult::Aborted;
+    }
+
+    if (InternetReadFile(hUrl, buffer.data(),
+                         static_cast<DWORD>(buffer.size()), &bytesRead)) {
+      if (bytesRead > 0) {
+        file.write(buffer.data(), bytesRead);
+        if (file.fail()) {
+          file.close();
+          UntrackRequestHandle(state, download->GetId(), hUrl);
+          InternetCloseHandle(hUrl);
+          return ChunkResult::Failed;
+        }
+
+        totalBytes += bytesRead;
+        download->UpdateChunkProgress(chunkIndex, rangeStart + totalBytes);
+
+        // Notify progress periodically (speed calculated in main thread)
+        auto now = std::chrono::steady_clock::now();
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                           now - lastProgressUpdate)
+                           .count();
+        if (elapsed >= Config::SPEED_UPDATE_INTERVAL_MS && progressCallback) {
+          progressCallback(download->GetId(), download->GetDownloadedSize(),
+                           download->GetTotalSize(), 0.0);
+          lastProgressUpdate = now;
+        }
+
+        if (speedLimitBytes > 0) {
+          auto now = std::chrono::steady_clock::now();
+          auto elapsedMs =
+              std::chrono::duration_cast<std::chrono::milliseconds>(
+                  now - lastThrottleUpdate)
+                  .count();
+          double targetMs = (bytesRead * 1000.0) / speedLimitBytes;
+          if (elapsedMs < targetMs) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(
+                static_cast<int>(targetMs - elapsedMs)));
+          }
+          lastThrottleUpdate = std::chrono::steady_clock::now();
+        }
+      }
+    } else {
+      DWORD err = GetLastError();
+      std::cerr << "[Chunk " << chunkIndex << "] Read failed after " 
+                << totalBytes << " bytes: " << GetWinINetError(err) << std::endl;
+      file.close();
+      UntrackRequestHandle(state, download->GetId(), hUrl);
+      InternetCloseHandle(hUrl);
+      return ChunkResult::NetworkError;
+    }
+
+  } while (bytesRead > 0);
+
+  file.close();
+  UntrackRequestHandle(state, download->GetId(), hUrl);
+  InternetCloseHandle(hUrl);
+
+  // Verify chunk received all expected bytes
+  if (totalBytes != rangeLength) {
+    std::cerr << "[Chunk " << chunkIndex << "] Incomplete: got " << totalBytes 
+              << " of " << rangeLength << " bytes" << std::endl;
+    return ChunkResult::NetworkError;
+  }
+
+  return ChunkResult::Success;
+}
+
+void DownloadEngine::TrackRequestHandle(const std::shared_ptr<EngineState> &state,
+                                        int downloadId,
+                                        HINTERNET requestHandle) {
+  if (!state || !requestHandle) {
+    return;
+  }
+  std::lock_guard<std::mutex> lock(state->requestHandlesMutex);
+  state->requestHandles[downloadId].push_back(requestHandle);
+}
+
+void DownloadEngine::UntrackRequestHandle(const std::shared_ptr<EngineState> &state,
+                                          int downloadId,
+                                          HINTERNET requestHandle) {
+  if (!state || !requestHandle) {
+    return;
+  }
+  // Remove the specific handle from the vector
+  std::lock_guard<std::mutex> lock(state->requestHandlesMutex);
+  auto it = state->requestHandles.find(downloadId);
+  if (it != state->requestHandles.end() && !it->second.empty()) {
+    auto &handles = it->second;
+    auto handleIt = std::find(handles.begin(), handles.end(), requestHandle);
+    if (handleIt != handles.end()) {
+      handles.erase(handleIt);
+    }
+    if (handles.empty()) {
+      state->requestHandles.erase(it);
+    }
+  }
+}
+
+HINTERNET DownloadEngine::GetTrackedHandle(
+    const std::shared_ptr<EngineState> &state, int downloadId) {
+  // Deprecated - use CloseTrackedHandles instead
+  return nullptr;
+}
+
+bool DownloadEngine::MergeChunkFiles(
+    const std::vector<std::string> &partPaths,
+    const std::string &outputPath) {
+  std::ofstream output(outputPath, std::ios::binary | std::ios::trunc);
+  if (!output.is_open()) {
+    return false;
+  }
+
+  char buffer[65536];
+  for (const auto &partPath : partPaths) {
+    std::ifstream input(partPath, std::ios::binary);
+    if (!input.is_open()) {
+      output.close();
+      DeleteFileA(outputPath.c_str());  // Clean up partial output
+      return false;
+    }
+
+    while (input) {
+      input.read(buffer, sizeof(buffer));
+      std::streamsize readCount = input.gcount();
+      if (readCount > 0) {
+        output.write(buffer, readCount);
+        if (output.fail()) {
+          output.close();
+          DeleteFileA(outputPath.c_str());  // Clean up partial output
+          return false;
+        }
+      }
+      if (input.eof()) break;
+      if (input.bad()) {
+        output.close();
+        DeleteFileA(outputPath.c_str());  // Clean up partial output
+        return false;
+      }
+    }
+  }
+
+  return true;
+}
+
+bool DownloadEngine::PerformMultiSegmentDownload(
+    std::shared_ptr<EngineState> state, std::shared_ptr<Download> download,
+    int connections) {
+  if (!state || !download || !state->running.load())
+    return false;
+
+  std::string savePath = download->GetSavePath();
+  CreateDirectoryA(savePath.c_str(), NULL);
+  std::string filePath = savePath + "\\" + download->GetFilename();
+
+  auto chunks = download->GetChunksCopy();
+  if (chunks.empty()) {
+    download->SetStatus(DownloadStatus::Error);
+    download->SetErrorMessage("Invalid chunk configuration");
+    return false;
+  }
+
+  std::vector<std::string> partPaths;
+  partPaths.reserve(chunks.size());
+
+  int64_t fileSize = download->GetTotalSize();
+  if (fileSize <= 0) {
+    download->SetStatus(DownloadStatus::Error);
+    download->SetErrorMessage("Unknown file size for multi-segment download");
+    return false;
+  }
+
+  // Resume existing parts if present
+  for (size_t i = 0; i < chunks.size(); ++i) {
+    std::string partPath = filePath + ".part" + std::to_string(i);
+    partPaths.push_back(partPath);
+
+    int64_t partSize = GetExistingFileSize(partPath);
+    int64_t chunkLength = (chunks[i].endByte - chunks[i].startByte) + 1;
+    if (partSize > 0) {
+      if (partSize > chunkLength) {
+        // Part file is corrupted (larger than expected), delete and restart
+        DeleteFileA(partPath.c_str());
+        partSize = 0;
+      }
+      chunks[i].currentByte = chunks[i].startByte + partSize;
+      chunks[i].completed = (partSize == chunkLength);
+    } else {
+      chunks[i].currentByte = chunks[i].startByte;
+      chunks[i].completed = false;
+    }
+  }
+  download->SetChunks(chunks);
+
+  std::vector<std::future<ChunkResult>> futures;
+  futures.reserve(chunks.size());
+  std::vector<bool> futureReady(chunks.size(), false);
+
+  int64_t totalSpeedLimit = state->speedLimitBytes.load();
+  int64_t perConnectionLimit = 0;
+  if (totalSpeedLimit > 0 && connections > 0) {
+    perConnectionLimit = totalSpeedLimit / connections;
+    if (perConnectionLimit < 1024) {
+      perConnectionLimit = 1024;
+    }
+  }
+
+  // Track start time and initial progress for speed calculation
+  auto downloadStartTime = std::chrono::steady_clock::now();
+  int64_t initialDownloaded = download->GetDownloadedSize();
+
+  for (size_t i = 0; i < chunks.size(); ++i) {
+    futures.push_back(std::async(std::launch::async,
+                                 [state, download, i, partPaths,
+                                  perConnectionLimit]() {
+                                   // Get fresh chunk state from download
+                                   auto freshChunks = download->GetChunksCopy();
+                                   if (i >= freshChunks.size() ||
+                                       freshChunks[i].completed) {
+                                     return ChunkResult::Success;
+                                   }
+                                   int attempt = 0;
+                                   while (attempt <= Config::MAX_CHUNK_RETRIES) {
+                                      // Refresh chunk state on each retry attempt
+                                      freshChunks = download->GetChunksCopy();
+                                      if (i >= freshChunks.size()) {
+                                        return ChunkResult::Failed;
+                                      }
+                                      int64_t fileOffset = 0;
+                                      if (freshChunks[i].currentByte > freshChunks[i].startByte) {
+                                        fileOffset = freshChunks[i].currentByte - freshChunks[i].startByte;
+                                      }
+                                      int64_t start =
+                                          freshChunks[i].currentByte > freshChunks[i].startByte
+                                              ? freshChunks[i].currentByte
+                                              : freshChunks[i].startByte;
+                                      ChunkResult result = PerformChunkDownload(
+                                          state, download, static_cast<int>(i),
+                                          start, freshChunks[i].endByte,
+                                          partPaths[i], perConnectionLimit,
+                                          fileOffset);
+                                     if (result == ChunkResult::Success ||
+                                         result == ChunkResult::RangeUnsupported ||
+                                         result == ChunkResult::Aborted) {
+                                       return result;
+                                     }
+                                     if (result == ChunkResult::Throttled) {
+                                       std::this_thread::sleep_for(
+                                           std::chrono::milliseconds(
+                                               Config::BASE_CHUNK_RETRY_MS *
+                                               (attempt + 1)));
+                                     } else {
+                                       std::this_thread::sleep_for(
+                                           std::chrono::milliseconds(
+                                               Config::BASE_CHUNK_RETRY_MS *
+                                               (1 << attempt)));
+                                     }
+                                     attempt++;
+                                   }
+                                   return ChunkResult::Failed;
+                                 }));
+  }
+
+  // Monitor progress and calculate aggregate speed while chunks download
+  ProgressCallback progressCallback;
+  {
+    std::lock_guard<std::mutex> lock(state->callbackMutex);
+    progressCallback = state->progressCallback;
+  }
+
+  auto lastSpeedUpdate = std::chrono::steady_clock::now();
+  int64_t lastDownloaded = initialDownloaded;
+
+  bool allComplete = false;
+  while (!allComplete) {
+    allComplete = true;
+    for (size_t i = 0; i < futures.size(); ++i) {
+      if (futureReady[i]) {
+        continue;
+      }
+      if (futures[i].valid() &&
+          futures[i].wait_for(std::chrono::milliseconds(100)) !=
+              std::future_status::ready) {
+        allComplete = false;
+      } else {
+        futureReady[i] = true;
+      }
+    }
+
+    // Calculate and update aggregate speed
+    auto now = std::chrono::steady_clock::now();
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                       now - lastSpeedUpdate)
+                       .count();
+    if (elapsed >= Config::SPEED_UPDATE_INTERVAL_MS) {
+      int64_t currentDownloaded = download->GetDownloadedSize();
+      double speed = 0.0;
+      if (elapsed > 0) {
+        speed = static_cast<double>(currentDownloaded - lastDownloaded) /
+                (elapsed / 1000.0);
+      }
+      if (speed >= 0.0) {
+        download->SetSpeed(speed);
+      }
+      lastSpeedUpdate = now;
+      lastDownloaded = currentDownloaded;
+
+      if (progressCallback) {
+        progressCallback(download->GetId(), currentDownloaded,
+                         download->GetTotalSize(), speed);
+      }
+    }
+
+    // Check for cancellation
+    if (download->GetStatus() == DownloadStatus::Cancelled ||
+        download->GetStatus() == DownloadStatus::Paused ||
+        !state->running.load()) {
+      break;
+    }
+  }
+
+  bool allOk = true;
+  bool rangeUnsupported = false;
+  bool throttled = false;
+  bool networkError = false;
+  for (size_t i = 0; i < futures.size(); ++i) {
+    if (futures[i].valid()) {
+      ChunkResult result = futures[i].get();
+      if (result != ChunkResult::Success) {
+        allOk = false;
+        if (result == ChunkResult::RangeUnsupported) {
+          rangeUnsupported = true;
+        }
+        if (result == ChunkResult::Throttled) {
+          throttled = true;
+        }
+        if (result == ChunkResult::NetworkError || result == ChunkResult::Failed) {
+          networkError = true;
+        }
+      }
+    } else {
+      allOk = false;
+    }
+  }
+
+  if (!allOk || download->GetStatus() == DownloadStatus::Cancelled ||
+      download->GetStatus() == DownloadStatus::Paused) {
+    if (rangeUnsupported) {
+      // Range not supported - must restart from scratch
+      for (const auto &partPath : partPaths) {
+        DeleteFileA(partPath.c_str());
+      }
+      download->InitializeChunks(1);
+      download->SetDownloadedSize(0);
+      return PerformDownload(state, download);
+    }
+    if (throttled && connections > 1) {
+      // Server throttling - reduce connections and restart
+      for (const auto &partPath : partPaths) {
+        DeleteFileA(partPath.c_str());
+      }
+      int reducedConnections = std::max(1, connections / 2);
+      download->InitializeChunks(reducedConnections);
+      download->SetDownloadedSize(0);
+      return PerformMultiSegmentDownload(state, download, reducedConnections);
+    }
+    
+    // For paused/cancelled, keep part files for resume
+    if (download->GetStatus() == DownloadStatus::Paused ||
+        download->GetStatus() == DownloadStatus::Cancelled) {
+      // Don't delete part files - they can be resumed later
+      return false;
+    }
+    
+    // Auto-retry on network errors (with exponential backoff)
+    int retryCount = download->GetRetryCount();
+    if (networkError && retryCount < Config::MAX_DOWNLOAD_RETRIES) {
+      std::cerr << "[Download] Auto-retry " << (retryCount + 1) 
+                << "/" << Config::MAX_DOWNLOAD_RETRIES << " after network error" << std::endl;
+      download->IncrementRetry();
+      
+      // Exponential backoff
+      int delayMs = Config::BASE_DOWNLOAD_RETRY_MS * (1 << std::min(retryCount, 4));
+      std::this_thread::sleep_for(std::chrono::milliseconds(delayMs));
+      
+      // Check if cancelled during wait
+      if (download->GetStatus() == DownloadStatus::Cancelled ||
+          download->GetStatus() == DownloadStatus::Paused ||
+          !state->running.load()) {
+        return false;
+      }
+      
+      download->SetStatus(DownloadStatus::Downloading);
+      return PerformMultiSegmentDownload(state, download, connections);
+    }
+    
+    // For other failures, also keep part files to allow resume
+    // Only set error status, don't delete progress
+    download->SetStatus(DownloadStatus::Error);
+    std::string errorMsg = "Download failed after " + 
+                           std::to_string(download->GetRetryCount()) + " retries";
+    download->SetErrorMessage(errorMsg);
+    std::cerr << "[Download] " << errorMsg << std::endl;
+    return false;
+  }
+
+  if (!MergeChunkFiles(partPaths, filePath)) {
+    for (const auto &partPath : partPaths) {
+      DeleteFileA(partPath.c_str());
+    }
+    download->SetStatus(DownloadStatus::Error);
+    download->SetErrorMessage("Failed to merge download parts");
+    return false;
+  }
+
+  int64_t mergedSize = GetExistingFileSize(filePath);
+  if (download->GetTotalSize() > 0 &&
+      mergedSize != download->GetTotalSize()) {
+    for (const auto &partPath : partPaths) {
+      DeleteFileA(partPath.c_str());
+    }
+    download->SetStatus(DownloadStatus::Error);
+    download->SetErrorMessage("Merged file size mismatch");
+    return false;
+  }
+
+  for (const auto &partPath : partPaths) {
+    DeleteFileA(partPath.c_str());
+  }
+
+  download->SetStatus(DownloadStatus::Completed);
+  download->ResetRetry();
+
+  CompletionCallback completionCallback;
+  {
+    std::lock_guard<std::mutex> lock(state->callbackMutex);
+    completionCallback = state->completionCallback;
+  }
   if (completionCallback)
     completionCallback(download->GetId(), true, "");
 

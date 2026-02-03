@@ -46,11 +46,12 @@ private:
   std::vector<std::shared_ptr<Download>>
       m_filteredDownloads;  // Visible downloads after filtering
   wxString m_currentFilter; // Current category filter
-  long m_contextMenuIndex;  // Index of right-clicked item
+  int m_contextMenuDownloadId;  // ID of right-clicked download (stable across refreshes)
 
   void CreateColumns();
   void UpdateRow(long row, std::shared_ptr<Download> download);
   void ApplyFilter(); // Apply current filter to downloads
+  std::shared_ptr<Download> FindDownloadById(int downloadId) const;
   wxString FormatFileSize(int64_t bytes) const;
   wxString FormatSpeed(double bytesPerSecond) const;
   wxString FormatTime(int seconds) const;

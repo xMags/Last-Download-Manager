@@ -35,7 +35,7 @@ public:
   // Queue management
   void StartQueue();
   void StopQueue();
-  bool IsQueueRunning() const { return m_isQueueRunning; }
+  bool IsQueueRunning() const { return m_isQueueRunning.load(); }
   void ProcessQueue();
 
   // Scheduling
@@ -67,8 +67,12 @@ public:
   // Callbacks for UI updates
   using DownloadUpdateCallback = std::function<void(int downloadId)>;
   void SetUpdateCallback(DownloadUpdateCallback callback) {
+    std::lock_guard<std::mutex> lock(m_callbackMutex);
     m_updateCallback = callback;
   }
+
+  // Database persistence (public for periodic saves)
+  void SaveAllDownloadsToDatabase();
 
 private:
   DownloadManager();
@@ -76,9 +80,10 @@ private:
 
   std::vector<std::shared_ptr<Download>> m_downloads;
   mutable std::mutex m_downloadsMutex;
+  mutable std::mutex m_callbackMutex;
 
   // Queue & Schedule state
-  bool m_isQueueRunning;
+  std::atomic<bool> m_isQueueRunning;
   wxTimer *m_schedulerTimer;
 
   // Schedule settings
@@ -103,7 +108,6 @@ private:
 
   // Database persistence helpers
   void LoadDownloadsFromDatabase();
-  void SaveAllDownloadsToDatabase();
   void SaveDownloadToDatabase(int downloadId);
 
   // Folder management
