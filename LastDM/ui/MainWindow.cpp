@@ -64,7 +64,7 @@ wxBEGIN_EVENT_TABLE(MainWindow, wxFrame) EVT_MENU(
                     wxEND_EVENT_TABLE()
 
                         MainWindow::MainWindow()
-    : wxFrame(nullptr, wxID_ANY, "Last Download Manager", wxDefaultPosition,
+    : wxFrame(nullptr, wxID_ANY, "Last Download Manager v1.5.0", wxDefaultPosition,
               wxSize(1050, 700)),
       m_splitter(nullptr), m_categoriesPanel(nullptr),
       m_downloadsTable(nullptr), m_toolbar(nullptr), m_statusBar(nullptr),
@@ -129,9 +129,18 @@ wxBEGIN_EVENT_TABLE(MainWindow, wxFrame) EVT_MENU(
 }
 
 MainWindow::~MainWindow() {
+  // Stop timer first to prevent callbacks during destruction
   if (m_updateTimer) {
     m_updateTimer->Stop();
     delete m_updateTimer;
+    m_updateTimer = nullptr;
+  }
+  
+  // Clean up tray icon
+  if (m_taskBarIcon) {
+    m_taskBarIcon->RemoveIcon();
+    delete m_taskBarIcon;
+    m_taskBarIcon = nullptr;
   }
 }
 
@@ -480,6 +489,11 @@ void MainWindow::OnCategorySelected(wxTreeEvent &event) {
 }
 
 void MainWindow::OnUpdateTimer(wxTimerEvent &event) {
+  // Guard against callbacks during destruction
+  if (!m_downloadsTable || !m_statusBar) {
+    return;
+  }
+  
   // Refresh downloads table with latest data from DownloadManager
   DownloadManager &manager = DownloadManager::GetInstance();
   auto downloads = manager.GetAllDownloads();
@@ -489,12 +503,22 @@ void MainWindow::OnUpdateTimer(wxTimerEvent &event) {
     m_downloadsTable->UpdateDownload(download->GetId());
   }
 
+  // Periodic database save (every 60 ticks = 30 seconds at 500ms interval)
+  // This ensures progress is saved in case of crash
+  m_dbSaveCounter++;
+  if (m_dbSaveCounter >= 60) {
+    m_dbSaveCounter = 0;
+    manager.SaveAllDownloadsToDatabase();
+  }
+
   // Update status bar
   int active = manager.GetActiveDownloads();
   double speed = manager.GetTotalSpeed();
 
   if (active > 0) {
     m_statusBar->SetStatusText(wxString::Format("Downloading: %d", active), 0);
+  } else {
+    m_statusBar->SetStatusText("Ready", 0);
   }
 
   m_statusBar->SetStatusText(
@@ -557,6 +581,11 @@ void MainWindow::OnIconize(wxIconizeEvent &event) {
 }
 
 void MainWindow::OnClose(wxCloseEvent &event) {
+  // Stop timer first to prevent callbacks during destruction
+  if (m_updateTimer) {
+    m_updateTimer->Stop();
+  }
+  
   // Clean up tray icon before closing
   if (m_taskBarIcon) {
     m_taskBarIcon->RemoveIcon();

@@ -1,5 +1,6 @@
 #include "Settings.h"
 #include "../database/DatabaseManager.h"
+#include <algorithm>
 #include <wx/filename.h>
 
 Settings &Settings::GetInstance() {
@@ -23,6 +24,8 @@ void Settings::Load() {
   // Ensure database is initialized
   db.Initialize();
 
+  std::lock_guard<std::mutex> lock(m_mutex);
+
   // Load general settings
   m_downloadFolder =
       db.GetSetting("download_folder", m_downloadFolder.ToStdString());
@@ -30,12 +33,12 @@ void Settings::Load() {
   m_minimizeToTray = db.GetSetting("minimize_to_tray", "1") == "1";
   m_showNotifications = db.GetSetting("show_notifications", "1") == "1";
 
-  // Load connection settings
+  // Load connection settings with validation
   try {
-    m_maxConnections = std::stoi(db.GetSetting("max_connections", "8"));
+    m_maxConnections = std::max(1, std::stoi(db.GetSetting("max_connections", "8")));
     m_maxSimultaneousDownloads =
-        std::stoi(db.GetSetting("max_simultaneous_downloads", "3"));
-    m_speedLimit = std::stoi(db.GetSetting("speed_limit", "0"));
+        std::max(1, std::stoi(db.GetSetting("max_simultaneous_downloads", "3")));
+    m_speedLimit = std::max(0, std::stoi(db.GetSetting("speed_limit", "0")));
   } catch (...) {
     // Use defaults on parse error
   }
@@ -44,7 +47,7 @@ void Settings::Load() {
   m_useProxy = db.GetSetting("use_proxy", "0") == "1";
   m_proxyHost = db.GetSetting("proxy_host", "");
   try {
-    m_proxyPort = std::stoi(db.GetSetting("proxy_port", "8080"));
+    m_proxyPort = std::clamp(std::stoi(db.GetSetting("proxy_port", "8080")), 1, 65535);
   } catch (...) {
     m_proxyPort = 8080;
   }
@@ -52,6 +55,8 @@ void Settings::Load() {
 
 void Settings::Save() {
   DatabaseManager &db = DatabaseManager::GetInstance();
+
+  std::lock_guard<std::mutex> lock(m_mutex);
 
   // Save general settings
   db.SetSetting("download_folder", m_downloadFolder.ToStdString());

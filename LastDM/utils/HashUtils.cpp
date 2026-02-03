@@ -109,9 +109,9 @@ bool HashUtils::VerifyHash(const std::string &filePath,
   std::string expectedLower = expectedHash;
   std::string calculatedLower = calculatedHash;
   std::transform(expectedLower.begin(), expectedLower.end(),
-                 expectedLower.begin(), ::tolower);
+                 expectedLower.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
   std::transform(calculatedLower.begin(), calculatedLower.end(),
-                 calculatedLower.begin(), ::tolower);
+                 calculatedLower.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
 
   return expectedLower == calculatedLower;
 }
@@ -127,7 +127,8 @@ std::string HashUtils::BytesToHex(const unsigned char *bytes, size_t length) {
 
 HashType HashUtils::ParseHashType(const std::string &typeStr) {
   std::string lower = typeStr;
-  std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+  std::transform(lower.begin(), lower.end(), lower.begin(), 
+                 [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
 
   if (lower == "md5") {
     return HashType::MD5;

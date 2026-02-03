@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <ctime>
 #include <iomanip>
+#include <limits>
 #include <sstream>
 
 Download::Download(int id, const std::string &url, const std::string &savePath)
@@ -68,7 +69,11 @@ int Download::GetTimeRemaining() const {
   if (remaining <= 0)
     return 0;
 
-  return static_cast<int>(remaining / speed);
+  double secondsRemaining = remaining / speed;
+  if (secondsRemaining >= static_cast<double>(std::numeric_limits<int>::max())) {
+    return std::numeric_limits<int>::max();
+  }
+  return static_cast<int>(secondsRemaining);
 }
 
 std::string Download::GetLastTryTime() const {
@@ -104,6 +109,40 @@ void Download::SetCategory(const std::string &category) {
 void Download::SetDescription(const std::string &desc) {
   std::lock_guard<std::mutex> lock(m_metadataMutex);
   m_description = desc;
+}
+
+void Download::SetSpeed(double speed) {
+  // Use exponential moving average (EMA) for smooth speed display
+  // Alpha controls smoothing: lower = smoother, higher = more responsive
+  constexpr double ALPHA = 0.2;
+  constexpr int WARMUP_SAMPLES = 3;
+
+  // Use mutex to protect the read-modify-write sequence
+  std::lock_guard<std::mutex> lock(m_metadataMutex);
+
+  int sampleCount = m_speedSampleCount.load(std::memory_order_relaxed);
+
+  if (sampleCount < WARMUP_SAMPLES) {
+    // During warmup, use simple average to establish baseline
+    double currentSmoothed = m_smoothedSpeed.load(std::memory_order_relaxed);
+    double newSmoothed = (currentSmoothed * sampleCount + speed) / (sampleCount + 1);
+    m_smoothedSpeed.store(newSmoothed, std::memory_order_relaxed);
+    m_speedSampleCount.store(sampleCount + 1, std::memory_order_relaxed);
+    m_speed.store(newSmoothed, std::memory_order_relaxed);
+  } else {
+    // Apply EMA: smoothed = alpha * new + (1 - alpha) * previous
+    double previousSmoothed = m_smoothedSpeed.load(std::memory_order_relaxed);
+    double newSmoothed = ALPHA * speed + (1.0 - ALPHA) * previousSmoothed;
+    m_smoothedSpeed.store(newSmoothed, std::memory_order_relaxed);
+    m_speed.store(newSmoothed, std::memory_order_relaxed);
+  }
+}
+
+void Download::ResetSpeed() {
+  std::lock_guard<std::mutex> lock(m_metadataMutex);
+  m_speed.store(0.0, std::memory_order_relaxed);
+  m_smoothedSpeed.store(0.0, std::memory_order_relaxed);
+  m_speedSampleCount.store(0, std::memory_order_relaxed);
 }
 
 void Download::SetErrorMessage(const std::string &msg) {
@@ -148,7 +187,8 @@ void Download::InitializeChunks(int numConnections) {
   int64_t totalSize = m_totalSize.load();
   if (totalSize <= 0 || numConnections <= 1) {
     // Single chunk for unknown size or single connection
-    m_chunks.emplace_back(0, totalSize > 0 ? totalSize - 1 : INT64_MAX);
+    // Use -1 as sentinel for unknown end (streaming download)
+    m_chunks.emplace_back(0, totalSize > 0 ? totalSize - 1 : -1);
     return;
   }
 
@@ -169,11 +209,25 @@ void Download::UpdateChunkProgress(int chunkIndex, int64_t currentByte) {
 
   if (chunkIndex >= 0 && chunkIndex < static_cast<int>(m_chunks.size())) {
     m_chunks[chunkIndex].currentByte = currentByte;
-    if (currentByte >= m_chunks[chunkIndex].endByte) {
+    // endByte is inclusive, so completed when currentByte > endByte
+    // endByte of -1 means unknown size (streaming), never auto-complete
+    if (m_chunks[chunkIndex].endByte >= 0 && 
+        currentByte > m_chunks[chunkIndex].endByte) {
       m_chunks[chunkIndex].completed = true;
     }
   }
 
+  RecalculateProgress();
+}
+
+std::vector<DownloadChunk> Download::GetChunksCopy() const {
+  std::lock_guard<std::mutex> lock(m_chunksMutex);
+  return m_chunks;
+}
+
+void Download::SetChunks(const std::vector<DownloadChunk> &chunks) {
+  std::lock_guard<std::mutex> lock(m_chunksMutex);
+  m_chunks = chunks;
   RecalculateProgress();
 }
 
@@ -214,8 +268,19 @@ std::string Download::ExtractFilenameFromUrl(const std::string &url) const {
       decoded += filename[i];
     }
 
-    if (!decoded.empty()) {
-      return decoded;
+    // Sanitize invalid Windows filename characters
+    std::string sanitized;
+    for (char c : decoded) {
+      if (c == ':' || c == '*' || c == '?' || c == '"' || 
+          c == '<' || c == '>' || c == '|' || c == '\\' || c == '/') {
+        sanitized += '_';  // Replace invalid chars with underscore
+      } else if (c >= 32) {  // Skip control characters
+        sanitized += c;
+      }
+    }
+
+    if (!sanitized.empty()) {
+      return sanitized;
     }
   }
 
@@ -275,7 +340,7 @@ std::string Download::DetermineCategory(const std::string &filename) const {
 // Retry support methods for exponential backoff
 bool Download::ShouldRetry() const {
   // Only retry if we have attempts remaining and status is Error
-  return m_retryCount < m_maxRetries &&
+  return m_retryCount.load() < m_maxRetries.load() &&
          m_status.load() == DownloadStatus::Error;
 }
 
@@ -283,7 +348,10 @@ int Download::GetRetryDelayMs() const {
   // Exponential backoff: 1s, 2s, 4s, 8s, 16s, ...
   // Formula: baseDelay * 2^retryCount
   constexpr int BASE_DELAY_MS = 1000;
-  int delay = BASE_DELAY_MS * (1 << m_retryCount); // 2^retryCount
+  int retryCount = m_retryCount.load();
+  // Cap at 5 to prevent integer overflow (1 << 5 = 32)
+  int cappedRetry = std::min(retryCount, 5);
+  int delay = BASE_DELAY_MS * (1 << cappedRetry); // 2^retryCount
 
   // Cap at 60 seconds maximum
   constexpr int MAX_DELAY_MS = 60000;
@@ -291,15 +359,22 @@ int Download::GetRetryDelayMs() const {
 }
 
 void Download::IncrementRetry() {
-  m_retryCount++;
+  int currentRetry = m_retryCount.fetch_add(1);
 
   // Calculate and set next retry time
-  int delayMs = GetRetryDelayMs();
+  // Use currentRetry+1 since we just incremented
+  constexpr int BASE_DELAY_MS = 1000;
+  int cappedRetry = std::min(currentRetry + 1, 5);
+  int delayMs = BASE_DELAY_MS * (1 << cappedRetry);
+  delayMs = std::min(delayMs, 60000);
+  
+  std::lock_guard<std::mutex> lock(m_metadataMutex);
   m_nextRetryTime =
       std::chrono::steady_clock::now() + std::chrono::milliseconds(delayMs);
 }
 
 void Download::ResetRetry() {
-  m_retryCount = 0;
+  m_retryCount.store(0);
+  std::lock_guard<std::mutex> lock(m_metadataMutex);
   m_nextRetryTime = std::chrono::steady_clock::time_point{};
 }

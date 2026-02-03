@@ -8,6 +8,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 #define NOMINMAX
 #define WIN32_LEAN_AND_MEAN
@@ -60,6 +61,14 @@ public:
   bool GetUseNativeCAStore() const { return m_useNativeCAStore; }
 
 private:
+  enum class ChunkResult {
+    Success,
+    RangeUnsupported,
+    Throttled,
+    NetworkError,    // Connection/read failure - should retry
+    Failed,          // Non-recoverable failure
+    Aborted
+  };
   struct SessionEntry {
     HINTERNET handle = nullptr;
     std::atomic<int> activeCount{0};
@@ -71,6 +80,9 @@ private:
     std::mutex sessionMutex;
     std::shared_ptr<SessionEntry> session;
     std::vector<std::shared_ptr<SessionEntry>> retiredSessions;
+
+    std::mutex requestHandlesMutex;
+    std::unordered_map<int, std::vector<HINTERNET>> requestHandles;
 
     std::atomic<bool> running{false};
     std::atomic<int64_t> speedLimitBytes{0};
@@ -115,6 +127,8 @@ private:
   static void CloseSessionIfIdle(const std::shared_ptr<SessionEntry> &entry);
   static bool ParseContentRangeStart(const std::string &value,
                                      int64_t &startOut);
+  static int64_t GetExistingFileSize(const std::string &filePath);
+  static bool PreallocateFile(const std::string &filePath, int64_t size);
 
   static void CleanupRetiredSessions(
       const std::shared_ptr<EngineState> &state);
@@ -124,5 +138,23 @@ private:
   // Helper methods
   static bool PerformDownload(std::shared_ptr<EngineState> state,
                               std::shared_ptr<Download> download);
+  static bool PerformMultiSegmentDownload(std::shared_ptr<EngineState> state,
+                                          std::shared_ptr<Download> download,
+                                          int connections);
+  static ChunkResult PerformChunkDownload(std::shared_ptr<EngineState> state,
+                                          std::shared_ptr<Download> download,
+                                          int chunkIndex, int64_t rangeStart,
+                                          int64_t rangeEnd,
+                                          const std::string &partPath,
+                                          int64_t speedLimitBytes,
+                                          int64_t fileOffset);
+  static bool MergeChunkFiles(const std::vector<std::string> &partPaths,
+                              const std::string &outputPath);
+  static void TrackRequestHandle(const std::shared_ptr<EngineState> &state,
+                                 int downloadId, HINTERNET requestHandle);
+  static void UntrackRequestHandle(const std::shared_ptr<EngineState> &state,
+                                   int downloadId, HINTERNET requestHandle);
+  static HINTERNET GetTrackedHandle(const std::shared_ptr<EngineState> &state,
+                                    int downloadId);
   
 };

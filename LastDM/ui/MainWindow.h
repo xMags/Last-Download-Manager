@@ -35,6 +35,9 @@ private:
   // System tray
   LastDMTaskBarIcon *m_taskBarIcon;
   bool m_minimizedToTray = false;
+  
+  // Periodic database save counter (every 60 ticks = 30 seconds at 500ms interval)
+  int m_dbSaveCounter = 0;
 
   // Menu bar
   wxMenuBar *m_menuBar;
