@@ -11,10 +11,10 @@
 #include <wx/wx.h>
 
 // Forward declaration for system tray
-class LastDMTaskBarIcon;
+class LDMTaskBarIcon;
 
 class MainWindow : public wxFrame {
-  friend class LastDMTaskBarIcon; // Allow tray icon to access ShowFromTray()
+  friend class LDMTaskBarIcon; // Allow tray icon to access ShowFromTray()
 public:
   MainWindow();
   ~MainWindow();
@@ -33,8 +33,9 @@ private:
   SpeedGraphPanel *m_speedGraph;
 
   // System tray
-  LastDMTaskBarIcon *m_taskBarIcon;
+  LDMTaskBarIcon *m_taskBarIcon;
   bool m_minimizedToTray = false;
+  bool m_isClosing = false;
   
   // Periodic database save counter (every 60 ticks = 30 seconds at 500ms interval)
   int m_dbSaveCounter = 0;
@@ -69,12 +70,21 @@ private:
   void OnViewDarkMode(wxCommandEvent &event);
   void OnCategorySelected(wxTreeEvent &event);
   void OnUpdateTimer(wxTimerEvent &event);
+  void OnInstallExtension(wxCommandEvent &event);
 
   // System tray handlers
   void OnIconize(wxIconizeEvent &event);
   void OnClose(wxCloseEvent &event);
   void ShowFromTray();
   void ShowNotification(const wxString &title, const wxString &message);
+  void OnTrayExitRequest();
+  void CleanupEventHandlers();
+  void EnsureTrayIcon();
+
+#ifdef _WIN32
+  // Override MSWWindowProc to handle WM_COPYDATA for single instance URL passing
+  virtual WXLRESULT MSWWindowProc(WXUINT nMsg, WXWPARAM wParam, WXLPARAM lParam) override;
+#endif
 
   wxDECLARE_EVENT_TABLE();
 };
@@ -98,18 +108,19 @@ enum {
   ID_DOWNLOADS_TABLE,
   ID_VIEW_DARK_MODE,
   ID_UPDATE_TIMER,
+  ID_INSTALL_EXTENSION,
   ID_TRAY_SHOW,
   ID_TRAY_EXIT
 };
 
 // System tray icon class
-class LastDMTaskBarIcon : public wxTaskBarIcon {
+class LDMTaskBarIcon : public wxTaskBarIcon {
 public:
-  LastDMTaskBarIcon(MainWindow *parent) : m_parent(parent) {}
+  LDMTaskBarIcon(MainWindow *parent) : m_parent(parent) {}
 
   wxMenu *CreatePopupMenu() override {
     wxMenu *menu = new wxMenu;
-    menu->Append(ID_TRAY_SHOW, wxT("Show Last Download Manager"));
+    menu->Append(ID_TRAY_SHOW, wxT("Show LDM"));
     menu->AppendSeparator();
     menu->Append(ID_TRAY_EXIT, wxT("Exit"));
     return menu;

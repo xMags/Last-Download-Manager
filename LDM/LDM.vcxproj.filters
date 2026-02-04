@@ -81,6 +81,12 @@
     <ClCompile Include="utils\HashUtils.cpp">
       <Filter>Source Files\utils</Filter>
     </ClCompile>
+    <ClCompile Include="utils\HttpServer.cpp">
+      <Filter>Source Files\utils</Filter>
+    </ClCompile>
+    <ClCompile Include="BrowserHost\main.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="core\Download.h">
@@ -120,6 +126,9 @@
       <Filter>Header Files\utils</Filter>
     </ClInclude>
     <ClInclude Include="utils\HashUtils.h">
+      <Filter>Header Files\utils</Filter>
+    </ClInclude>
+    <ClInclude Include="utils\HttpServer.h">
       <Filter>Header Files\utils</Filter>
     </ClInclude>
   </ItemGroup>
@@ -202,6 +211,6 @@
     </Image>
   </ItemGroup>
   <ItemGroup>
-    <Manifest Include="resources\LastDM.manifest" />
+    <Manifest Include="resources\LDM.manifest" />
   </ItemGroup>
 </Project>

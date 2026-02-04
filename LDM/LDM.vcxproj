@@ -14,9 +14,9 @@
     <VCProjectVersion>17.0</VCProjectVersion>
     <Keyword>Win32Proj</Keyword>
     <ProjectGuid>{E106ACD7-4E53-4AEE-9425-3405C5E7F5F8}</ProjectGuid>
-    <RootNamespace>LastDM</RootNamespace>
+    <RootNamespace>LDM</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
-    <ProjectName>LastDM</ProjectName>
+    <ProjectName>LDM</ProjectName>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
@@ -109,6 +109,7 @@
     <ClCompile Include="ui\SchedulerDialog.cpp" />
     <ClCompile Include="ui\SpeedGraphPanel.cpp" />
     <ClCompile Include="utils\HashUtils.cpp" />
+    <ClCompile Include="utils\HttpServer.cpp" />
     <ClCompile Include="utils\Settings.cpp" />
     <ClCompile Include="utils\ThemeManager.cpp" />
   </ItemGroup>
@@ -124,6 +125,7 @@
     <ClInclude Include="ui\SchedulerDialog.h" />
     <ClInclude Include="ui\SpeedGraphPanel.h" />
     <ClInclude Include="utils\HashUtils.h" />
+    <ClInclude Include="utils\HttpServer.h" />
     <ClInclude Include="utils\Settings.h" />
     <ClInclude Include="utils\ThemeManager.h" />
   </ItemGroup>
@@ -160,7 +162,7 @@
     <Image Include="resources\LDM Github Readme.png" />
   </ItemGroup>
   <ItemGroup>
-    <Manifest Include="resources\LastDM.manifest" />
+    <Manifest Include="resources\LDM.manifest" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

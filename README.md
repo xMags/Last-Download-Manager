@@ -1,12 +1,12 @@
-# LastDM - Modern Download Manager
+# LDM - Modern Download Manager
 
 A modern, feature-rich download manager built with C++ and wxWidgets.
 
-![LastDM Banner](LastDM/resources/LDM%20Github%20Readme.png)
+![LDM Banner](LDM/resources/LDM%20Github%20Readme.png)
 
 ## Screenshot
 
-![LastDM Interface](LastDM/resources/Interface.png)
+![LDM Interface](LDM/resources/Interface.png)
 
 ## Features
 
@@ -20,6 +20,30 @@ A modern, feature-rich download manager built with C++ and wxWidgets.
 - **System Tray Integration** - Minimize to system tray with notification support
 - **Crash Recovery** - Periodic database saves ensure progress is preserved even after unexpected shutdowns
 - **Detailed Error Reporting** - Human-readable error messages for network failures
+- **Browser Integration** - Chrome/Edge/Firefox extension to intercept and send downloads to LDM
+
+## Browser Extension
+
+LDM includes a browser extension that automatically intercepts downloads and sends them to LDM for accelerated downloading.
+
+### Installation
+
+1. **Make sure LDM is running** - The extension communicates with LDM via a local HTTP server
+2. Open your browser's extensions page:
+   - **Chrome**: `chrome://extensions`
+   - **Edge**: `edge://extensions`
+   - **Brave**: `brave://extensions`
+3. Enable **Developer mode** (toggle in top-right corner)
+4. Click **Load unpacked**
+5. Select the `BrowserExtension` folder from your LDM installation
+
+### Features
+
+- **Auto-intercept**: Automatically catches browser downloads and sends them to LDM
+- **Context menu**: Right-click any link → "Download with LDM"
+- **Manual download**: Paste URLs directly in the extension popup
+- **Connection status**: Shows whether LDM is running
+- **Configurable**: Exclude certain file types from interception
 
 ## Requirements
 
@@ -41,21 +65,21 @@ This project uses **wxWidgets** for the UI and native Windows APIs (**WinINet**)
 
 ### Using Visual Studio
 
-1. Open `LastDM.sln` in Visual Studio 2022.
+1. Open `LDM.sln` in Visual Studio 2022.
 2. Select the **Debug** or **Release** configuration and **x64** platform.
 3. Build the solution (**Ctrl+Shift+B**).
 
 ## Project Structure
 
 ```
-LastDM-Download-Manager/
-├── LastDM.sln              # Visual Studio Solution
-├── LastDM/                 # Main project directory
+Last-Download-Manager/
+├── LDM.sln              # Visual Studio Solution
+├── LDM/                 # Main project directory
 │   ├── main.cpp            # Application entry point
 │   ├── core/               # Download engine (WinINet-based)
 │   │   ├── Download.cpp/h        # Download data model
 │   │   ├── DownloadEngine.cpp/h  # Network operations & retry logic
-│   │   └── DownloadManager.cpp/h # Queue management
+│   │   ├── DownloadManager.cpp/h # Queue management
 │   ├── ui/                 # User interface components (wxWidgets)
 │   │   ├── MainWindow.cpp/h      # Main application window
 │   │   ├── DownloadsTable.cpp/h  # Download list view
@@ -71,7 +95,7 @@ LastDM-Download-Manager/
 
 ### Retry Strategy
 
-LastDM implements a two-level retry system:
+LDM implements a two-level retry system:
 
 1. **Chunk-Level Retry** - Each download segment retries up to 3 times with 500ms base delay
 2. **Download-Level Retry** - The entire download retries up to 5 times with exponential backoff (2-32 seconds)

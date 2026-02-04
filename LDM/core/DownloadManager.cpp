@@ -554,7 +554,7 @@ void DownloadManager::CheckSchedule() {
 
       // Handle completion actions
       if (m_schedExit) {
-        wxExit();
+        wxTheApp->Exit();
       }
       // Todo: HangUp/Shutdown (require system calls)
     }

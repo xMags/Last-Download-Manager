@@ -1,12 +1,23 @@
 #include "MainWindow.h"
 #include "../core/DownloadManager.h"
+#include "../utils/HttpServer.h"
 #include "../utils/ThemeManager.h"
 #include "OptionsDialog.h"
 #include "SchedulerDialog.h"
 #include <wx/dnd.h>
+#include <wx/file.h>
+#include <wx/dir.h>
+#include <wx/utils.h>
 #include <wx/filename.h>
 #include <wx/msgdlg.h>
 #include <wx/stdpaths.h>
+#include <vector>
+
+#ifdef _WIN32
+#include <Windows.h>
+#endif
+
+
 
 // Drop target for URLs
 class URLDropTarget : public wxTextDropTarget {
@@ -51,24 +62,16 @@ wxBEGIN_EVENT_TABLE(MainWindow, wxFrame) EVT_MENU(
                                         wxID_ANY,
                                         MainWindow::OnCategorySelected)
                                         EVT_MENU(ID_VIEW_DARK_MODE,
-                                                 MainWindow::OnViewDarkMode)
-                                            EVT_ICONIZE(MainWindow::OnIconize)
-                                                EVT_CLOSE(MainWindow::OnClose)
-                                                    wxEND_EVENT_TABLE()
+                                                                                     MainWindow::OnViewDarkMode)
+                                                                                        EVT_MENU(ID_INSTALL_EXTENSION, MainWindow::OnInstallExtension)
+                                                                                        wxEND_EVENT_TABLE()
 
-    // Event table for system tray icon
-    wxBEGIN_EVENT_TABLE(LastDMTaskBarIcon, wxTaskBarIcon)
-        EVT_MENU(ID_TRAY_SHOW, LastDMTaskBarIcon::OnTrayShow)
-            EVT_MENU(ID_TRAY_EXIT, LastDMTaskBarIcon::OnTrayExit)
-                EVT_TASKBAR_LEFT_DCLICK(LastDMTaskBarIcon::OnLeftClick)
-                    wxEND_EVENT_TABLE()
-
-                        MainWindow::MainWindow()
-    : wxFrame(nullptr, wxID_ANY, "Last Download Manager v1.5.0", wxDefaultPosition,
-              wxSize(1050, 700)),
-      m_splitter(nullptr), m_categoriesPanel(nullptr),
-      m_downloadsTable(nullptr), m_toolbar(nullptr), m_statusBar(nullptr),
-      m_updateTimer(nullptr), m_taskBarIcon(nullptr) {
+                                                            MainWindow::MainWindow()
+                                        : wxFrame(nullptr, wxID_ANY, "Last Download Manager v1.6.0", wxDefaultPosition,
+                                                  wxSize(1050, 700)),
+                                          m_splitter(nullptr), m_categoriesPanel(nullptr),
+                                          m_downloadsTable(nullptr), m_toolbar(nullptr), m_statusBar(nullptr),
+                                          m_updateTimer(nullptr) {
   // Set drop target
   SetDropTarget(new URLDropTarget(this));
 
@@ -124,23 +127,35 @@ wxBEGIN_EVENT_TABLE(MainWindow, wxFrame) EVT_MENU(
   m_updateTimer = new wxTimer(this, ID_UPDATE_TIMER);
   m_updateTimer->Start(500);
 
+  // Start HTTP server for browser extension integration
+  HttpServer &httpServer = HttpServer::GetInstance();
+  httpServer.SetUrlCallback([this](const std::string &url) {
+    // Post to main thread via wxWidgets event mechanism
+    wxTheApp->CallAfter([this, url]() {
+      ProcessUrl(wxString::FromUTF8(url));
+    });
+  });
+  if (!httpServer.Start(45678)) {
+    // Non-fatal: log but don't show error (port might be in use)
+    wxLogDebug("Failed to start HTTP server on port 45678");
+  }
+
   // Center on screen
   Centre();
 }
 
 MainWindow::~MainWindow() {
-  // Stop timer first to prevent callbacks during destruction
+  // Clear callback first to prevent calls with dangling 'this'
+  HttpServer::GetInstance().SetUrlCallback(nullptr);
+  
+  // Stop HTTP server and wait for threads
+  HttpServer::GetInstance().Stop();
+
+  // Stop timer to prevent callbacks during destruction
   if (m_updateTimer) {
     m_updateTimer->Stop();
     delete m_updateTimer;
     m_updateTimer = nullptr;
-  }
-  
-  // Clean up tray icon
-  if (m_taskBarIcon) {
-    m_taskBarIcon->RemoveIcon();
-    delete m_taskBarIcon;
-    m_taskBarIcon = nullptr;
   }
 }
 
@@ -195,6 +210,9 @@ void MainWindow::CreateMenuBar() {
 
   // Help menu
   m_helpMenu = new wxMenu();
+  m_helpMenu->Append(ID_INSTALL_EXTENSION, "Install &Chrome Integration...",
+                     "Install or repair the Chrome extension integration");
+  m_helpMenu->AppendSeparator();
   m_helpMenu->Append(wxID_ABOUT, "&About...", "About Last Download Manager");
   m_menuBar->Append(m_helpMenu, "&Help");
 
@@ -326,7 +344,7 @@ void MainWindow::CreateMainContent() {
 void MainWindow::OnExit(wxCommandEvent &event) { Close(true); }
 
 void MainWindow::OnAbout(wxCommandEvent &event) {
-  wxMessageBox("Last Download Manager\n\n"
+  wxMessageBox("LDM\n\n"
                "Version 1.0\n\n"
                "A powerful download manager built with wxWidgets, WinINet, and "
                "XML storage.\n\n"
@@ -335,7 +353,7 @@ void MainWindow::OnAbout(wxCommandEvent &event) {
                "- Pause/Resume support\n"
                "- Automatic file categorization\n"
                "- Download scheduling",
-               "About Last Download Manager", wxOK | wxICON_INFORMATION, this);
+               "About LDM", wxOK | wxICON_INFORMATION, this);
 }
 
 void MainWindow::OnAddUrl(wxCommandEvent &event) {
@@ -541,83 +559,73 @@ void MainWindow::OnUpdateTimer(wxTimerEvent &event) {
   }
 }
 
-// System tray handlers
-void MainWindow::OnIconize(wxIconizeEvent &event) {
-  if (event.IsIconized()) {
-    // Minimize to system tray
-    m_minimizedToTray = true;
-    Hide();
-
-    // Create tray icon if not already created
-    if (!m_taskBarIcon) {
-      m_taskBarIcon = new LastDMTaskBarIcon(this);
-      wxIcon trayIcon;
-      wxString exePath = wxStandardPaths::Get().GetExecutablePath();
-
-      // Try ./resources first
-      wxFileName iconPath(exePath);
-      iconPath.SetFullName("app_icon.ico");
-      iconPath.AppendDir("resources");
-      iconPath.Normalize(wxPATH_NORM_DOTS | wxPATH_NORM_ABSOLUTE | wxPATH_NORM_TILDE);
-
-      if (!wxFileExists(iconPath.GetFullPath())) {
-        // Try ../resources
-        iconPath = wxFileName(exePath);
-        iconPath.SetFullName("app_icon.ico");
-        iconPath.AppendDir("..");
-        iconPath.AppendDir("resources");
-        iconPath.Normalize(wxPATH_NORM_DOTS | wxPATH_NORM_ABSOLUTE | wxPATH_NORM_TILDE);
+void MainWindow::OnInstallExtension(wxCommandEvent &event) {
+  // Get current executable path
+  wxString exePath = wxStandardPaths::Get().GetExecutablePath();
+  wxFileName exeFileName(exePath);
+  wxString exeDir = exeFileName.GetPath();
+  
+  // Find BrowserExtension folder
+  wxString extPath = exeDir + "\\BrowserExtension";
+  if (!wxDirExists(extPath)) {
+      extPath = exeDir + "\\..\\BrowserExtension";
+      if (!wxDirExists(extPath)) {
+           extPath = exeDir + "\\..\\..\\BrowserExtension";
       }
-      if (wxFileExists(iconPath.GetFullPath())) {
-        trayIcon.LoadFile(iconPath.GetFullPath(), wxBITMAP_TYPE_ICO);
-      }
-      if (!trayIcon.IsOk()) {
-        trayIcon = wxArtProvider::GetIcon(wxART_EXECUTABLE_FILE);
-      }
-      m_taskBarIcon->SetIcon(trayIcon, "Last Download Manager");
-    }
-  }
-  event.Skip();
-}
-
-void MainWindow::OnClose(wxCloseEvent &event) {
-  // Stop timer first to prevent callbacks during destruction
-  if (m_updateTimer) {
-    m_updateTimer->Stop();
   }
   
-  // Clean up tray icon before closing
-  if (m_taskBarIcon) {
-    m_taskBarIcon->RemoveIcon();
-    delete m_taskBarIcon;
-    m_taskBarIcon = nullptr;
+  if (!wxDirExists(extPath)) {
+      extPath = exeDir + "\\..\\..\\..\\BrowserExtension";
   }
-  event.Skip();
+  
+  // Normalize the path for display
+  wxFileName extFileName(extPath);
+  extFileName.Normalize(wxPATH_NORM_DOTS | wxPATH_NORM_ABSOLUTE);
+  extPath = extFileName.GetFullPath();
+  
+  // Check if LDM's HTTP server is running
+  HttpServer &server = HttpServer::GetInstance();
+  wxString serverStatus = server.IsRunning() 
+      ? wxString::Format("HTTP server running on port %d", server.GetPort())
+      : "HTTP server not started (will start on next launch)";
+  
+  wxString message = wxString::Format(
+      "Browser Extension Installation\n\n"
+      "The new LDM browser extension uses HTTP communication - no registry setup needed!\n\n"
+      "To install:\n"
+      "1. Open Chrome/Edge Extensions page (chrome://extensions or edge://extensions)\n"
+      "2. Enable 'Developer mode' (toggle in top-right)\n"
+      "3. Click 'Load unpacked'\n"
+      "4. Select this folder:\n   %s\n\n"
+      "That's it! The extension will automatically connect to LDM when it's running.\n\n"
+      "Status: %s",
+      extPath, serverStatus);
+  
+  wxMessageBox(message, "Install Browser Extension", wxOK | wxICON_INFORMATION, this);
 }
 
-void MainWindow::ShowFromTray() {
-  Show(true);
-  Iconize(false);
-  Raise();
-  m_minimizedToTray = false;
-}
-
-void MainWindow::ShowNotification(const wxString &title,
-                                  const wxString &message) {
-  if (m_taskBarIcon && m_minimizedToTray) {
-    m_taskBarIcon->ShowBalloon(title, message, 3000, wxICON_INFORMATION);
+#ifdef _WIN32
+WXLRESULT MainWindow::MSWWindowProc(WXUINT nMsg, WXWPARAM wParam, WXLPARAM lParam) {
+  if (nMsg == WM_COPYDATA) {
+    COPYDATASTRUCT *pCDS = (COPYDATASTRUCT *)lParam;
+    if (pCDS->dwData == 1) { // 1 = URL data
+      const char *url = (const char *)pCDS->lpData;
+      if (url) {
+        wxString urlStr = wxString::FromUTF8(url);
+        // We need to process this on the main thread, but we are already on it.
+        // However, bringing the window to front is important.
+        if (IsIconized()) {
+            Restore();
+        }
+        Show(true);
+        Raise();
+        RequestUserAttention();
+        
+        ProcessUrl(urlStr);
+        return 0; // Handled
+      }
+    }
   }
+  return wxFrame::MSWWindowProc(nMsg, wParam, lParam);
 }
-
-// LastDMTaskBarIcon implementations
-void LastDMTaskBarIcon::OnTrayShow(wxCommandEvent &event) {
-  m_parent->ShowFromTray();
-}
-
-void LastDMTaskBarIcon::OnTrayExit(wxCommandEvent &event) {
-  m_parent->Close(true);
-}
-
-void LastDMTaskBarIcon::OnLeftClick(wxTaskBarIconEvent &event) {
-  m_parent->ShowFromTray();
-}
+#endif

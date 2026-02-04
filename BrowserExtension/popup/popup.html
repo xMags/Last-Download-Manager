@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>LDM</title>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; width: 220px; padding: 10px; margin: 0; background-color: #fff; color: #333; }
+        .header { display: flex; align-items: center; margin-bottom: 10px; border-bottom: 1px solid #eee; padding-bottom: 8px; }
+        .header img { width: 24px; height: 24px; margin-right: 8px; }
+        .header h3 { margin: 0; font-size: 16px; font-weight: 600; flex: 1; }
+        
+        .connection-status { display: flex; align-items: center; font-size: 11px; padding: 4px 8px; border-radius: 12px; }
+        .connection-status.connected { background: #e6f4ea; color: #137333; }
+        .connection-status.disconnected { background: #fce8e6; color: #c5221f; }
+        .status-dot { width: 6px; height: 6px; border-radius: 50%; margin-right: 4px; }
+        .connected .status-dot { background: #137333; }
+        .disconnected .status-dot { background: #c5221f; }
+        
+        .control-group { margin-bottom: 15px; }
+        
+        /* Toggle Switch */
+        .switch-container { display: flex; align-items: center; justify-content: space-between; cursor: pointer; }
+        .switch-label { font-size: 14px; }
+        
+        .switch { position: relative; display: inline-block; width: 34px; height: 20px; }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; border-radius: 20px; }
+        .slider:before { position: absolute; content: ""; height: 16px; width: 16px; left: 2px; bottom: 2px; background-color: white; transition: .4s; border-radius: 50%; }
+        input:checked + .slider { background-color: #0078d7; }
+        input:checked + .slider:before { transform: translateX(14px); }
+        
+        /* Manual Download */
+        input[type="text"] { width: 100%; padding: 8px; margin-bottom: 8px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; font-size: 13px; }
+        button { width: 100%; padding: 8px; background-color: #0078d7; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 500; transition: background-color 0.2s; }
+        button:hover { background-color: #0063b1; }
+        button:disabled { background-color: #ccc; cursor: not-allowed; }
+        
+        .footer { margin-top: 15px; font-size: 11px; text-align: center; color: #888; border-top: 1px solid #eee; padding-top: 8px; }
+        .footer a { color: #0078d7; text-decoration: none; cursor: pointer; }
+        .footer a:hover { text-decoration: underline; }
+        
+        #status { text-align: center; margin-top: 5px; font-size: 12px; height: 16px; opacity: 0; transition: opacity 0.3s; }
+        
+        /* Offline notice */
+        .offline-notice { display: none; background: #fff3cd; border: 1px solid #ffc107; border-radius: 6px; padding: 10px; margin-bottom: 12px; text-align: center; }
+        .offline-notice.show { display: block; }
+        .offline-notice p { margin: 0 0 8px 0; font-size: 12px; color: #856404; }
+        .offline-notice a { display: inline-block; background: #0078d7; color: white; padding: 6px 12px; border-radius: 4px; text-decoration: none; font-size: 12px; font-weight: 500; }
+        .offline-notice a:hover { background: #0063b1; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <img src="../icon.png" alt="Icon">
+        <h3>LDM</h3>
+        <div id="connectionStatus" class="connection-status disconnected">
+            <span class="status-dot"></span>
+            <span id="connectionText">Checking...</span>
+        </div>
+    </div>
+
+    <div id="offlineNotice" class="offline-notice">
+        <p>LDM is not running. Start LDM or download it:</p>
+        <a href="https://github.com/MrDevFX/Last-Download-Manager/releases" target="_blank">Download LDM</a>
+    </div>
+
+    <div class="control-group">
+        <div class="switch-container" id="toggleContainer">
+            <span class="switch-label">Intercept Downloads</span>
+            <label class="switch">
+                <input type="checkbox" id="interceptToggle">
+                <span class="slider"></span>
+            </label>
+        </div>
+    </div>
+
+    <div class="control-group">
+        <input type="text" id="manualUrl" placeholder="Paste URL here...">
+        <button id="downloadBtn">Download with LDM</button>
+    </div>
+    
+    <div id="status"></div>
+
+    <div class="footer">
+        <a id="openOptions">More Options</a>
+    </div>
+
+    <script src="popup.js"></script>
+</body>
+</html>
