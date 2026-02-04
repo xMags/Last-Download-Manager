@@ -54,6 +54,12 @@ void DownloadsTable::CreateColumns() {
 }
 
 void DownloadsTable::AddDownload(std::shared_ptr<Download> download) {
+  // Check if download already exists to prevent duplicates
+  for (const auto& existing : m_downloads) {
+    if (existing->GetId() == download->GetId()) {
+      return;
+    }
+  }
   m_downloads.push_back(download);
 
   // Re-apply filter to show the new download if it matches current filter

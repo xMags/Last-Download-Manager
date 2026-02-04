@@ -55,7 +55,7 @@ bool DatabaseManager::LoadDatabase() {
   m_data.settings.clear();
 
   wxXmlNode *root = doc.GetRoot();
-  if (!root || root->GetName() != "LastDM")
+  if (!root || root->GetName() != "LDM")
     return false;
 
   // Safe parsing helpers to avoid crashes on corrupted XML
@@ -177,7 +177,7 @@ bool DatabaseManager::LoadDatabase() {
 
 bool DatabaseManager::SaveDatabase() {
   wxXmlDocument doc;
-  wxXmlNode *root = new wxXmlNode(NULL, wxXML_ELEMENT_NODE, "LastDM");
+  wxXmlNode *root = new wxXmlNode(NULL, wxXML_ELEMENT_NODE, "LDM");
   doc.SetRoot(root);
 
   // Downloads

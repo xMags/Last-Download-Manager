@@ -31,13 +31,13 @@ BEGIN
     BEGIN
         BLOCK "040904b0"
         BEGIN
-            VALUE "CompanyName", "Last Download Manager"
-            VALUE "FileDescription", "Last Download Manager"
+            VALUE "CompanyName", "LDM"
+            VALUE "FileDescription", "LDM"
             VALUE "FileVersion", "1.0.0.0"
-            VALUE "InternalName", "LastDM"
+            VALUE "InternalName", "LDM"
             VALUE "LegalCopyright", "Copyright (C) 2026"
-            VALUE "OriginalFilename", "LastDM.exe"
-            VALUE "ProductName", "Last Download Manager"
+            VALUE "OriginalFilename", "LDM.exe"
+            VALUE "ProductName", "LDM"
             VALUE "ProductVersion", "1.0.0.0"
         END
     END

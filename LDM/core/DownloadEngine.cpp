@@ -28,7 +28,17 @@ static std::string GetWinINetError(DWORD errorCode) {
   DWORD len = sizeof(buffer);
   
   if (InternetGetLastResponseInfoA(&errorCode, buffer, &len) && len > 0) {
-    return std::string(buffer, len);
+    // Truncate at first newline if present
+    char* newline = strchr(buffer, '\n');
+    if (newline) *newline = '\0';
+    // Trim carriage return if present
+    char* cr = strchr(buffer, '\r');
+    if (cr) *cr = '\0';
+    
+    // Sometimes response info is empty even if function succeeds
+    if (strlen(buffer) > 0) {
+        return std::string(buffer);
+    }
   }
   
   // Fallback to common error descriptions
@@ -44,6 +54,24 @@ static std::string GetWinINetError(DWORD errorCode) {
     case ERROR_INTERNET_INVALID_URL: return "Invalid URL";
     case ERROR_INTERNET_SEC_CERT_DATE_INVALID: return "SSL certificate date invalid";
     case ERROR_INTERNET_SEC_CERT_CN_INVALID: return "SSL certificate name mismatch";
+    case ERROR_INTERNET_HTTP_TO_HTTPS_ON_REDIR: return "Redirected HTTP to HTTPS";
+    case ERROR_INTERNET_HTTPS_TO_HTTP_ON_REDIR: return "Redirected HTTPS to HTTP";
+    case ERROR_INTERNET_INCORRECT_HANDLE_TYPE: return "Incorrect handle type";
+    case ERROR_INTERNET_LOGIN_FAILURE: return "Login failure";
+    case ERROR_INTERNET_INVALID_OPERATION: return "Invalid operation";
+    // case ERROR_INTERNET_OPERATION_IN_PROGRESS: return "Operation in progress"; // Not defined in all SDKs
+    case ERROR_INTERNET_INCORRECT_PASSWORD: return "Incorrect password";
+    case ERROR_HTTP_HEADER_NOT_FOUND: return "HTTP header not found";
+    case ERROR_HTTP_DOWNLEVEL_SERVER: return "HTTP downlevel server";
+    case ERROR_HTTP_INVALID_SERVER_RESPONSE: return "Invalid server response";
+    case ERROR_HTTP_INVALID_HEADER: return "Invalid HTTP header";
+    case ERROR_HTTP_INVALID_QUERY_REQUEST: return "Invalid HTTP query request";
+    case ERROR_HTTP_HEADER_ALREADY_EXISTS: return "HTTP header already exists";
+    case ERROR_HTTP_REDIRECT_FAILED: return "HTTP redirect failed";
+    case ERROR_HTTP_NOT_REDIRECTED: return "HTTP not redirected";
+    case ERROR_HTTP_COOKIE_NEEDS_CONFIRMATION: return "Cookie needs confirmation";
+    case ERROR_HTTP_COOKIE_DECLINED: return "Cookie declined";
+    case ERROR_HTTP_REDIRECT_NEEDS_CONFIRMATION: return "Redirect needs confirmation";
     default: return "Error code: " + std::to_string(errorCode);
   }
 }

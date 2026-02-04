@@ -75,7 +75,7 @@ void SchedulerDialog::InitUI() {
   wxStaticBoxSizer *actionSizer =
       new wxStaticBoxSizer(wxVERTICAL, this, "On Completion");
   m_chkHangUp = new wxCheckBox(this, wxID_ANY, "Hang up modem when done");
-  m_chkExit = new wxCheckBox(this, wxID_ANY, "Exit LastDM when done");
+  m_chkExit = new wxCheckBox(this, wxID_ANY, "Exit LDM when done");
   m_chkShutdown = new wxCheckBox(this, wxID_ANY, "Turn off computer when done");
 
   actionSizer->Add(m_chkHangUp, 0, wxALL, 5);
