@@ -1,25 +1,69 @@
 {
   "name": "LDM - Download Manager Integration",
   "description": "Intercept browser downloads and send them to LDM for accelerated multi-segment downloading.",
-  "version": "2.0",
+  "version": "3.0",
   "manifest_version": 3,
   "permissions": [
     "downloads",
     "contextMenus",
-    "storage"
+    "storage",
+    "notifications",
+    "activeTab",
+    "scripting"
   ],
   "host_permissions": [
-    "http://127.0.0.1:45678/*"
+    "http://127.0.0.1:45678/*",
+    "<all_urls>"
   ],
   "options_page": "options/options.html",
   "background": {
     "service_worker": "background.js"
   },
   "action": {
-    "default_title": "LDM - Download Manager",
-    "default_popup": "popup/popup.html"
+    "default_title": "Last Download Manager",
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
   },
   "icons": {
-    "48": "icon.png"
-  }
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "commands": {
+    "download-current": {
+      "suggested_key": {
+        "default": "Alt+D",
+        "windows": "Alt+D",
+        "mac": "Alt+D"
+      },
+      "description": "Download current page link with LDM"
+    },
+    "grab-all-links": {
+      "suggested_key": {
+        "default": "Alt+G",
+        "windows": "Alt+G",
+        "mac": "Alt+G"
+      },
+      "description": "Grab all download links from page"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_end"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["sounds/*.mp3", "icons/*.png"],
+      "matches": ["<all_urls>"]
+    }
+  ]
 }

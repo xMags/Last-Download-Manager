@@ -100,6 +100,7 @@
     <ClCompile Include="core\Download.cpp" />
     <ClCompile Include="core\DownloadEngine.cpp" />
     <ClCompile Include="core\DownloadManager.cpp" />
+    <ClCompile Include="core\YtDlpManager.cpp" />
     <ClCompile Include="database\DatabaseManager.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="ui\CategoriesPanel.cpp" />
@@ -108,6 +109,7 @@
     <ClCompile Include="ui\OptionsDialog.cpp" />
     <ClCompile Include="ui\SchedulerDialog.cpp" />
     <ClCompile Include="ui\SpeedGraphPanel.cpp" />
+    <ClCompile Include="ui\VideoQualityDialog.cpp" />
     <ClCompile Include="utils\HashUtils.cpp" />
     <ClCompile Include="utils\HttpServer.cpp" />
     <ClCompile Include="utils\Settings.cpp" />
@@ -117,6 +119,7 @@
     <ClInclude Include="core\Download.h" />
     <ClInclude Include="core\DownloadEngine.h" />
     <ClInclude Include="core\DownloadManager.h" />
+    <ClInclude Include="core\YtDlpManager.h" />
     <ClInclude Include="database\DatabaseManager.h" />
     <ClInclude Include="ui\CategoriesPanel.h" />
     <ClInclude Include="ui\DownloadsTable.h" />
@@ -124,6 +127,7 @@
     <ClInclude Include="ui\OptionsDialog.h" />
     <ClInclude Include="ui\SchedulerDialog.h" />
     <ClInclude Include="ui\SpeedGraphPanel.h" />
+    <ClInclude Include="ui\VideoQualityDialog.h" />
     <ClInclude Include="utils\HashUtils.h" />
     <ClInclude Include="utils\HttpServer.h" />
     <ClInclude Include="utils\Settings.h" />

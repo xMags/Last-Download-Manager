@@ -13,11 +13,36 @@ wxBEGIN_EVENT_TABLE(SchedulerDialog, wxDialog)
     : wxDialog(parent, wxID_ANY, "Scheduler", wxDefaultPosition,
                wxSize(450, 400)) {
   InitUI();
+  LoadCurrentSettings();
 
   // Apply current theme
   ThemeManager::GetInstance().ApplyTheme(this);
 
   CenterOnParent();
+}
+
+void SchedulerDialog::LoadCurrentSettings() {
+  DownloadManager &manager = DownloadManager::GetInstance();
+
+  m_chkStartTime->SetValue(manager.IsScheduleStartEnabled());
+  m_chkStopTime->SetValue(manager.IsScheduleStopEnabled());
+
+  wxDateTime startTime = manager.GetScheduleStartTime();
+  if (startTime.IsValid()) {
+    m_datePickerStart->SetValue(startTime);
+    m_timePickerStart->SetValue(startTime);
+  }
+
+  wxDateTime stopTime = manager.GetScheduleStopTime();
+  if (stopTime.IsValid()) {
+    m_datePickerStop->SetValue(stopTime);
+    m_timePickerStop->SetValue(stopTime);
+  }
+
+  m_spinMaxDownloads->SetValue(manager.GetMaxSimultaneousDownloads());
+  m_chkHangUp->SetValue(manager.IsScheduleHangUp());
+  m_chkExit->SetValue(manager.IsScheduleExit());
+  m_chkShutdown->SetValue(manager.IsScheduleShutdown());
 }
 
 void SchedulerDialog::InitUI() {
@@ -74,9 +99,9 @@ void SchedulerDialog::InitUI() {
   // --- Completion Actions ---
   wxStaticBoxSizer *actionSizer =
       new wxStaticBoxSizer(wxVERTICAL, this, "On Completion");
-  m_chkHangUp = new wxCheckBox(this, wxID_ANY, "Hang up modem when done");
+  m_chkHangUp = new wxCheckBox(this, wxID_ANY, "Disconnect network when done");
   m_chkExit = new wxCheckBox(this, wxID_ANY, "Exit LDM when done");
-  m_chkShutdown = new wxCheckBox(this, wxID_ANY, "Turn off computer when done");
+  m_chkShutdown = new wxCheckBox(this, wxID_ANY, "Shut down computer when done");
 
   actionSizer->Add(m_chkHangUp, 0, wxALL, 5);
   actionSizer->Add(m_chkExit, 0, wxALL, 5);
@@ -135,20 +160,35 @@ bool SchedulerDialog::ShouldShutdownWhenDone() const {
 }
 
 void SchedulerDialog::OnOK(wxCommandEvent &event) {
-  // TODO: Save settings to SettingsManager or Apply directly
+  // Apply settings to DownloadManager
+  DownloadManager &manager = DownloadManager::GetInstance();
+  manager.SetSchedule(
+      IsStartTimeEnabled(), GetStartTime(),
+      IsStopTimeEnabled(), GetStopTime(),
+      GetMaxConcurrentDownloads(), ShouldHangUpWhenDone(),
+      ShouldExitWhenDone(), ShouldShutdownWhenDone());
+  
   EndModal(wxID_OK);
 }
 
 void SchedulerDialog::OnCancel(wxCommandEvent &event) { EndModal(wxID_CANCEL); }
 
 void SchedulerDialog::OnApply(wxCommandEvent &event) {
-  // TODO: Apply settings without closing
+  // Apply settings without closing
+  DownloadManager &manager = DownloadManager::GetInstance();
+  manager.SetSchedule(
+      IsStartTimeEnabled(), GetStartTime(),
+      IsStopTimeEnabled(), GetStopTime(),
+      GetMaxConcurrentDownloads(), ShouldHangUpWhenDone(),
+      ShouldExitWhenDone(), ShouldShutdownWhenDone());
 }
 
 void SchedulerDialog::OnStartNow(wxCommandEvent &event) {
   // Start queue immediately
+  DownloadManager::GetInstance().StartQueue();
 }
 
 void SchedulerDialog::OnStopNow(wxCommandEvent &event) {
   // Stop queue immediately
+  DownloadManager::GetInstance().StopQueue();
 }

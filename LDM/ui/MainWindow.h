@@ -9,6 +9,9 @@
 #include <wx/timer.h>
 #include <wx/toolbar.h>
 #include <wx/wx.h>
+#include <atomic>
+#include <thread>
+#include <mutex>
 
 // Forward declaration for system tray
 class LDMTaskBarIcon;
@@ -19,8 +22,8 @@ public:
   MainWindow();
   ~MainWindow();
 
-  // Helper to process URL (used by DnD)
-  void ProcessUrl(const wxString &url);
+  // Helper to process URL (used by DnD and browser extension)
+  void ProcessUrl(const wxString &url, const wxString &referer = wxEmptyString);
 
 private:
   // UI Components
@@ -39,6 +42,12 @@ private:
   
   // Periodic database save counter (every 60 ticks = 30 seconds at 500ms interval)
   int m_dbSaveCounter = 0;
+
+  // Background save thread management
+  std::atomic<bool> m_dbSaveInProgress{false};
+  std::atomic<bool> m_shuttingDown{false};
+  std::thread m_dbSaveThread;
+  std::mutex m_dbSaveThreadMutex;
 
   // Menu bar
   wxMenuBar *m_menuBar;
@@ -71,6 +80,7 @@ private:
   void OnCategorySelected(wxTreeEvent &event);
   void OnUpdateTimer(wxTimerEvent &event);
   void OnInstallExtension(wxCommandEvent &event);
+  void OnGrabber(wxCommandEvent &event);
 
   // System tray handlers
   void OnIconize(wxIconizeEvent &event);

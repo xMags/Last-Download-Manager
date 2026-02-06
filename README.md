@@ -10,17 +10,32 @@ A modern, feature-rich download manager built with C++ and wxWidgets.
 
 ## Features
 
+### Core Download Engine
 - **Multi-Segment Downloads** - Accelerated downloading with parallel connections using WinINet
 - **Auto-Retry & Resume** - Automatic retry on network failures with exponential backoff; interrupted downloads resume from where they left off
+- **Checksum Verification** - MD5 and SHA256 hash verification for downloaded files
+- **Crash Recovery** - Periodic database saves ensure progress is preserved even after unexpected shutdowns
+
+### Video Site Support
+- **yt-dlp Integration** - Download videos from YouTube, Vimeo, and 1000+ supported sites
+- **Automatic Tool Management** - Auto-downloads yt-dlp, ffmpeg, and Deno runtime as needed
+- **Video Quality Selection** - Choose your preferred resolution and format before downloading
+- **Protected Video Support** - Referer header propagation for CDN-authenticated video streams
+
+### User Interface
 - **Real-time Speed Graph** - Visual download speed monitoring with gradient visualization
 - **Category Management** - Automatic file categorization (Documents, Videos, Music, Images, Programs, Compressed)
 - **Scheduler** - Schedule downloads to start/stop at specific times
-- **Checksum Verification** - MD5 and SHA256 hash verification for downloaded files
 - **Modern UI** - Clean interface with Dark Mode support
 - **System Tray Integration** - Minimize to system tray with notification support
-- **Crash Recovery** - Periodic database saves ensure progress is preserved even after unexpected shutdowns
 - **Detailed Error Reporting** - Human-readable error messages for network failures
-- **Browser Integration** - Chrome/Edge/Firefox extension to intercept and send downloads to LDM
+
+### Browser Integration
+- **Chrome/Edge/Firefox Extension** - Seamlessly intercept and send downloads to LDM
+- **Context Menu Integration** - Right-click any link, image, or video to download
+- **Batch Downloads** - Download all links or media from a page with one click
+- **Video Detection** - Automatic detection of video elements on web pages
+- **Protected Downloads** - Passes referer headers for sites requiring authentication
 
 ## Browser Extension
 
@@ -33,17 +48,21 @@ LDM includes a browser extension that automatically intercepts downloads and sen
    - **Chrome**: `chrome://extensions`
    - **Edge**: `edge://extensions`
    - **Brave**: `brave://extensions`
+   - **Firefox**: `about:debugging#/runtime/this-firefox`
 3. Enable **Developer mode** (toggle in top-right corner)
-4. Click **Load unpacked**
+4. Click **Load unpacked** (Chrome/Edge) or **Load Temporary Add-on** (Firefox)
 5. Select the `BrowserExtension` folder from your LDM installation
 
-### Features
+### Extension Features
 
-- **Auto-intercept**: Automatically catches browser downloads and sends them to LDM
-- **Context menu**: Right-click any link → "Download with LDM"
-- **Manual download**: Paste URLs directly in the extension popup
-- **Connection status**: Shows whether LDM is running
-- **Configurable**: Exclude certain file types from interception
+- **Auto-intercept** - Automatically catches browser downloads and sends them to LDM
+- **Context Menu** - Right-click any link → "Download with LDM"
+- **Video Tab** - Scan pages for video elements and download with quality selection
+- **Batch Downloads** - "Download All Links" and "Download All Media" options
+- **Manual Download** - Paste URLs directly in the extension popup
+- **Connection Status** - Real-time indicator showing LDM connection state
+- **Keyboard Shortcuts** - Configurable hotkeys for quick actions
+- **Configurable Filters** - Exclude file types, domains, or minimum file sizes
 
 ## Requirements
 
@@ -54,6 +73,15 @@ LDM includes a browser extension that automatically intercepts downloads and sen
 ## Dependencies
 
 This project uses **wxWidgets** for the UI and native Windows APIs (**WinINet**) for networking. No external libcurl dependency is required.
+
+### Video Download Dependencies (Auto-managed)
+
+LDM automatically downloads and manages these tools when needed:
+- **yt-dlp** - Video extraction and downloading
+- **ffmpeg** - Audio/video processing and merging
+- **Deno** - JavaScript runtime for certain extractors (YouTube)
+
+Tools are stored in `%APPDATA%\LDM\tools\` and updated automatically.
 
 ### Setting up wxWidgets
 
@@ -69,26 +97,40 @@ This project uses **wxWidgets** for the UI and native Windows APIs (**WinINet**)
 2. Select the **Debug** or **Release** configuration and **x64** platform.
 3. Build the solution (**Ctrl+Shift+B**).
 
+### Debug Mode
+
+To enable debug console output:
+- Run with `--debug` command line flag, or
+- Create an empty `debug.txt` file in the application directory
+
 ## Project Structure
 
 ```
 Last-Download-Manager/
-├── LDM.sln              # Visual Studio Solution
-├── LDM/                 # Main project directory
-│   ├── main.cpp            # Application entry point
-│   ├── core/               # Download engine (WinINet-based)
-│   │   ├── Download.cpp/h        # Download data model
-│   │   ├── DownloadEngine.cpp/h  # Network operations & retry logic
-│   │   ├── DownloadManager.cpp/h # Queue management
-│   ├── ui/                 # User interface components (wxWidgets)
-│   │   ├── MainWindow.cpp/h      # Main application window
-│   │   ├── DownloadsTable.cpp/h  # Download list view
-│   │   ├── CategoriesPanel.cpp/h # Category sidebar
-│   │   └── SpeedGraphPanel.cpp/h # Speed visualization
-│   ├── database/           # SQLite-based data persistence
-│   ├── utils/              # Utilities (settings, themes, hash)
-│   └── resources/          # Icons, manifests, and assets
-└── bin/                    # Compiled binaries output
+├── LDM.sln                  # Visual Studio Solution
+├── BrowserExtension/        # Chrome/Firefox extension
+│   ├── manifest.json            # Extension manifest (v3)
+│   ├── background.js            # Service worker
+│   ├── content.js               # Content script for video detection
+│   ├── popup/                   # Extension popup UI
+│   └── options/                 # Extension settings page
+├── LDM/                     # Main application
+│   ├── main.cpp                 # Application entry point
+│   ├── core/                    # Download engine
+│   │   ├── Download.cpp/h           # Download data model
+│   │   ├── DownloadEngine.cpp/h     # Network operations & retry logic
+│   │   ├── DownloadManager.cpp/h    # Queue management
+│   │   └── YtDlpManager.cpp/h       # Video site integration
+│   ├── ui/                      # User interface (wxWidgets)
+│   │   ├── MainWindow.cpp/h         # Main application window
+│   │   ├── DownloadsTable.cpp/h     # Download list view
+│   │   ├── CategoriesPanel.cpp/h    # Category sidebar
+│   │   ├── VideoQualityDialog.cpp/h # Quality selection dialog
+│   │   └── SpeedGraphPanel.cpp/h    # Speed visualization
+│   ├── database/                # XML-based data persistence
+│   ├── utils/                   # Utilities (settings, themes, HTTP server)
+│   └── resources/               # Icons, manifests, and assets
+└── bin/                         # Compiled binaries output
 ```
 
 ## Technical Details
@@ -105,12 +147,21 @@ LDM implements a two-level retry system:
 - Part files (`.part0`, `.part1`, etc.) are preserved on failure
 - Downloads can be resumed manually even after all automatic retries are exhausted
 - Content-Range headers are validated to prevent data corruption
+- Existing file size is checked on application restart for accurate resume
 
 ### Thread Safety
 
 - Atomic operations for status, sizes, and speed values
 - Mutex protection for metadata, chunks, and database operations
 - RAII-style session management for WinINet handles
+- Tracked async tasks with proper lifecycle management
+
+### Browser Extension Communication
+
+- Local HTTP server on port 45678
+- Token-based authentication for security
+- JSON API for download requests and status queries
+- Referer header propagation for protected content
 
 ## License
 

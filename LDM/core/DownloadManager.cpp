@@ -1,10 +1,13 @@
 #include "DownloadManager.h"
+#include "YtDlpManager.h"
 #include "../database/DatabaseManager.h"
 #include "../utils/Settings.h"
 #include <KnownFolders.h>
 #include <Shlobj.h>
 #include <algorithm>
 #include <iostream>
+#include <sstream>
+#include <unordered_set>
 #include <wx/app.h>
 #include <wx/msgdlg.h>
 
@@ -19,7 +22,118 @@ static bool IsValidUrl(const std::string &url) {
     return false;
   }
 
+  // Reject blob: and data: URLs (sometimes passed with http prefix stripped incorrectly)
+  if (url.find("blob:") != std::string::npos ||
+      url.find("data:") != std::string::npos) {
+    return false;
+  }
+
+  // Reject streaming manifest URLs
+  if (url.find(".m3u8") != std::string::npos ||
+      url.find(".mpd") != std::string::npos) {
+    return false;
+  }
+
+  // Check URL length (WinINet has limits)
+  if (url.length() > 2048) {
+    return false;
+  }
+
+  // Find the host part - must exist after protocol
+  size_t protocolEnd = url.find("://");
+  if (protocolEnd == std::string::npos || protocolEnd + 3 >= url.length()) {
+    return false;
+  }
+
+  // Check for a valid host (must have at least one character before / or end)
+  size_t hostStart = protocolEnd + 3;
+  size_t hostEnd = url.find('/', hostStart);
+  if (hostEnd == std::string::npos) {
+    hostEnd = url.length();
+  }
+
+  std::string host = url.substr(hostStart, hostEnd - hostStart);
+
+  // Remove port if present
+  size_t portPos = host.find(':');
+  if (portPos != std::string::npos) {
+    host = host.substr(0, portPos);
+  }
+
+  // Host must not be empty
+  if (host.empty()) {
+    return false;
+  }
+
+  // Host must contain at least one dot (except localhost)
+  if (host != "localhost" && host != "127.0.0.1" && host.find('.') == std::string::npos) {
+    return false;
+  }
+
   return true;
+}
+
+static std::unordered_set<std::string> ParseExtensions(const std::string &csv) {
+  std::unordered_set<std::string> result;
+  std::istringstream stream(csv);
+  std::string item;
+  while (std::getline(stream, item, ',')) {
+    size_t start = item.find_first_not_of(" \t\r\n");
+    size_t end = item.find_last_not_of(" \t\r\n");
+    if (start == std::string::npos) {
+      continue;
+    }
+    std::string ext = item.substr(start, end - start + 1);
+    std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+    if (!ext.empty()) {
+      result.insert(ext);
+    }
+  }
+  return result;
+}
+
+static std::string DetermineCategoryFromSettings(const std::string &filename) {
+  size_t dotPos = filename.rfind('.');
+  if (dotPos == std::string::npos) {
+    return "All Downloads";
+  }
+
+  std::string ext = filename.substr(dotPos + 1);
+  std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+
+  DatabaseManager &db = DatabaseManager::GetInstance();
+
+  auto compressed = ParseExtensions(db.GetSetting("file_types_compressed", "zip,rar,7z,tar,gz"));
+  if (compressed.find(ext) != compressed.end()) {
+    return "Compressed";
+  }
+
+  auto documents = ParseExtensions(db.GetSetting("file_types_documents", "pdf,doc,docx,txt,xls,xlsx,ppt,pptx"));
+  if (documents.find(ext) != documents.end()) {
+    return "Documents";
+  }
+
+  auto images = ParseExtensions(db.GetSetting("file_types_images", "jpg,jpeg,png,gif,bmp,webp,svg,ico,tiff,tif"));
+  if (images.find(ext) != images.end()) {
+    return "Images";
+  }
+
+  auto music = ParseExtensions(db.GetSetting("file_types_music", "mp3,wav,flac,aac,ogg,wma"));
+  if (music.find(ext) != music.end()) {
+    return "Music";
+  }
+
+  auto video = ParseExtensions(db.GetSetting("file_types_video", "mp4,avi,mkv,mov,wmv,flv,webm"));
+  if (video.find(ext) != video.end()) {
+    return "Video";
+  }
+
+  auto programs = ParseExtensions(db.GetSetting("file_types_programs", "exe,msi,dmg,deb,rpm,apk"));
+  if (programs.find(ext) != programs.end()) {
+    return "Programs";
+  }
+
+  return "All Downloads";
 }
 
 DownloadManager &DownloadManager::GetInstance() {
@@ -33,6 +147,14 @@ DownloadManager::DownloadManager()
       m_schedStopEnabled(false), m_schedHangUp(false), m_schedExit(false),
       m_schedShutdown(false) {
   m_engine = std::make_unique<DownloadEngine>();
+  m_engine->SetProgressCallback([this](int downloadId, int64_t downloaded,
+                                       int64_t total, double speed) {
+    OnDownloadProgress(downloadId, downloaded, total, speed);
+  });
+  m_engine->SetCompletionCallback(
+      [this](int downloadId, bool success, const std::string &error) {
+        OnDownloadComplete(downloadId, success, error);
+      });
 
   // Set default save path to Downloads folder
   PWSTR path = NULL;
@@ -56,21 +178,12 @@ DownloadManager::DownloadManager()
     }
   }
 
-  ApplySettings(Settings::GetInstance());
-
-  // Setup callbacks
-  m_engine->SetProgressCallback(
-      [this](int id, int64_t dl, int64_t total, double speed) {
-        OnDownloadProgress(id, dl, total, speed);
-      });
-
-  m_engine->SetCompletionCallback(
-      [this](int id, bool success, const std::string &error) {
-        OnDownloadComplete(id, success, error);
-      });
-
   // Load downloads from database
   LoadDownloadsFromDatabase();
+
+  // Now that database is initialized, load settings
+  Settings::GetInstance().Load();
+  ApplySettings(Settings::GetInstance());
 
   // Create scheduler timer
   m_schedulerTimer = new wxTimer(this);
@@ -107,7 +220,12 @@ void DownloadManager::EnsureCategoryFoldersExist() {
 }
 
 void DownloadManager::ApplySettings(const Settings &settings) {
-  // Always use system Downloads folder, ignore saved setting
+  // Use user's download folder setting if valid, otherwise keep default
+  wxString userFolder = settings.GetDownloadFolder();
+  if (!userFolder.IsEmpty()) {
+    m_defaultSavePath = userFolder.ToStdString();
+  }
+
   m_maxSimultaneousDownloads = settings.GetMaxSimultaneousDownloads();
   EnsureCategoryFoldersExist();
 
@@ -142,7 +260,9 @@ void DownloadManager::LoadDownloadsFromDatabase() {
     }
 
     // Convert unique_ptr to shared_ptr and add to list
-    m_downloads.push_back(std::shared_ptr<Download>(download.release()));
+    auto sharedDownload = std::shared_ptr<Download>(download.release());
+    m_downloads.push_back(sharedDownload);
+    m_downloadIndex[sharedDownload->GetId()] = sharedDownload;
   }
 }
 
@@ -152,6 +272,29 @@ void DownloadManager::SaveAllDownloadsToDatabase() {
   std::lock_guard<std::mutex> lock(m_downloadsMutex);
   if (!db.SyncAllDownloads(m_downloads)) {
     std::cerr << "Database error: Failed to save downloads" << std::endl;
+  }
+}
+
+void DownloadManager::UpdateDownloadsCategory(const std::string &fromCategory,
+                                              const std::string &toCategory) {
+  std::vector<std::shared_ptr<Download>> toUpdate;
+  {
+    std::lock_guard<std::mutex> lock(m_downloadsMutex);
+    for (const auto &download : m_downloads) {
+      if (download && download->GetCategory() == fromCategory) {
+        download->SetCategory(toCategory);
+        toUpdate.push_back(download);
+      }
+    }
+  }
+
+  if (toUpdate.empty()) {
+    return;
+  }
+
+  DatabaseManager &db = DatabaseManager::GetInstance();
+  for (const auto &download : toUpdate) {
+    db.UpdateDownload(*download);
   }
 }
 
@@ -175,11 +318,21 @@ int DownloadManager::AddDownload(const std::string &url,
   auto download =
       std::make_shared<Download>(m_nextId++, url, m_defaultSavePath);
 
+  // Check if this is a video site URL
+  YtDlpManager &ytdlp = YtDlpManager::GetInstance();
+  bool isVideoSite = ytdlp.IsVideoSiteUrl(url);
+
   // Determine the correct folder based on category
-  std::string category = download->GetCategory();
+  std::string category = DetermineCategoryFromSettings(download->GetFilename());
+  download->SetCategory(category);
 
   if (!savePath.empty()) {
     download->SetSavePath(savePath); // User specified a custom path
+  } else if (isVideoSite) {
+    // Video site URLs always go to Video folder
+    download->SetSavePath(m_defaultSavePath + "\\Video");
+    download->SetCategory("Video");
+    download->SetYtDlpDownload(true);
   } else if (category != "All Downloads") {
     // Use category subfolder
     download->SetSavePath(m_defaultSavePath + "\\" + category);
@@ -187,6 +340,7 @@ int DownloadManager::AddDownload(const std::string &url,
   // else: keep default save path
 
   m_downloads.push_back(download);
+  m_downloadIndex[download->GetId()] = download;
 
   // Save to database immediately
   if (!DatabaseManager::GetInstance().SaveDownload(*download)) {
@@ -198,37 +352,59 @@ int DownloadManager::AddDownload(const std::string &url,
 }
 
 void DownloadManager::RemoveDownload(int downloadId, bool deleteFile) {
-  std::lock_guard<std::mutex> lock(m_downloadsMutex);
+  std::shared_ptr<Download> downloadToRemove;
 
-  auto it = std::find_if(m_downloads.begin(), m_downloads.end(),
-                         [downloadId](const std::shared_ptr<Download> &d) {
-                           return d->GetId() == downloadId;
-                         });
+  {
+    std::lock_guard<std::mutex> lock(m_downloadsMutex);
 
-  if (it != m_downloads.end()) {
-    // Cancel if still downloading
-    if ((*it)->GetStatus() == DownloadStatus::Downloading) {
-      m_engine->CancelDownload(*it);
+    auto it = std::find_if(m_downloads.begin(), m_downloads.end(),
+                           [downloadId](const std::shared_ptr<Download> &d) {
+                             return d->GetId() == downloadId;
+                           });
+
+    if (it == m_downloads.end()) {
+      return;
     }
 
-    // Delete file if requested
-    if (deleteFile) {
-      std::string filePath = (*it)->GetSavePath() + "\\" + (*it)->GetFilename();
-      DeleteFileA(filePath.c_str());
-      
-      // Also delete any .partN files that may exist
-      auto chunks = (*it)->GetChunksCopy();
-      for (size_t i = 0; i < chunks.size(); ++i) {
-        std::string partPath = filePath + ".part" + std::to_string(i);
-        DeleteFileA(partPath.c_str());
+    downloadToRemove = *it;
+
+    // Cancel if still downloading
+    if (downloadToRemove->GetStatus() == DownloadStatus::Downloading) {
+      if (downloadToRemove->IsYtDlpDownload()) {
+        YtDlpManager::GetInstance().CancelDownload(downloadId);
+      } else {
+        m_engine->CancelDownload(downloadToRemove);
       }
     }
 
-    // Remove from database
-    DatabaseManager::GetInstance().DeleteDownload(downloadId);
-
+    // Remove from index and list first
+    m_downloadIndex.erase(downloadId);
     m_downloads.erase(it);
   }
+
+  // Wait for download thread to finish (outside the lock to avoid deadlock)
+  // This ensures file handles are released before we try to delete
+  if (downloadToRemove->IsYtDlpDownload()) {
+    YtDlpManager::GetInstance().WaitForDownloadFinish(downloadId, 5000);
+  } else {
+    m_engine->WaitForDownloadFinish(downloadId, 5000);
+  }
+
+  // Delete file if requested
+  if (deleteFile) {
+    std::string filePath = downloadToRemove->GetSavePath() + "\\" + downloadToRemove->GetFilename();
+    DeleteFileA(filePath.c_str());
+
+    // Also delete any .partN files that may exist
+    auto chunks = downloadToRemove->GetChunksCopy();
+    for (size_t i = 0; i < chunks.size(); ++i) {
+      std::string partPath = filePath + ".part" + std::to_string(i);
+      DeleteFileA(partPath.c_str());
+    }
+  }
+
+  // Remove from database
+  DatabaseManager::GetInstance().DeleteDownload(downloadId);
 }
 
 void DownloadManager::StartDownload(int downloadId) {
@@ -236,18 +412,71 @@ void DownloadManager::StartDownload(int downloadId) {
 
   {
     std::lock_guard<std::mutex> lock(m_downloadsMutex);
-    auto it = std::find_if(m_downloads.begin(), m_downloads.end(),
-                           [downloadId](const std::shared_ptr<Download> &d) {
-                             return d->GetId() == downloadId;
-                           });
-
-    if (it != m_downloads.end()) {
-      download = *it;
+    auto it = m_downloadIndex.find(downloadId);
+    if (it != m_downloadIndex.end()) {
+      download = it->second;
     }
   }
 
   if (download) {
-    m_engine->StartDownload(download);
+    // Check if this is a video site URL that should use yt-dlp
+    YtDlpManager &ytdlp = YtDlpManager::GetInstance();
+    if (ytdlp.IsVideoSiteUrl(download->GetUrl())) {
+      download->SetYtDlpDownload(true);
+      download->SetCategory("Video");
+
+      // Always set save path to Video subfolder for yt-dlp downloads
+      // (Override the default path since video site URLs don't have proper extensions)
+      download->SetSavePath(m_defaultSavePath + "\\Video");
+
+      // Check if yt-dlp is available
+      if (!ytdlp.IsYtDlpAvailable()) {
+        // yt-dlp not installed - set error and let UI handle it
+        download->SetStatus(DownloadStatus::Error);
+        download->SetErrorMessage("yt-dlp not installed. Click to install.");
+        return;
+      }
+
+      ytdlp.StartDownload(download);
+    } else {
+      m_engine->StartDownload(download);
+    }
+  }
+}
+
+void DownloadManager::StartDownloadWithFormat(int downloadId, const std::string &formatId) {
+  std::shared_ptr<Download> download;
+
+  {
+    std::lock_guard<std::mutex> lock(m_downloadsMutex);
+    auto it = m_downloadIndex.find(downloadId);
+    if (it != m_downloadIndex.end()) {
+      download = it->second;
+    }
+  }
+
+  if (download) {
+    // Check if this is a video site URL that should use yt-dlp
+    YtDlpManager &ytdlp = YtDlpManager::GetInstance();
+    if (ytdlp.IsVideoSiteUrl(download->GetUrl())) {
+      download->SetYtDlpDownload(true);
+      download->SetCategory("Video");
+
+      // Always set save path to Video subfolder for yt-dlp downloads
+      download->SetSavePath(m_defaultSavePath + "\\Video");
+
+      // Check if yt-dlp is available
+      if (!ytdlp.IsYtDlpAvailable()) {
+        download->SetStatus(DownloadStatus::Error);
+        download->SetErrorMessage("yt-dlp not installed. Click to install.");
+        return;
+      }
+
+      ytdlp.StartDownloadWithFormat(download, formatId);
+    } else {
+      // Non-video files don't support format selection
+      m_engine->StartDownload(download);
+    }
   }
 }
 
@@ -255,17 +484,19 @@ void DownloadManager::PauseDownload(int downloadId) {
   std::shared_ptr<Download> download;
   {
     std::lock_guard<std::mutex> lock(m_downloadsMutex);
-    auto it = std::find_if(m_downloads.begin(), m_downloads.end(),
-                           [downloadId](const std::shared_ptr<Download> &d) {
-                             return d->GetId() == downloadId;
-                           });
-    if (it != m_downloads.end()) {
-      download = *it;
+    auto it = m_downloadIndex.find(downloadId);
+    if (it != m_downloadIndex.end()) {
+      download = it->second;
     }
   }
 
   if (download) {
-    m_engine->PauseDownload(download);
+    if (download->IsYtDlpDownload()) {
+      YtDlpManager::GetInstance().PauseDownload(downloadId);
+      download->SetStatus(DownloadStatus::Paused);
+    } else {
+      m_engine->PauseDownload(download);
+    }
     // Save updated status
     DatabaseManager::GetInstance().UpdateDownload(*download);
   }
@@ -276,18 +507,18 @@ void DownloadManager::ResumeDownload(int downloadId) {
 
   {
     std::lock_guard<std::mutex> lock(m_downloadsMutex);
-    auto it = std::find_if(m_downloads.begin(), m_downloads.end(),
-                           [downloadId](const std::shared_ptr<Download> &d) {
-                             return d->GetId() == downloadId;
-                           });
-
-    if (it != m_downloads.end()) {
-      download = *it;
+    auto it = m_downloadIndex.find(downloadId);
+    if (it != m_downloadIndex.end()) {
+      download = it->second;
     }
   }
 
   if (download) {
-    m_engine->ResumeDownload(download);
+    if (download->IsYtDlpDownload()) {
+      YtDlpManager::GetInstance().ResumeDownload(download);
+    } else {
+      m_engine->ResumeDownload(download);
+    }
   }
 }
 
@@ -295,17 +526,19 @@ void DownloadManager::CancelDownload(int downloadId) {
   std::shared_ptr<Download> download;
   {
     std::lock_guard<std::mutex> lock(m_downloadsMutex);
-    auto it = std::find_if(m_downloads.begin(), m_downloads.end(),
-                           [downloadId](const std::shared_ptr<Download> &d) {
-                             return d->GetId() == downloadId;
-                           });
-    if (it != m_downloads.end()) {
-      download = *it;
+    auto it = m_downloadIndex.find(downloadId);
+    if (it != m_downloadIndex.end()) {
+      download = it->second;
     }
   }
 
   if (download) {
-    m_engine->CancelDownload(download);
+    if (download->IsYtDlpDownload()) {
+      YtDlpManager::GetInstance().CancelDownload(downloadId);
+      download->SetStatus(DownloadStatus::Cancelled);
+    } else {
+      m_engine->CancelDownload(download);
+    }
     // Save updated status
     DatabaseManager::GetInstance().UpdateDownload(*download);
   }
@@ -325,7 +558,11 @@ void DownloadManager::StartAllDownloads() {
   }
 
   for (const auto &download : toStart) {
-    m_engine->StartDownload(download);
+    if (download->IsYtDlpDownload()) {
+      YtDlpManager::GetInstance().StartDownload(download);
+    } else {
+      m_engine->StartDownload(download);
+    }
   }
 }
 
@@ -341,7 +578,12 @@ void DownloadManager::PauseAllDownloads() {
   }
 
   for (const auto &download : toPause) {
-    m_engine->PauseDownload(download);
+    if (download->IsYtDlpDownload()) {
+      YtDlpManager::GetInstance().PauseDownload(download->GetId());
+      download->SetStatus(DownloadStatus::Paused);
+    } else {
+      m_engine->PauseDownload(download);
+    }
   }
 }
 
@@ -358,19 +600,20 @@ void DownloadManager::CancelAllDownloads() {
   }
 
   for (const auto &download : toCancel) {
-    m_engine->CancelDownload(download);
+    if (download->IsYtDlpDownload()) {
+      YtDlpManager::GetInstance().CancelDownload(download->GetId());
+      download->SetStatus(DownloadStatus::Cancelled);
+    } else {
+      m_engine->CancelDownload(download);
+    }
   }
 }
 
 std::shared_ptr<Download> DownloadManager::GetDownload(int downloadId) const {
   std::lock_guard<std::mutex> lock(m_downloadsMutex);
 
-  auto it = std::find_if(m_downloads.begin(), m_downloads.end(),
-                         [downloadId](const std::shared_ptr<Download> &d) {
-                           return d->GetId() == downloadId;
-                         });
-
-  return (it != m_downloads.end()) ? *it : nullptr;
+  auto it = m_downloadIndex.find(downloadId);
+  return (it != m_downloadIndex.end()) ? it->second : nullptr;
 }
 
 std::vector<std::shared_ptr<Download>>
@@ -384,6 +627,7 @@ DownloadManager::GetDownloadsByCategory(const std::string &category) const {
   std::lock_guard<std::mutex> lock(m_downloadsMutex);
 
   std::vector<std::shared_ptr<Download>> result;
+  result.reserve(m_downloads.size());  // Avoid reallocations
   for (const auto &download : m_downloads) {
     if (category == "All Downloads" || download->GetCategory() == category) {
       result.push_back(download);
@@ -398,6 +642,7 @@ DownloadManager::GetDownloadsByStatus(DownloadStatus status) const {
   std::lock_guard<std::mutex> lock(m_downloadsMutex);
 
   std::vector<std::shared_ptr<Download>> result;
+  result.reserve(m_downloads.size());  // Avoid reallocations
   for (const auto &download : m_downloads) {
     if (download->GetStatus() == status) {
       result.push_back(download);
@@ -468,7 +713,8 @@ void DownloadManager::OnDownloadComplete(int downloadId, bool success,
   }
 
   // If queue is running, check if we can start more
-  if (m_isQueueRunning.load() && success) {
+  // Always call ProcessQueue regardless of success to fill vacant slot
+  if (m_isQueueRunning.load()) {
     ProcessQueue();
   }
 }
@@ -509,7 +755,18 @@ void DownloadManager::ProcessQueue() {
       break;
 
     if (download->GetStatus() == DownloadStatus::Queued) {
-      m_engine->StartDownload(download);
+      // Use appropriate download method based on download type
+      if (download->IsYtDlpDownload()) {
+        YtDlpManager &ytdlp = YtDlpManager::GetInstance();
+        if (ytdlp.IsYtDlpAvailable()) {
+          ytdlp.StartDownload(download);
+        } else {
+          download->SetStatus(DownloadStatus::Error);
+          download->SetErrorMessage("yt-dlp not installed. Click to install.");
+        }
+      } else {
+        m_engine->StartDownload(download);
+      }
       activeCount++;
     }
   }
@@ -532,31 +789,54 @@ void DownloadManager::SetSchedule(bool enableStart, const wxDateTime &startTime,
 
 void DownloadManager::CheckSchedule() {
   wxDateTime now = wxDateTime::Now();
+  int currentMinute = now.GetHour() * 60 + now.GetMinute();
 
-  // Only check hours/minutes/seconds, ignore date part for daily schedule
-  // Or actually, if we want specific date/time, we need to compare fully.
-  // Let's match SchedulerDialog which gives full DateTime but user might expect
-  // daily For now, assume exact time match within 1 second grace
-
+  // Start schedule - check if we should start the queue
   if (m_schedStartEnabled && !m_isQueueRunning.load()) {
-    if (now.GetHour() == m_schedStartTime.GetHour() &&
-        now.GetMinute() == m_schedStartTime.GetMinute() &&
-        now.GetSecond() == m_schedStartTime.GetSecond()) {
+    int schedStartMinute = m_schedStartTime.GetHour() * 60 + m_schedStartTime.GetMinute();
+    // Only trigger once per minute (prevents double-trigger within same minute)
+    if (currentMinute == schedStartMinute && m_lastSchedStartMinute != currentMinute) {
+      m_lastSchedStartMinute = currentMinute;
       StartQueue();
     }
   }
 
+  // Stop schedule - check if we should stop the queue
   if (m_schedStopEnabled && m_isQueueRunning.load()) {
-    if (now.GetHour() == m_schedStopTime.GetHour() &&
-        now.GetMinute() == m_schedStopTime.GetMinute() &&
-        now.GetSecond() == m_schedStopTime.GetSecond()) {
+    int schedStopMinute = m_schedStopTime.GetHour() * 60 + m_schedStopTime.GetMinute();
+    // Only trigger once per minute (prevents double-trigger within same minute)
+    if (currentMinute == schedStopMinute && m_lastSchedStopMinute != currentMinute) {
+      m_lastSchedStopMinute = currentMinute;
       StopQueue();
 
       // Handle completion actions
-      if (m_schedExit) {
+      if (m_schedShutdown) {
+        // Show warning and give user a chance to cancel
+        int result = wxMessageBox(
+            "LDM is about to shut down the computer as scheduled.\n\n"
+            "Click Cancel within 30 seconds to abort.",
+            "Scheduled Shutdown",
+            wxOK | wxCANCEL | wxICON_WARNING);
+
+        if (result == wxOK) {
+          // Initiate system shutdown with proper privilege check
+#ifdef _WIN32
+          // Request shutdown privilege
+          HANDLE hToken;
+          TOKEN_PRIVILEGES tkp;
+          if (OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &hToken)) {
+            LookupPrivilegeValue(NULL, SE_SHUTDOWN_NAME, &tkp.Privileges[0].Luid);
+            tkp.PrivilegeCount = 1;
+            tkp.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
+            AdjustTokenPrivileges(hToken, FALSE, &tkp, 0, NULL, 0);
+            CloseHandle(hToken);
+          }
+          ExitWindowsEx(EWX_SHUTDOWN | EWX_FORCE, SHTDN_REASON_MAJOR_APPLICATION);
+#endif
+        }
+      } else if (m_schedExit) {
         wxTheApp->Exit();
       }
-      // Todo: HangUp/Shutdown (require system calls)
     }
   }
 }

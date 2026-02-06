@@ -1,5 +1,6 @@
 #include "OptionsDialog.h"
 #include "../core/DownloadManager.h"
+#include "../database/DatabaseManager.h"
 #include "../utils/Settings.h"
 #include "../utils/ThemeManager.h"
 
@@ -155,7 +156,7 @@ void OptionsDialog::CreateFileTypesTab(wxNotebook *notebook) {
       "Define file extensions for automatic categorization (comma-separated):");
   sizer->Add(infoLabel, 0, wxALL, 10);
 
-  wxFlexGridSizer *gridSizer = new wxFlexGridSizer(5, 2, 10, 10);
+  wxFlexGridSizer *gridSizer = new wxFlexGridSizer(6, 2, 10, 10);
   gridSizer->AddGrowableCol(1, 1);
 
   gridSizer->Add(new wxStaticText(panel, wxID_ANY, "Compressed:"), 0,
@@ -168,6 +169,12 @@ void OptionsDialog::CreateFileTypesTab(wxNotebook *notebook) {
   m_documentTypesText =
       new wxTextCtrl(panel, wxID_ANY, "pdf,doc,docx,txt,xls,xlsx,ppt,pptx");
   gridSizer->Add(m_documentTypesText, 1, wxEXPAND);
+
+  gridSizer->Add(new wxStaticText(panel, wxID_ANY, "Images:"), 0,
+                 wxALIGN_CENTER_VERTICAL);
+  m_imageTypesText =
+      new wxTextCtrl(panel, wxID_ANY, "jpg,jpeg,png,gif,bmp,webp,svg,ico,tiff,tif");
+  gridSizer->Add(m_imageTypesText, 1, wxEXPAND);
 
   gridSizer->Add(new wxStaticText(panel, wxID_ANY, "Music:"), 0,
                  wxALIGN_CENTER_VERTICAL);
@@ -245,6 +252,15 @@ void OptionsDialog::LoadSettings() {
   m_useProxyCheck->SetValue(settings.GetUseProxy());
   m_proxyHostText->SetValue(settings.GetProxyHost());
   m_proxyPortSpin->SetValue(settings.GetProxyPort());
+
+  // Load file type settings from database
+  DatabaseManager &db = DatabaseManager::GetInstance();
+  m_compressedTypesText->SetValue(db.GetSetting("file_types_compressed", "zip,rar,7z,tar,gz"));
+  m_documentTypesText->SetValue(db.GetSetting("file_types_documents", "pdf,doc,docx,txt,xls,xlsx,ppt,pptx"));
+  m_imageTypesText->SetValue(db.GetSetting("file_types_images", "jpg,jpeg,png,gif,bmp,webp,svg,ico,tiff,tif"));
+  m_musicTypesText->SetValue(db.GetSetting("file_types_music", "mp3,wav,flac,aac,ogg,wma"));
+  m_videoTypesText->SetValue(db.GetSetting("file_types_video", "mp4,avi,mkv,mov,wmv,flv,webm"));
+  m_programTypesText->SetValue(db.GetSetting("file_types_programs", "exe,msi,dmg,deb,rpm,apk"));
 }
 
 void OptionsDialog::SaveSettings() {
@@ -262,6 +278,15 @@ void OptionsDialog::SaveSettings() {
   settings.SetProxyPort(m_proxyPortSpin->GetValue());
 
   settings.Save();
+
+  // Save file type settings to database
+  DatabaseManager &db = DatabaseManager::GetInstance();
+  db.SetSetting("file_types_compressed", m_compressedTypesText->GetValue().ToStdString());
+  db.SetSetting("file_types_documents", m_documentTypesText->GetValue().ToStdString());
+  db.SetSetting("file_types_images", m_imageTypesText->GetValue().ToStdString());
+  db.SetSetting("file_types_music", m_musicTypesText->GetValue().ToStdString());
+  db.SetSetting("file_types_video", m_videoTypesText->GetValue().ToStdString());
+  db.SetSetting("file_types_programs", m_programTypesText->GetValue().ToStdString());
 
   DownloadManager::GetInstance().ApplySettings(settings);
 }
