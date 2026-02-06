@@ -15,14 +15,16 @@ Settings::Settings()
   // Set default download folder to Windows Downloads folder
   m_downloadFolder = wxStandardPaths::Get().GetUserDir(wxStandardPaths::Dir_Downloads);
 
-  Load();
+  // NOTE: Load() is NOT called here to avoid initialization order issues
+  // The main application should call Settings::GetInstance().Load() after
+  // DatabaseManager::GetInstance().Initialize() has been called
 }
 
 void Settings::Load() {
   DatabaseManager &db = DatabaseManager::GetInstance();
 
-  // Ensure database is initialized
-  db.Initialize();
+  // NOTE: Caller must ensure database is initialized before calling Load()
+  // Do not call db.Initialize() here to avoid recursive initialization issues
 
   std::lock_guard<std::mutex> lock(m_mutex);
 

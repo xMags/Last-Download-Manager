@@ -53,6 +53,12 @@ std::string Download::GetDescription() const {
 }
 
 double Download::GetProgress() const {
+  // If manual progress is set (yt-dlp), use it
+  double manual = m_manualProgress.load();
+  if (manual >= 0.0) {
+    return manual;
+  }
+
   int64_t totalSize = m_totalSize.load();
   if (totalSize <= 0)
     return 0.0;
@@ -101,6 +107,15 @@ void Download::SetFilename(const std::string &filename) {
   m_filename = filename;
 }
 
+void Download::SetReferer(const std::string &referer) {
+  std::lock_guard<std::mutex> lock(m_metadataMutex);
+  m_referer = referer;
+}
+
+void Download::SetProgress(double progress) {
+  m_manualProgress.store(progress);
+}
+
 void Download::SetCategory(const std::string &category) {
   std::lock_guard<std::mutex> lock(m_metadataMutex);
   m_category = category;
@@ -120,6 +135,7 @@ void Download::SetSpeed(double speed) {
   // Use mutex to protect the read-modify-write sequence
   std::lock_guard<std::mutex> lock(m_metadataMutex);
 
+  // Since we hold the mutex, we can use relaxed ordering - the mutex provides synchronization
   int sampleCount = m_speedSampleCount.load(std::memory_order_relaxed);
 
   if (sampleCount < WARMUP_SAMPLES) {
@@ -128,13 +144,13 @@ void Download::SetSpeed(double speed) {
     double newSmoothed = (currentSmoothed * sampleCount + speed) / (sampleCount + 1);
     m_smoothedSpeed.store(newSmoothed, std::memory_order_relaxed);
     m_speedSampleCount.store(sampleCount + 1, std::memory_order_relaxed);
-    m_speed.store(newSmoothed, std::memory_order_relaxed);
+    m_speed.store(newSmoothed, std::memory_order_release);  // Release for readers
   } else {
     // Apply EMA: smoothed = alpha * new + (1 - alpha) * previous
     double previousSmoothed = m_smoothedSpeed.load(std::memory_order_relaxed);
     double newSmoothed = ALPHA * speed + (1.0 - ALPHA) * previousSmoothed;
     m_smoothedSpeed.store(newSmoothed, std::memory_order_relaxed);
-    m_speed.store(newSmoothed, std::memory_order_relaxed);
+    m_speed.store(newSmoothed, std::memory_order_release);  // Release for readers
   }
 }
 
@@ -158,11 +174,16 @@ void Download::SetSavePath(const std::string &path) {
 void Download::UpdateLastTryTime() {
   auto now = std::chrono::system_clock::now();
   std::time_t time = std::chrono::system_clock::to_time_t(now);
-  std::tm tm;
-  localtime_s(&tm, &time);
+  std::tm tm = {};  // Initialize all fields to zero
+  errno_t err = localtime_s(&tm, &time);
 
   std::stringstream ss;
-  ss << std::put_time(&tm, "%Y-%m-%d %H:%M");
+  if (err == 0) {
+    ss << std::put_time(&tm, "%Y-%m-%d %H:%M");
+  } else {
+    // Fallback to timestamp if localtime_s fails
+    ss << "Error-" << time;
+  }
   {
     std::lock_guard<std::mutex> lock(m_metadataMutex);
     m_lastTryTime = ss.str();
@@ -235,7 +256,20 @@ void Download::RecalculateProgress() {
   int64_t totalDownloaded = 0;
 
   for (const auto &chunk : m_chunks) {
-    totalDownloaded += chunk.currentByte - chunk.startByte;
+    // currentByte is the next byte to download, so downloaded = currentByte - startByte
+    // But we need to handle the case where chunk hasn't started (currentByte == startByte)
+    if (chunk.currentByte > chunk.startByte) {
+      totalDownloaded += chunk.currentByte - chunk.startByte;
+    }
+    // If completed, ensure we count the full chunk
+    if (chunk.completed && chunk.endByte >= 0) {
+      int64_t chunkSize = chunk.endByte - chunk.startByte + 1;
+      int64_t counted = chunk.currentByte - chunk.startByte;
+      // If somehow we counted less than the full chunk but it's marked complete, fix it
+      if (counted < chunkSize) {
+        totalDownloaded += (chunkSize - counted);
+      }
+    }
   }
 
   m_downloadedSize = totalDownloaded;
@@ -271,12 +305,23 @@ std::string Download::ExtractFilenameFromUrl(const std::string &url) const {
     // Sanitize invalid Windows filename characters
     std::string sanitized;
     for (char c : decoded) {
-      if (c == ':' || c == '*' || c == '?' || c == '"' || 
+      if (c == ':' || c == '*' || c == '?' || c == '"' ||
           c == '<' || c == '>' || c == '|' || c == '\\' || c == '/') {
         sanitized += '_';  // Replace invalid chars with underscore
       } else if (c >= 32) {  // Skip control characters
         sanitized += c;
       }
+    }
+
+    // Trim trailing dots and spaces (Windows doesn't allow these at end of filenames)
+    while (!sanitized.empty() && (sanitized.back() == '.' || sanitized.back() == ' ')) {
+      sanitized.pop_back();
+    }
+
+    // Also trim leading spaces
+    size_t start = sanitized.find_first_not_of(' ');
+    if (start != std::string::npos && start > 0) {
+      sanitized = sanitized.substr(start);
     }
 
     if (!sanitized.empty()) {

@@ -34,6 +34,7 @@ private:
   wxTextCtrl *m_musicTypesText;
   wxTextCtrl *m_videoTypesText;
   wxTextCtrl *m_programTypesText;
+  wxTextCtrl *m_imageTypesText;
 
   void CreateGeneralTab(wxNotebook *notebook);
   void CreateConnectionTab(wxNotebook *notebook);

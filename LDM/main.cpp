@@ -5,6 +5,7 @@
 #include <wx/image.h>
 #include <wx/wx.h>
 #include <wx/cmdline.h>
+#include <iostream>
 
 #ifdef _WIN32
 #include <Windows.h>
@@ -87,24 +88,17 @@ private:
     void SendUrlToExistingInstance(const wxString& url) {
 #ifdef _WIN32
         // Find the main window of the existing instance
-        // Note: The title must match exactly what MainWindow sets.
-        // In MainWindow.cpp: "LDM v1.5.0"
-        // It is safer to find by class name if possible or use a more specific title search if the version changes.
-        // For now, we will try to find a window that contains "LDM".
-        
-        HWND hWnd = FindWindowA(NULL, "LDM v1.5.0");
-        if (!hWnd) {
-            // Try to find any window starting with "LDM" if exact match fails
-            // This is a bit hacky but simple for now.
-             hWnd = FindWindowA(NULL, NULL);
-             while (hWnd) {
-                 char title[256];
-                 GetWindowTextA(hWnd, title, sizeof(title));
-                 if (strstr(title, "LDM v") != NULL) {
-                     break;
-                 }
-                 hWnd = GetWindow(hWnd, GW_HWNDNEXT);
-             }
+        // Search for any window with "Last Download Manager" in the title (version-independent)
+        HWND hWnd = NULL;
+        HWND hSearch = ::GetTopWindow(NULL);
+        while (hSearch) {
+            char title[256];
+            ::GetWindowTextA(hSearch, title, sizeof(title));
+            if (strstr(title, "Last Download Manager") != NULL) {
+                hWnd = hSearch;
+                break;
+            }
+            hSearch = ::GetNextWindow(hSearch, GW_HWNDNEXT);
         }
 
         if (hWnd) {
@@ -116,7 +110,7 @@ private:
             cds.lpData = (PVOID)urlStd.c_str();
 
             SendMessageA(hWnd, WM_COPYDATA, (WPARAM)NULL, (LPARAM)&cds);
-            
+
             // Allow time for processing
             Sleep(100);
         }
@@ -133,6 +127,40 @@ wxIMPLEMENT_APP_NO_MAIN(LDMApp);
 
 #if defined(_WIN32) || defined(WIN32)
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
+    // Check for debug mode:
+    // 1. --debug or -d command line flag
+    // 2. debug.txt file exists next to exe (for portable apps)
+    bool enableDebug = false;
+
+    std::string cmdLine(lpCmdLine ? lpCmdLine : "");
+    if (cmdLine.find("--debug") != std::string::npos || cmdLine.find("-d") != std::string::npos) {
+        enableDebug = true;
+    }
+
+    // Check for debug.txt next to exe
+    if (!enableDebug) {
+        char exePath[MAX_PATH];
+        if (GetModuleFileNameA(NULL, exePath, MAX_PATH)) {
+            std::string debugFilePath(exePath);
+            size_t lastSlash = debugFilePath.rfind('\\');
+            if (lastSlash != std::string::npos) {
+                debugFilePath = debugFilePath.substr(0, lastSlash + 1) + "debug.txt";
+                DWORD attrs = GetFileAttributesA(debugFilePath.c_str());
+                if (attrs != INVALID_FILE_ATTRIBUTES) {
+                    enableDebug = true;
+                }
+            }
+        }
+    }
+
+    if (enableDebug) {
+        AllocConsole();
+        FILE* fDummy;
+        freopen_s(&fDummy, "CONOUT$", "w", stdout);
+        freopen_s(&fDummy, "CONOUT$", "w", stderr);
+        std::cout << "[LDM] Debug console enabled" << std::endl;
+    }
+
     return wxEntry(hInstance, hPrevInstance, lpCmdLine, nCmdShow);
 }
 #else

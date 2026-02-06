@@ -54,12 +54,12 @@ void DownloadsTable::CreateColumns() {
 }
 
 void DownloadsTable::AddDownload(std::shared_ptr<Download> download) {
-  // Check if download already exists to prevent duplicates
-  for (const auto& existing : m_downloads) {
-    if (existing->GetId() == download->GetId()) {
-      return;
-    }
+  // Check if download already exists using index for O(1) lookup
+  if (m_downloadIndex.find(download->GetId()) != m_downloadIndex.end()) {
+    return;
   }
+  
+  m_downloadIndex[download->GetId()] = m_downloads.size();
   m_downloads.push_back(download);
 
   // Re-apply filter to show the new download if it matches current filter
@@ -67,23 +67,29 @@ void DownloadsTable::AddDownload(std::shared_ptr<Download> download) {
 }
 
 void DownloadsTable::RemoveDownload(int downloadId) {
-  for (size_t i = 0; i < m_downloads.size(); ++i) {
-    if (m_downloads[i]->GetId() == downloadId) {
-      m_downloads.erase(m_downloads.begin() + i);
-      break;
+  auto indexIt = m_downloadIndex.find(downloadId);
+  if (indexIt != m_downloadIndex.end()) {
+    size_t idx = indexIt->second;
+    
+    // If not the last element, swap with last and update its index
+    if (idx < m_downloads.size() - 1) {
+      auto& lastDownload = m_downloads.back();
+      m_downloadIndex[lastDownload->GetId()] = idx;
+      m_downloads[idx] = std::move(m_downloads.back());
     }
+    
+    m_downloads.pop_back();
+    m_downloadIndex.erase(indexIt);
   }
   // Re-apply filter to update display
   ApplyFilter();
 }
 
 void DownloadsTable::UpdateDownload(int downloadId) {
-  // Find the download in the filtered list and update it
-  for (size_t i = 0; i < m_filteredDownloads.size(); ++i) {
-    if (m_filteredDownloads[i]->GetId() == downloadId) {
-      UpdateRow(static_cast<long>(i), m_filteredDownloads[i]);
-      break;
-    }
+  // Use filtered index for O(1) lookup instead of linear search
+  auto it = m_filteredIndex.find(downloadId);
+  if (it != m_filteredIndex.end() && it->second < m_filteredDownloads.size()) {
+    UpdateRow(static_cast<long>(it->second), m_filteredDownloads[it->second]);
   }
 }
 
@@ -102,6 +108,7 @@ void DownloadsTable::ClearFilter() {
 void DownloadsTable::ApplyFilter() {
   m_listCtrl->DeleteAllItems();
   m_filteredDownloads.clear();
+  m_filteredIndex.clear();
 
   for (const auto &download : m_downloads) {
     bool matches = false;
@@ -127,6 +134,8 @@ void DownloadsTable::ApplyFilter() {
     }
 
     if (matches) {
+      size_t filteredIdx = m_filteredDownloads.size();
+      m_filteredIndex[download->GetId()] = filteredIdx;
       m_filteredDownloads.push_back(download);
       long index = m_listCtrl->InsertItem(m_listCtrl->GetItemCount(),
                                           download->GetFilename());
@@ -328,10 +337,9 @@ void DownloadsTable::OnItemRightClick(wxListEvent &event) {
 void DownloadsTable::OnColumnClick(wxListEvent &event) { event.Skip(); }
 
 std::shared_ptr<Download> DownloadsTable::FindDownloadById(int downloadId) const {
-  for (const auto &download : m_downloads) {
-    if (download->GetId() == downloadId) {
-      return download;
-    }
+  auto indexIt = m_downloadIndex.find(downloadId);
+  if (indexIt != m_downloadIndex.end() && indexIt->second < m_downloads.size()) {
+    return m_downloads[indexIt->second];
   }
   return nullptr;
 }
