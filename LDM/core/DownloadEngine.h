@@ -6,6 +6,7 @@
 #include <future>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -33,6 +34,10 @@ public:
   void PauseDownload(std::shared_ptr<Download> download);
   void ResumeDownload(std::shared_ptr<Download> download);
   void CancelDownload(std::shared_ptr<Download> download);
+
+  // Wait for a download thread to finish (after cancel/pause)
+  // Returns true if download is no longer running, false on timeout
+  bool WaitForDownloadFinish(int downloadId, int timeoutMs = 5000);
 
   // Get file info (size, resumable) without downloading
   bool GetFileInfo(const std::string &url, int64_t &fileSize, bool &resumable);
@@ -114,6 +119,10 @@ private:
   // Active download tracking for safe thread management
   std::vector<std::future<bool>> m_activeDownloads;
   std::mutex m_activeDownloadsMutex;
+
+  // Track currently running download IDs to prevent double-start
+  std::set<int> m_runningDownloadIds;
+  std::mutex m_runningIdsMutex;
 
   // Worker thread
   std::thread m_workerThread;

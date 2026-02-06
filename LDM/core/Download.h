@@ -29,10 +29,14 @@ struct DownloadChunk {
       : startByte(start), endByte(end), currentByte(start), completed(false) {}
 
   double GetProgress() const {
-    if (endByte <= startByte)
-      return 100.0;
-    return static_cast<double>(currentByte - startByte) /
-           (endByte - startByte) * 100.0;
+    if (completed) return 100.0;
+    if (endByte < 0) return 0.0;  // Unknown size
+    int64_t total = endByte - startByte + 1;  // +1 because endByte is inclusive
+    if (total <= 0) return 0.0;
+    int64_t downloaded = currentByte - startByte;
+    if (downloaded <= 0) return 0.0;
+    if (downloaded >= total) return 100.0;
+    return static_cast<double>(downloaded) / total * 100.0;
   }
 };
 
@@ -46,6 +50,10 @@ public:
   std::string GetUrl() const {
     std::lock_guard<std::mutex> lock(m_metadataMutex);
     return m_url;
+  }
+  std::string GetReferer() const {
+    std::lock_guard<std::mutex> lock(m_metadataMutex);
+    return m_referer;
   }
   std::string GetFilename() const;
   std::string GetSavePath() const;
@@ -85,9 +93,10 @@ public:
 
   // Setters
   void SetFilename(const std::string &filename);
+  void SetReferer(const std::string &referer);
   void SetTotalSize(int64_t size) { m_totalSize.store(size); }
-  void SetDownloadedSize(int64_t size) { m_downloadedSize = size; }
-  void SetStatus(DownloadStatus status) { m_status = status; }
+  void SetDownloadedSize(int64_t size) { m_downloadedSize.store(size); }
+  void SetStatus(DownloadStatus status) { m_status.store(status); }
   void SetCategory(const std::string &category);
   void SetDescription(const std::string &desc);
   void SetSpeed(double speed);
@@ -95,6 +104,11 @@ public:
   void SetErrorMessage(const std::string &msg);
   void SetSavePath(const std::string &path);
   void UpdateLastTryTime();
+  void SetProgress(double progress);  // For yt-dlp downloads
+
+  // yt-dlp download flag
+  bool IsYtDlpDownload() const { return m_isYtDlpDownload.load(); }
+  void SetYtDlpDownload(bool isYtDlp) { m_isYtDlpDownload.store(isYtDlp); }
 
   // Retry support
   void SetMaxRetries(int maxRetries) { m_maxRetries.store(maxRetries); }
@@ -121,6 +135,7 @@ public:
 private:
   int m_id;
   std::string m_url;
+  std::string m_referer;  // Page URL for protected downloads
   std::string m_filename;
   std::string m_savePath;
   std::atomic<int64_t> m_totalSize;
@@ -131,6 +146,8 @@ private:
   std::atomic<double> m_speed;
   std::atomic<double> m_smoothedSpeed{0.0};  // EMA smoothed speed
   std::atomic<int> m_speedSampleCount{0};    // Sample count for initial ramp-up
+  std::atomic<bool> m_isYtDlpDownload{false}; // True if handled by yt-dlp
+  std::atomic<double> m_manualProgress{-1.0}; // Manual progress for yt-dlp (-1 = use calculated)
   std::string m_lastTryTime;
   std::string m_errorMessage;
 

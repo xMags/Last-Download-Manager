@@ -1,4 +1,6 @@
 #include "ThemeManager.h"
+#include "../database/DatabaseManager.h"
+#include <mutex>
 #include <wx/button.h>
 #include <wx/checkbox.h>
 #include <wx/choice.h>
@@ -25,13 +27,21 @@ ThemeManager &ThemeManager::GetInstance() {
 ThemeManager::ThemeManager() : m_isDarkMode(false) {}
 
 void ThemeManager::Initialize() {
-  // Check system setting or load from config
-  // For now default to true if the user asked for it, otherwise default to
-  // false But since we are implementing it, let's default to false and let user
-  // toggle
+  std::lock_guard<std::mutex> lock(m_mutex);
+  // Load dark mode setting from database
+  DatabaseManager &db = DatabaseManager::GetInstance();
+  std::string darkModeSetting = db.GetSetting("dark_mode", "0");
+  m_isDarkMode = (darkModeSetting == "1");
 }
 
-void ThemeManager::SetDarkMode(bool enable) { m_isDarkMode = enable; }
+void ThemeManager::SetDarkMode(bool enable) {
+  std::lock_guard<std::mutex> lock(m_mutex);
+  m_isDarkMode = enable;
+
+  // Persist to database
+  DatabaseManager &db = DatabaseManager::GetInstance();
+  db.SetSetting("dark_mode", enable ? "1" : "0");
+}
 
 wxColour ThemeManager::GetBackgroundColor() const {
   return m_isDarkMode ? m_darkBg

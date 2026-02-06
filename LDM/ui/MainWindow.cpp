@@ -1,9 +1,12 @@
 #include "MainWindow.h"
 #include "../core/DownloadManager.h"
+#include "../core/YtDlpManager.h"
+#include "../database/DatabaseManager.h"
 #include "../utils/HttpServer.h"
 #include "../utils/ThemeManager.h"
 #include "OptionsDialog.h"
 #include "SchedulerDialog.h"
+#include "VideoQualityDialog.h"
 #include <wx/dnd.h>
 #include <wx/file.h>
 #include <wx/dir.h>
@@ -11,7 +14,10 @@
 #include <wx/filename.h>
 #include <wx/msgdlg.h>
 #include <wx/stdpaths.h>
+#include <wx/progdlg.h>
 #include <vector>
+#include <thread>
+#include <iostream>
 
 #ifdef _WIN32
 #include <Windows.h>
@@ -64,14 +70,16 @@ wxBEGIN_EVENT_TABLE(MainWindow, wxFrame) EVT_MENU(
                                         EVT_MENU(ID_VIEW_DARK_MODE,
                                                                                      MainWindow::OnViewDarkMode)
                                                                                         EVT_MENU(ID_INSTALL_EXTENSION, MainWindow::OnInstallExtension)
+                                                                                        EVT_MENU(ID_GRABBER, MainWindow::OnGrabber)
+                                                                                        EVT_TOOL(ID_GRABBER, MainWindow::OnGrabber)
                                                                                         wxEND_EVENT_TABLE()
 
                                                             MainWindow::MainWindow()
-                                        : wxFrame(nullptr, wxID_ANY, "Last Download Manager v1.6.0", wxDefaultPosition,
+                                        : wxFrame(nullptr, wxID_ANY, "Last Download Manager v2.0.0", wxDefaultPosition,
                                                   wxSize(1050, 700)),
                                           m_splitter(nullptr), m_categoriesPanel(nullptr),
                                           m_downloadsTable(nullptr), m_toolbar(nullptr), m_statusBar(nullptr),
-                                          m_updateTimer(nullptr) {
+                                          m_updateTimer(nullptr), m_speedGraph(nullptr), m_taskBarIcon(nullptr) {
   // Set drop target
   SetDropTarget(new URLDropTarget(this));
 
@@ -129,12 +137,85 @@ wxBEGIN_EVENT_TABLE(MainWindow, wxFrame) EVT_MENU(
 
   // Start HTTP server for browser extension integration
   HttpServer &httpServer = HttpServer::GetInstance();
-  httpServer.SetUrlCallback([this](const std::string &url) {
+  httpServer.SetUrlCallback([this](const std::string &url, const std::string &referer) {
+    // Make explicit copy to ensure it survives until CallAfter executes
+    std::string urlCopy = url;
+    std::string refererCopy = referer;
+    std::cout << "[MainWindow] Callback received URL (len=" << urlCopy.length() << "): " << urlCopy << std::endl;
+    if (!refererCopy.empty()) {
+      std::cout << "[MainWindow] With referer: " << refererCopy << std::endl;
+    }
+    std::cout.flush();
     // Post to main thread via wxWidgets event mechanism
-    wxTheApp->CallAfter([this, url]() {
-      ProcessUrl(wxString::FromUTF8(url));
+    wxTheApp->CallAfter([this, urlCopy, refererCopy]() {
+      std::cout << "[MainWindow] CallAfter executing with URL (len=" << urlCopy.length() << ")" << std::endl;
+      std::cout.flush();
+      ProcessUrl(wxString::FromUTF8(urlCopy), wxString::FromUTF8(refererCopy));
     });
   });
+
+  // Set status callback for extension to get download speeds
+  httpServer.SetStatusCallback([]() -> std::string {
+    DownloadManager &mgr = DownloadManager::GetInstance();
+    auto downloads = mgr.GetAllDownloads();
+
+    int activeCount = 0;
+    double totalSpeed = 0;
+    std::string downloadsJson = "[";
+    bool first = true;
+
+    for (const auto &dl : downloads) {
+      DownloadStatus status = dl->GetStatus();
+      if (status == DownloadStatus::Downloading) {
+        activeCount++;
+        double speed = dl->GetSpeed();
+        totalSpeed += speed;
+
+        if (!first) downloadsJson += ",";
+        first = false;
+
+        // Escape filename for JSON
+        std::string filename = dl->GetFilename();
+        std::string escapedFilename;
+        escapedFilename.reserve(filename.size() + 16);
+        for (char c : filename) {
+          if (c == '"') escapedFilename += "\\\"";
+          else if (c == '\\') escapedFilename += "\\\\";
+          else if (c == '\n') escapedFilename += "\\n";
+          else if (c == '\r') escapedFilename += "\\r";
+          else if (c == '\t') escapedFilename += "\\t";
+          else escapedFilename += c;
+        }
+
+        // Build JSON using string concatenation (no buffer overflow risk)
+        downloadsJson += "{\"id\":";
+        downloadsJson += std::to_string(dl->GetId());
+        downloadsJson += ",\"filename\":\"";
+        downloadsJson += escapedFilename;
+        downloadsJson += "\",\"progress\":";
+        downloadsJson += std::to_string(static_cast<int>(dl->GetProgress() * 10) / 10.0).substr(0, 5);
+        downloadsJson += ",\"speed\":";
+        downloadsJson += std::to_string(static_cast<long long>(speed));
+        downloadsJson += ",\"size\":";
+        downloadsJson += std::to_string(dl->GetTotalSize());
+        downloadsJson += ",\"downloaded\":";
+        downloadsJson += std::to_string(dl->GetDownloadedSize());
+        downloadsJson += "}";
+      }
+    }
+    downloadsJson += "]";
+
+    // Build final result using string concatenation
+    std::string result = "{\"status\":\"ok\",\"activeDownloads\":";
+    result += std::to_string(activeCount);
+    result += ",\"totalSpeed\":";
+    result += std::to_string(static_cast<long long>(totalSpeed));
+    result += ",\"downloads\":";
+    result += downloadsJson;
+    result += "}";
+    return result;
+  });
+
   if (!httpServer.Start(45678)) {
     // Non-fatal: log but don't show error (port might be in use)
     wxLogDebug("Failed to start HTTP server on port 45678");
@@ -145,9 +226,13 @@ wxBEGIN_EVENT_TABLE(MainWindow, wxFrame) EVT_MENU(
 }
 
 MainWindow::~MainWindow() {
-  // Clear callback first to prevent calls with dangling 'this'
+  // Signal shutdown to prevent new background saves
+  m_shuttingDown.store(true);
+
+  // Clear callbacks first to prevent calls with dangling 'this'
   HttpServer::GetInstance().SetUrlCallback(nullptr);
-  
+  HttpServer::GetInstance().SetStatusCallback(nullptr);
+
   // Stop HTTP server and wait for threads
   HttpServer::GetInstance().Stop();
 
@@ -156,6 +241,14 @@ MainWindow::~MainWindow() {
     m_updateTimer->Stop();
     delete m_updateTimer;
     m_updateTimer = nullptr;
+  }
+
+  // Wait for any in-progress database save to complete
+  {
+    std::lock_guard<std::mutex> lock(m_dbSaveThreadMutex);
+    if (m_dbSaveThread.joinable()) {
+      m_dbSaveThread.join();
+    }
   }
 }
 
@@ -344,8 +437,8 @@ void MainWindow::CreateMainContent() {
 void MainWindow::OnExit(wxCommandEvent &event) { Close(true); }
 
 void MainWindow::OnAbout(wxCommandEvent &event) {
-  wxMessageBox("LDM\n\n"
-               "Version 1.0\n\n"
+  wxMessageBox("Last Download Manager\n\n"
+               "Version 2.0.0\n\n"
                "A powerful download manager built with wxWidgets, WinINet, and "
                "XML storage.\n\n"
                "Features:\n"
@@ -367,32 +460,272 @@ void MainWindow::OnAddUrl(wxCommandEvent &event) {
   }
 }
 
-void MainWindow::ProcessUrl(const wxString &url) {
+void MainWindow::ProcessUrl(const wxString &url, const wxString &referer) {
   if (!url.IsEmpty()) {
-    // Add download to the manager
-    DownloadManager &manager = DownloadManager::GetInstance();
-    int downloadId = manager.AddDownload(url.ToStdString());
+    try {
+      // Debug: Log URL processing
+      std::cout << "[MainWindow] ProcessUrl called with: " << url.ToStdString() << std::endl;
+      if (!referer.IsEmpty()) {
+        std::cout << "[MainWindow] Referer: " << referer.ToStdString() << std::endl;
+      }
+      std::cout.flush();
 
-    // Check for validation error
-    if (downloadId < 0) {
-      wxMessageBox("Invalid URL. Please enter a valid HTTP, HTTPS, or FTP URL.",
-                   "Invalid URL", wxOK | wxICON_ERROR, this);
-      m_statusBar->SetStatusText("Invalid URL entered", 0);
-      return;
-    }
+      // Check if this is a video site that needs yt-dlp
+      std::cout << "[MainWindow] Getting YtDlpManager..." << std::endl;
+      std::cout.flush();
+      YtDlpManager &ytdlp = YtDlpManager::GetInstance();
 
-    // Get the download object and add to table
-    auto download = manager.GetDownload(downloadId);
-    if (download) {
-      m_downloadsTable->AddDownload(download);
+      // Debug: Log video site detection and yt-dlp availability
+      std::cout << "[MainWindow] Checking IsVideoSiteUrl..." << std::endl;
+      std::cout.flush();
+      bool isVideoSite = ytdlp.IsVideoSiteUrl(url.ToStdString());
+      std::cout << "[MainWindow] Checking IsYtDlpAvailable..." << std::endl;
+      std::cout.flush();
+      bool ytdlpAvailable = ytdlp.IsYtDlpAvailable();
+      std::cout << "[MainWindow] IsVideoSite: " << isVideoSite
+                << ", YtDlpAvailable: " << ytdlpAvailable
+                << ", Path: " << ytdlp.GetYtDlpPath() << std::endl;
+      std::cout.flush();
+      if (isVideoSite && !ytdlpAvailable) {
+        // Prompt user to install yt-dlp
+        int result = wxMessageBox(
+            "This video site requires yt-dlp to download.\n\n"
+            "yt-dlp is a free video downloader that supports 1400+ sites.\n"
+            "Would you like to download it now? (~15 MB)",
+            "Install yt-dlp?",
+            wxYES_NO | wxICON_QUESTION, this);
 
-      // Start the download automatically
-      manager.StartDownload(downloadId);
+        if (result == wxYES) {
+          m_statusBar->SetStatusText("Downloading yt-dlp...", 0);
 
-      // Update status bar
-      m_statusBar->SetStatusText("Downloading: " + url, 0);
-      m_statusBar->SetStatusText(
-          wxString::Format("Downloads: %d", manager.GetTotalDownloads()), 1);
+          // Show progress
+          wxProgressDialog progressDlg(
+              "Downloading yt-dlp",
+              "Please wait while yt-dlp is being downloaded...",
+              100, this,
+              wxPD_APP_MODAL | wxPD_AUTO_HIDE);
+
+          progressDlg.Pulse();
+
+          std::atomic<bool> downloadComplete{false};
+          std::atomic<bool> downloadSuccess{false};
+          std::string downloadError;
+          std::mutex downloadErrorMutex;
+
+          ytdlp.DownloadYtDlp([&](bool success, const std::string &error) {
+            downloadSuccess.store(success);
+            {
+              std::lock_guard<std::mutex> lock(downloadErrorMutex);
+              downloadError = error;
+            }
+            downloadComplete.store(true);
+          });
+
+          // Wait for download to complete
+          while (!downloadComplete.load()) {
+            progressDlg.Pulse();
+            wxMilliSleep(100);
+            wxYield();
+          }
+
+          progressDlg.Close();
+
+          if (downloadSuccess.load()) {
+            m_statusBar->SetStatusText("yt-dlp installed! Checking ffmpeg...", 0);
+
+            // Also download ffmpeg if not available (for high-quality video merging)
+            if (!ytdlp.IsFfmpegAvailable()) {
+              wxProgressDialog ffmpegDlg(
+                  "Downloading ffmpeg",
+                  "Downloading ffmpeg for high-quality video support...",
+                  100, this,
+                  wxPD_APP_MODAL | wxPD_AUTO_HIDE);
+
+              ffmpegDlg.Pulse();
+
+              std::atomic<bool> ffmpegComplete{false};
+              std::atomic<bool> ffmpegSuccess{false};
+              std::string ffmpegError;
+              std::mutex ffmpegErrorMutex;
+
+              ytdlp.DownloadFfmpeg([&](bool success, const std::string &error) {
+                ffmpegSuccess.store(success);
+                {
+                  std::lock_guard<std::mutex> lock(ffmpegErrorMutex);
+                  ffmpegError = error;
+                }
+                ffmpegComplete.store(true);
+              });
+
+              while (!ffmpegComplete.load()) {
+                ffmpegDlg.Pulse();
+                wxMilliSleep(100);
+                wxYield();
+              }
+
+              ffmpegDlg.Close();
+
+              if (ffmpegSuccess.load()) {
+                // Also download Deno if not available (required for YouTube)
+                if (!ytdlp.IsDenoAvailable()) {
+                  m_statusBar->SetStatusText("Downloading Deno (JS runtime)...", 0);
+                  wxProgressDialog denoDlg(
+                      "Downloading Deno",
+                      "Downloading JavaScript runtime for YouTube support...",
+                      100, this,
+                      wxPD_APP_MODAL | wxPD_AUTO_HIDE);
+
+                  denoDlg.Pulse();
+
+                  std::atomic<bool> denoComplete{false};
+                  std::atomic<bool> denoSuccess{false};
+                  std::string denoError;
+                  std::mutex denoErrorMutex;
+
+                  ytdlp.DownloadDeno([&](bool success, const std::string &error) {
+                    denoSuccess.store(success);
+                    {
+                      std::lock_guard<std::mutex> lock(denoErrorMutex);
+                      denoError = error;
+                    }
+                    denoComplete.store(true);
+                  });
+
+                  while (!denoComplete.load()) {
+                    denoDlg.Pulse();
+                    wxMilliSleep(100);
+                    wxYield();
+                  }
+
+                  denoDlg.Close();
+
+                  if (denoSuccess.load()) {
+                    wxMessageBox("All components installed successfully!\n\nyt-dlp, ffmpeg, and Deno are ready.\nYour download will now start with best quality.",
+                                 "Success", wxOK | wxICON_INFORMATION, this);
+                  } else {
+                    std::string denoErrorCopy;
+                    {
+                      std::lock_guard<std::mutex> lock(denoErrorMutex);
+                      denoErrorCopy = denoError;
+                    }
+                    wxMessageBox("yt-dlp and ffmpeg installed!\n\nNote: Deno installation failed. YouTube may show warnings.\n\nError: " + denoErrorCopy,
+                                 "Partial Success", wxOK | wxICON_WARNING, this);
+                  }
+                } else {
+                  wxMessageBox("yt-dlp and ffmpeg installed successfully!\n\nYour download will now start with best quality.",
+                               "Success", wxOK | wxICON_INFORMATION, this);
+                }
+              } else {
+                std::string ffmpegErrorCopy;
+                {
+                  std::lock_guard<std::mutex> lock(ffmpegErrorMutex);
+                  ffmpegErrorCopy = ffmpegError;
+                }
+                // ffmpeg failed but yt-dlp works - continue with reduced quality
+                wxMessageBox("yt-dlp installed successfully!\n\nNote: ffmpeg installation failed. Videos will download in reduced quality.\n\nError: " + ffmpegErrorCopy,
+                             "Partial Success", wxOK | wxICON_WARNING, this);
+              }
+            } else {
+              wxMessageBox("yt-dlp installed successfully!\n\nYour download will now start.",
+                           "Success", wxOK | wxICON_INFORMATION, this);
+            }
+          } else {
+            std::string downloadErrorCopy;
+            {
+              std::lock_guard<std::mutex> lock(downloadErrorMutex);
+              downloadErrorCopy = downloadError;
+            }
+            wxMessageBox(wxString::Format("Failed to install yt-dlp:\n%s", downloadErrorCopy),
+                         "Error", wxOK | wxICON_ERROR, this);
+            m_statusBar->SetStatusText("yt-dlp installation failed", 0);
+            return;
+          }
+        } else {
+          m_statusBar->SetStatusText("yt-dlp required for video downloads", 0);
+          return;
+        }
+      }
+
+      // Add download to the manager
+      DownloadManager &manager = DownloadManager::GetInstance();
+      int downloadId = manager.AddDownload(url.ToStdString());
+
+      // Check for validation error
+      if (downloadId < 0) {
+        wxMessageBox("Invalid or unsupported URL.\n\nSupported: HTTP, HTTPS, FTP\nNot supported: blob:, data:, streaming (m3u8, mpd)",
+                     "Invalid URL", wxOK | wxICON_ERROR, this);
+        m_statusBar->SetStatusText("Invalid URL entered", 0);
+        return;
+      }
+
+      // Get the download object and add to table
+      auto download = manager.GetDownload(downloadId);
+      if (download) {
+        // Set referer if provided (for protected downloads)
+        if (!referer.IsEmpty()) {
+          download->SetReferer(referer.ToStdString());
+          std::cout << "[MainWindow] Set referer on download: " << referer.ToStdString() << std::endl;
+        }
+
+        m_downloadsTable->AddDownload(download);
+
+        // For video sites, show quality selection dialog
+        // But skip dialog for problematic sites that tend to hang
+        std::string urlStr = url.ToStdString();
+        bool isVideoSite = ytdlp.IsVideoSiteUrl(urlStr);
+
+        // Sites that should skip quality dialog (tend to hang or have issues)
+        bool skipQualityDialog = (urlStr.find("xhamster.com") != std::string::npos ||
+                                   urlStr.find("xvideos.com") != std::string::npos ||
+                                   urlStr.find("xnxx.com") != std::string::npos ||
+                                   urlStr.find("redtube.com") != std::string::npos);
+
+        if (isVideoSite && !skipQualityDialog) {
+          m_statusBar->SetStatusText("Fetching video info...", 0);
+          wxBusyCursor wait;
+          wxYield();
+
+          // Get video title
+          std::string videoTitle = ytdlp.GetVideoTitle(urlStr);
+          if (videoTitle.empty()) {
+            videoTitle = "Video";
+          }
+
+          // Show quality dialog
+          VideoQualityDialog qualityDlg(this, urlStr, videoTitle);
+          if (qualityDlg.ShowModal() == wxID_OK) {
+            std::string formatId = qualityDlg.GetSelectedFormatId();
+            manager.StartDownloadWithFormat(downloadId, formatId);
+            m_statusBar->SetStatusText("Downloading: " + url, 0);
+          } else {
+            // User cancelled - remove the download
+            manager.RemoveDownload(downloadId, false);
+            m_downloadsTable->RemoveDownload(downloadId);
+            m_statusBar->SetStatusText("Download cancelled", 0);
+            return;
+          }
+        } else if (isVideoSite) {
+          // Skip quality dialog for problematic sites - use default format
+          m_statusBar->SetStatusText("Starting download (default quality)...", 0);
+          manager.StartDownloadWithFormat(downloadId, ""); // Empty = default
+          m_statusBar->SetStatusText("Downloading: " + url, 0);
+        } else {
+          // Start the download automatically for non-video files
+          manager.StartDownload(downloadId);
+          m_statusBar->SetStatusText("Downloading: " + url, 0);
+        }
+
+        m_statusBar->SetStatusText(
+            wxString::Format("Downloads: %d", manager.GetTotalDownloads()), 1);
+      }
+    } catch (const std::exception& e) {
+      wxMessageBox(wxString::Format("Error processing URL: %s", e.what()),
+                   "Error", wxOK | wxICON_ERROR, this);
+      m_statusBar->SetStatusText("Error processing URL", 0);
+    } catch (...) {
+      wxMessageBox("An unexpected error occurred while processing the URL.",
+                   "Error", wxOK | wxICON_ERROR, this);
+      m_statusBar->SetStatusText("Unexpected error", 0);
     }
   }
 }
@@ -523,10 +856,25 @@ void MainWindow::OnUpdateTimer(wxTimerEvent &event) {
 
   // Periodic database save (every 60 ticks = 30 seconds at 500ms interval)
   // This ensures progress is saved in case of crash
+  // Run in background thread to avoid UI blocking
   m_dbSaveCounter++;
-  if (m_dbSaveCounter >= 60) {
+  if (m_dbSaveCounter >= 60 && !m_shuttingDown.load() && !m_dbSaveInProgress.load()) {
     m_dbSaveCounter = 0;
-    manager.SaveAllDownloadsToDatabase();
+
+    // Join previous save thread if it exists
+    {
+      std::lock_guard<std::mutex> lock(m_dbSaveThreadMutex);
+      if (m_dbSaveThread.joinable()) {
+        m_dbSaveThread.join();
+      }
+
+      m_dbSaveInProgress.store(true);
+      m_dbSaveThread = std::thread([this]() {
+        DownloadManager::GetInstance().SaveAllDownloadsToDatabase();
+        DatabaseManager::GetInstance().Flush();
+        m_dbSaveInProgress.store(false);
+      });
+    }
   }
 
   // Update status bar
@@ -629,3 +977,16 @@ WXLRESULT MainWindow::MSWWindowProc(WXUINT nMsg, WXWPARAM wParam, WXLPARAM lPara
   return wxFrame::MSWWindowProc(nMsg, wParam, lParam);
 }
 #endif
+
+void MainWindow::OnGrabber(wxCommandEvent &event) {
+  wxMessageBox(
+      "URL Grabber\n\n"
+      "The URL Grabber feature allows you to extract multiple download links "
+      "from a webpage.\n\n"
+      "This feature is planned for a future release.\n\n"
+      "For now, you can:\n"
+      "- Use the browser extension to send links directly to LDM\n"
+      "- Drag and drop URLs onto the main window\n"
+      "- Use Add URL (Ctrl+N) to add downloads manually",
+      "URL Grabber", wxOK | wxICON_INFORMATION, this);
+}

@@ -19,6 +19,7 @@ public:
   // Database operations
   bool Initialize(const std::string &dbPath = "");
   void Close();
+  void Flush();  // Explicitly save if dirty
 
   // Download CRUD operations
   bool SaveDownload(const Download &download);
@@ -47,7 +48,12 @@ public:
   bool BeginTransaction() { return true; }
   bool CommitTransaction() { 
     std::lock_guard<std::mutex> lock(m_mutex);
-    return SaveDatabase(); 
+    if (m_dirty) {
+      bool result = SaveDatabase();
+      m_dirty = false;
+      return result;
+    }
+    return true;
   }
   bool RollbackTransaction() { return true; }
 
@@ -57,6 +63,7 @@ private:
 
   std::string m_dbPath;
   std::mutex m_mutex;
+  bool m_dirty = false;  // Tracks unsaved changes
 
   // In-memory data
   struct AppData {
@@ -67,6 +74,7 @@ private:
 
   bool LoadDatabase();
   bool SaveDatabase();
+  void MarkDirty() { m_dirty = true; }
 
   // Helpers
   void CreateDefaultCategories();

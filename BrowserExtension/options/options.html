@@ -1,39 +1,734 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Last Download Manager Options</title>
+    <title>LDM Settings</title>
     <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 20px; max-width: 600px; margin: 0 auto; }
-        h1 { border-bottom: 1px solid #ccc; padding-bottom: 10px; font-size: 24px; color: #333; }
-        .option-group { margin-bottom: 20px; padding: 15px; background: #f9f9f9; border-radius: 5px; border: 1px solid #eee; }
-        label { display: block; margin-bottom: 10px; cursor: pointer; }
-        input[type="checkbox"] { margin-right: 10px; }
-        textarea { width: 100%; height: 100px; margin-top: 5px; padding: 8px; box-sizing: border-box; font-family: monospace; border: 1px solid #ccc; border-radius: 3px; }
-        .hint { font-size: 12px; color: #666; margin-top: 5px; }
-        button { background-color: #0078d7; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; font-size: 14px; }
-        button:hover { background-color: #0063b1; }
-        .status { margin-top: 10px; color: green; display: none; }
+        :root {
+            --primary: #6366f1;
+            --primary-dark: #4f46e5;
+            --primary-light: #818cf8;
+            --success: #10b981;
+            --success-bg: rgba(16, 185, 129, 0.1);
+            --error: #ef4444;
+            --warning: #f59e0b;
+            --bg: #f8fafc;
+            --bg-card: #ffffff;
+            --text: #1e293b;
+            --text-secondary: #64748b;
+            --text-muted: #94a3b8;
+            --border: #e2e8f0;
+            --shadow: 0 1px 3px rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.1);
+            --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1);
+        }
+
+        :root.dark {
+            --primary: #818cf8;
+            --primary-dark: #6366f1;
+            --bg: #0f172a;
+            --bg-card: #1e293b;
+            --text: #f1f5f9;
+            --text-secondary: #cbd5e1;
+            --text-muted: #64748b;
+            --border: #334155;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            padding: 40px 20px;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        /* Header */
+        .page-header {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            margin-bottom: 32px;
+        }
+
+        .header-icon {
+            width: 64px;
+            height: 64px;
+            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+            border-radius: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: var(--shadow-lg);
+        }
+
+        .header-icon img {
+            width: 40px;
+            height: 40px;
+            filter: brightness(0) invert(1);
+        }
+
+        .header-text h1 {
+            font-size: 32px;
+            font-weight: 700;
+            color: var(--text);
+            letter-spacing: -0.5px;
+        }
+
+        .header-text p {
+            font-size: 14px;
+            color: var(--text-secondary);
+            margin-top: 4px;
+        }
+
+        .header-actions {
+            margin-left: auto;
+            display: flex;
+            gap: 12px;
+        }
+
+        /* Cards */
+        .card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 24px;
+            margin-bottom: 20px;
+            box-shadow: var(--shadow);
+        }
+
+        .card-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 20px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .card-icon {
+            width: 44px;
+            height: 44px;
+            background: linear-gradient(135deg, var(--primary-light) 0%, var(--primary) 100%);
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+        }
+
+        .card-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: var(--text);
+        }
+
+        .card-description {
+            font-size: 13px;
+            color: var(--text-muted);
+            margin-top: 2px;
+        }
+
+        /* Settings Row */
+        .setting-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 16px;
+            background: var(--bg);
+            border-radius: 12px;
+            margin-bottom: 12px;
+            transition: background 0.2s;
+        }
+
+        .setting-row:hover {
+            background: var(--border);
+        }
+
+        .setting-info {
+            flex: 1;
+        }
+
+        .setting-info h3 {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text);
+        }
+
+        .setting-info p {
+            font-size: 12px;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+
+        /* Toggle Switch */
+        .switch {
+            position: relative;
+            width: 52px;
+            height: 28px;
+            flex-shrink: 0;
+        }
+
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: var(--border);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            border-radius: 28px;
+        }
+
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 22px;
+            width: 22px;
+            left: 3px;
+            bottom: 3px;
+            background: white;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            border-radius: 50%;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+        }
+
+        input:checked + .slider {
+            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+        }
+
+        input:checked + .slider:before {
+            transform: translateX(24px);
+        }
+
+        /* Form Elements */
+        .form-group {
+            margin-bottom: 16px;
+        }
+
+        .form-group label {
+            display: block;
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text);
+            margin-bottom: 8px;
+        }
+
+        .form-group input[type="text"],
+        .form-group input[type="number"],
+        .form-group textarea,
+        .form-group select {
+            width: 100%;
+            padding: 12px 16px;
+            border: 2px solid var(--border);
+            border-radius: 10px;
+            font-size: 14px;
+            color: var(--text);
+            background: var(--bg);
+            transition: all 0.2s;
+            font-family: inherit;
+        }
+
+        .form-group textarea {
+            min-height: 100px;
+            resize: vertical;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 13px;
+        }
+
+        .form-group input:focus,
+        .form-group textarea:focus,
+        .form-group select:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+        }
+
+        .form-hint {
+            font-size: 12px;
+            color: var(--text-muted);
+            margin-top: 6px;
+        }
+
+        /* Grid */
+        .grid-2 {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+        }
+
+        /* Buttons */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            padding: 12px 24px;
+            border-radius: 10px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: none;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+            color: white;
+            box-shadow: var(--shadow);
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: var(--shadow-lg);
+        }
+
+        .btn-secondary {
+            background: var(--bg);
+            color: var(--text);
+            border: 2px solid var(--border);
+        }
+
+        .btn-secondary:hover {
+            background: var(--border);
+        }
+
+        .btn-danger {
+            background: var(--error);
+            color: white;
+        }
+
+        .btn-danger:hover {
+            opacity: 0.9;
+        }
+
+        /* Toast */
+        .toast {
+            position: fixed;
+            bottom: 24px;
+            left: 50%;
+            transform: translateX(-50%) translateY(100px);
+            background: var(--success);
+            color: white;
+            padding: 14px 24px;
+            border-radius: 12px;
+            font-size: 14px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            box-shadow: var(--shadow-lg);
+            opacity: 0;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            z-index: 1000;
+        }
+
+        .toast.show {
+            opacity: 1;
+            transform: translateX(-50%) translateY(0);
+        }
+
+        /* Stats Card */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 16px;
+            margin-bottom: 20px;
+        }
+
+        .stat-card {
+            background: var(--bg);
+            border-radius: 12px;
+            padding: 16px;
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 24px;
+            font-weight: 700;
+            color: var(--primary);
+        }
+
+        .stat-label {
+            font-size: 11px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-top: 4px;
+        }
+
+        /* Tabs */
+        .tabs {
+            display: flex;
+            gap: 4px;
+            background: var(--bg);
+            padding: 4px;
+            border-radius: 12px;
+            margin-bottom: 24px;
+        }
+
+        .tab-btn {
+            flex: 1;
+            padding: 12px 16px;
+            background: transparent;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-muted);
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .tab-btn.active {
+            background: var(--bg-card);
+            color: var(--primary);
+            box-shadow: var(--shadow);
+        }
+
+        .tab-btn:hover:not(.active) {
+            color: var(--text);
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        /* Keyboard Shortcut Display */
+        .shortcut-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .shortcut-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 16px;
+            background: var(--bg);
+            border-radius: 10px;
+        }
+
+        .shortcut-item span {
+            font-size: 14px;
+            color: var(--text);
+        }
+
+        .shortcut-keys {
+            display: flex;
+            gap: 4px;
+        }
+
+        .shortcut-keys kbd {
+            background: var(--border);
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-family: inherit;
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-secondary);
+        }
+
+        /* Color Themes */
+        .theme-grid {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .theme-option {
+            width: 48px;
+            height: 48px;
+            border-radius: 12px;
+            cursor: pointer;
+            border: 3px solid transparent;
+            transition: all 0.2s;
+            position: relative;
+        }
+
+        .theme-option.active {
+            border-color: var(--text);
+        }
+
+        .theme-option:hover {
+            transform: scale(1.1);
+        }
+
+        .theme-option::after {
+            content: '✓';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            font-size: 18px;
+            opacity: 0;
+        }
+
+        .theme-option.active::after {
+            opacity: 1;
+        }
     </style>
 </head>
 <body>
-    <h1>LDM Integration</h1>
+    <div class="container">
+        <div class="page-header">
+            <div class="header-icon">
+                <img src="../icon.png" alt="LDM">
+            </div>
+            <div class="header-text">
+                <h1>LDM Settings</h1>
+                <p>Configure your download manager integration</p>
+            </div>
+            <div class="header-actions">
+                <button class="btn btn-secondary" id="themeToggle">
+                    <span id="themeIcon">&#127769;</span> Dark Mode
+                </button>
+            </div>
+        </div>
 
-    <div class="option-group">
-        <label>
-            <input type="checkbox" id="interceptAll">
-            Intercept all downloads automatically
-        </label>
-        <div class="hint">If unchecked, use the right-click context menu "Download with LDM" manually.</div>
+        <!-- Stats -->
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-value" id="statTotal">0</div>
+                <div class="stat-label">Total Downloads</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="statToday">0</div>
+                <div class="stat-label">Today</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="statData">0 MB</div>
+                <div class="stat-label">Data Transferred</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="statStatus">--</div>
+                <div class="stat-label">LDM Status</div>
+            </div>
+        </div>
+
+        <!-- Tabs -->
+        <div class="tabs">
+            <button class="tab-btn active" data-tab="general">General</button>
+            <button class="tab-btn" data-tab="filters">Filters</button>
+            <button class="tab-btn" data-tab="advanced">Advanced</button>
+            <button class="tab-btn" data-tab="shortcuts">Shortcuts</button>
+        </div>
+
+        <!-- General Tab -->
+        <div class="tab-content active" id="tab-general">
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-icon">&#128229;</div>
+                    <div>
+                        <div class="card-title">Download Interception</div>
+                        <div class="card-description">Control automatic download handling</div>
+                    </div>
+                </div>
+
+                <div class="setting-row">
+                    <div class="setting-info">
+                        <h3>Auto-Intercept Downloads</h3>
+                        <p>Automatically capture browser downloads and send to LDM</p>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" id="interceptAll">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+
+                <div class="setting-row">
+                    <div class="setting-info">
+                        <h3>Show Notifications</h3>
+                        <p>Display desktop notifications when downloads start</p>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" id="notificationsEnabled">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+
+                <div class="setting-row">
+                    <div class="setting-info">
+                        <h3>Sound Effects</h3>
+                        <p>Play audio feedback for actions</p>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" id="soundEnabled">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+            </div>
+        </div>
+
+        <!-- Filters Tab -->
+        <div class="tab-content" id="tab-filters">
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-icon">&#128196;</div>
+                    <div>
+                        <div class="card-title">File Type Filters</div>
+                        <div class="card-description">Exclude certain file types from interception</div>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>Ignored Extensions</label>
+                    <textarea id="ignoredExtensions" placeholder="jpg&#10;png&#10;gif"></textarea>
+                    <p class="form-hint">One extension per line (without dots). These files will be downloaded by Chrome instead of LDM.</p>
+                </div>
+
+                <div class="form-group">
+                    <label>Minimum File Size (KB)</label>
+                    <input type="number" id="minFileSize" value="0" min="0" placeholder="0 = no minimum">
+                    <p class="form-hint">Only intercept files larger than this size. Set to 0 to disable.</p>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-icon">&#127760;</div>
+                    <div>
+                        <div class="card-title">Domain Filters</div>
+                        <div class="card-description">Control which websites can use LDM</div>
+                    </div>
+                </div>
+
+                <div class="grid-2">
+                    <div class="form-group">
+                        <label>Domain Whitelist</label>
+                        <textarea id="domainWhitelist" placeholder="github.com&#10;example.com"></textarea>
+                        <p class="form-hint">Only intercept from these domains (leave empty to allow all)</p>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Domain Blacklist</label>
+                        <textarea id="domainBlacklist" placeholder="ads.example.com"></textarea>
+                        <p class="form-hint">Never intercept from these domains</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Advanced Tab -->
+        <div class="tab-content" id="tab-advanced">
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-icon">&#128190;</div>
+                    <div>
+                        <div class="card-title">Data Management</div>
+                        <div class="card-description">Manage your extension data</div>
+                    </div>
+                </div>
+
+                <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+                    <button class="btn btn-secondary" id="exportSettings">
+                        &#128194; Export Settings
+                    </button>
+                    <button class="btn btn-secondary" id="importSettings">
+                        &#128229; Import Settings
+                    </button>
+                    <button class="btn btn-secondary" id="resetStats">
+                        &#128202; Reset Statistics
+                    </button>
+                    <button class="btn btn-secondary" id="clearHistory">
+                        &#128465; Clear History
+                    </button>
+                    <button class="btn btn-danger" id="resetAll">
+                        &#9888; Reset Everything
+                    </button>
+                </div>
+
+                <input type="file" id="importFile" accept=".json" style="display: none;">
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-icon">&#127912;</div>
+                    <div>
+                        <div class="card-title">Theme</div>
+                        <div class="card-description">Choose a color scheme</div>
+                    </div>
+                </div>
+
+                <div class="theme-grid">
+                    <div class="theme-option" data-theme="indigo" style="background: linear-gradient(135deg, #6366f1, #4f46e5);" title="Indigo"></div>
+                    <div class="theme-option" data-theme="blue" style="background: linear-gradient(135deg, #3b82f6, #2563eb);" title="Blue"></div>
+                    <div class="theme-option" data-theme="green" style="background: linear-gradient(135deg, #10b981, #059669);" title="Green"></div>
+                    <div class="theme-option" data-theme="purple" style="background: linear-gradient(135deg, #8b5cf6, #7c3aed);" title="Purple"></div>
+                    <div class="theme-option" data-theme="pink" style="background: linear-gradient(135deg, #ec4899, #db2777);" title="Pink"></div>
+                    <div class="theme-option" data-theme="orange" style="background: linear-gradient(135deg, #f97316, #ea580c);" title="Orange"></div>
+                    <div class="theme-option" data-theme="red" style="background: linear-gradient(135deg, #ef4444, #dc2626);" title="Red"></div>
+                    <div class="theme-option" data-theme="gray" style="background: linear-gradient(135deg, #6b7280, #4b5563);" title="Gray"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Shortcuts Tab -->
+        <div class="tab-content" id="tab-shortcuts">
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-icon">&#9000;</div>
+                    <div>
+                        <div class="card-title">Keyboard Shortcuts</div>
+                        <div class="card-description">Quick actions with hotkeys</div>
+                    </div>
+                </div>
+
+                <div class="shortcut-list">
+                    <div class="shortcut-item">
+                        <span>Download current page</span>
+                        <div class="shortcut-keys">
+                            <kbd>Alt</kbd>
+                            <kbd>D</kbd>
+                        </div>
+                    </div>
+                    <div class="shortcut-item">
+                        <span>Grab all media links</span>
+                        <div class="shortcut-keys">
+                            <kbd>Alt</kbd>
+                            <kbd>G</kbd>
+                        </div>
+                    </div>
+                </div>
+
+                <p style="margin-top: 16px; font-size: 12px; color: var(--text-muted);">
+                    To change shortcuts, go to <code>chrome://extensions/shortcuts</code>
+                </p>
+            </div>
+        </div>
+
+        <!-- Save Button -->
+        <div style="display: flex; gap: 12px; margin-top: 24px;">
+            <button class="btn btn-primary" id="saveSettings" style="flex: 1;">
+                &#10003; Save All Settings
+            </button>
+        </div>
     </div>
 
-    <div class="option-group">
-        <label for="ignoredExtensions">Ignored File Extensions (one per line):</label>
-        <textarea id="ignoredExtensions" placeholder="jpg&#10;png&#10;gif&#10;pdf"></textarea>
-        <div class="hint">Files with these extensions will be downloaded by Chrome, not LDM. (Only applies when automatic interception is enabled)</div>
+    <div id="toast" class="toast">
+        <span>&#10003;</span> <span id="toastMessage">Settings saved!</span>
     </div>
-
-    <button id="save">Save Settings</button>
-    <div id="status" class="status">Settings saved.</div>
 
     <script src="options.js"></script>
 </body>

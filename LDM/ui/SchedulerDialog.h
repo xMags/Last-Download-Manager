@@ -25,6 +25,7 @@ public:
 
 private:
   void InitUI();
+  void LoadCurrentSettings();
 
   // UI Controls
   wxCheckBox *m_chkStartTime;
