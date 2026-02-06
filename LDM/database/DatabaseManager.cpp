@@ -42,7 +42,18 @@ bool DatabaseManager::Initialize(const std::string &dbPath) {
 
 void DatabaseManager::Close() { 
   std::lock_guard<std::mutex> lock(m_mutex);
-  SaveDatabase(); 
+  if (m_dirty) {
+    SaveDatabase();
+    m_dirty = false;
+  }
+}
+
+void DatabaseManager::Flush() {
+  std::lock_guard<std::mutex> lock(m_mutex);
+  if (m_dirty) {
+    SaveDatabase();
+    m_dirty = false;
+  }
 }
 
 bool DatabaseManager::LoadDatabase() {
@@ -98,6 +109,8 @@ bool DatabaseManager::LoadDatabase() {
               downloadNode->GetAttribute("category", "").ToStdString());
           download->SetDescription(
               downloadNode->GetAttribute("description", "").ToStdString());
+          download->SetReferer(
+              downloadNode->GetAttribute("referer", "").ToStdString());
 
           std::string statusStr =
               downloadNode->GetAttribute("status", "Queued").ToStdString();
@@ -117,6 +130,11 @@ bool DatabaseManager::LoadDatabase() {
 
           download->SetErrorMessage(
               downloadNode->GetAttribute("error_message", "").ToStdString());
+
+          // Load yt-dlp flag
+          std::string isYtDlp =
+              downloadNode->GetAttribute("is_ytdlp", "0").ToStdString();
+          download->SetYtDlpDownload(isYtDlp == "1");
 
           // Load chunk metadata if present
           std::vector<DownloadChunk> chunks;
@@ -196,7 +214,9 @@ bool DatabaseManager::SaveDatabase() {
     node->AddAttribute("status", download->GetStatusString());
     node->AddAttribute("category", download->GetCategory());
     node->AddAttribute("description", download->GetDescription());
+    node->AddAttribute("referer", download->GetReferer());
     node->AddAttribute("error_message", download->GetErrorMessage());
+    node->AddAttribute("is_ytdlp", download->IsYtDlpDownload() ? "1" : "0");
 
     auto chunks = download->GetChunksCopy();
     if (!chunks.empty()) {
@@ -230,7 +250,38 @@ bool DatabaseManager::SaveDatabase() {
     node->AddAttribute("value", set.second);
   }
 
-  return doc.Save(m_dbPath);
+  // Atomic save: write to temp file, then use ReplaceFile for atomic replacement
+  std::string tempPath = m_dbPath + ".tmp";
+  if (!doc.Save(tempPath)) {
+    return false;
+  }
+
+  // Use ReplaceFile API for atomic replacement (safer against race conditions)
+  // ReplaceFile is atomic and handles concurrent access better than Delete+Rename
+  if (ReplaceFileA(m_dbPath.c_str(), tempPath.c_str(), NULL,
+                   REPLACEFILE_IGNORE_MERGE_ERRORS, NULL, NULL)) {
+    return true;
+  }
+
+  // ReplaceFile fails if destination doesn't exist, fallback to MoveFile
+  DWORD err = GetLastError();
+  if (err == ERROR_FILE_NOT_FOUND) {
+    // First save - just rename temp to target
+    if (MoveFileA(tempPath.c_str(), m_dbPath.c_str())) {
+      return true;
+    }
+  }
+
+  // Final fallback: delete and rename (less safe but works)
+  DeleteFileA(m_dbPath.c_str());
+  if (!MoveFileA(tempPath.c_str(), m_dbPath.c_str())) {
+    // If rename fails, try to restore from temp
+    CopyFileA(tempPath.c_str(), m_dbPath.c_str(), FALSE);
+    DeleteFileA(tempPath.c_str());
+    return false;
+  }
+
+  return true;
 }
 
 bool DatabaseManager::SaveDownload(const Download &download) {
@@ -249,6 +300,7 @@ bool DatabaseManager::SaveDownload(const Download &download) {
     (*it)->SetDownloadedSize(download.GetDownloadedSize());
     (*it)->SetErrorMessage(download.GetErrorMessage());
     (*it)->SetChunks(download.GetChunksCopy());
+    (*it)->SetYtDlpDownload(download.IsYtDlpDownload());
     // Copy other fields if needed, but usually only status/progress changes
     // frequently.
   } else {
@@ -259,13 +311,16 @@ bool DatabaseManager::SaveDownload(const Download &download) {
     newDownload->SetFilename(download.GetFilename());
     newDownload->SetCategory(download.GetCategory());
     newDownload->SetDescription(download.GetDescription());
+    newDownload->SetReferer(download.GetReferer());
     newDownload->SetTotalSize(download.GetTotalSize());
     newDownload->SetDownloadedSize(download.GetDownloadedSize());
     newDownload->SetStatus(download.GetStatus());
     newDownload->SetChunks(download.GetChunksCopy());
+    newDownload->SetYtDlpDownload(download.IsYtDlpDownload());
     m_data.downloads.push_back(newDownload);
   }
-  return SaveDatabase();
+  MarkDirty();
+  return true;
 }
 
 bool DatabaseManager::SyncAllDownloads(
@@ -286,16 +341,19 @@ bool DatabaseManager::SyncAllDownloads(
     copy->SetFilename(download->GetFilename());
     copy->SetCategory(download->GetCategory());
     copy->SetDescription(download->GetDescription());
+    copy->SetReferer(download->GetReferer());
     copy->SetTotalSize(download->GetTotalSize());
     copy->SetDownloadedSize(download->GetDownloadedSize());
     copy->SetStatus(download->GetStatus());
     copy->SetErrorMessage(download->GetErrorMessage());
     copy->SetChunks(download->GetChunksCopy());
+    copy->SetYtDlpDownload(download->IsYtDlpDownload());
 
     m_data.downloads.push_back(copy);
   }
 
-  return SaveDatabase();
+  MarkDirty();
+  return true;
 }
 
 bool DatabaseManager::UpdateDownload(const Download &download) {
@@ -311,7 +369,8 @@ bool DatabaseManager::DeleteDownload(int downloadId) {
 
   if (it != m_data.downloads.end()) {
     m_data.downloads.erase(it, m_data.downloads.end());
-    return SaveDatabase();
+    MarkDirty();
+    return true;
   }
   return false;
 }
@@ -336,6 +395,7 @@ std::unique_ptr<Download> DatabaseManager::LoadDownload(int downloadId) {
     copy->SetStatus(d->GetStatus());
     copy->SetErrorMessage(d->GetErrorMessage());
     copy->SetChunks(d->GetChunksCopy());
+    copy->SetYtDlpDownload(d->IsYtDlpDownload());
     return copy;
   }
   return nullptr;
@@ -355,6 +415,7 @@ std::vector<std::unique_ptr<Download>> DatabaseManager::LoadAllDownloads() {
     copy->SetStatus(d->GetStatus());
     copy->SetErrorMessage(d->GetErrorMessage());
     copy->SetChunks(d->GetChunksCopy());
+    copy->SetYtDlpDownload(d->IsYtDlpDownload());
     result.push_back(std::move(copy));
   }
   return result;
@@ -370,7 +431,7 @@ bool DatabaseManager::AddCategory(const std::string &name) {
   if (std::find(m_data.categories.begin(), m_data.categories.end(), name) ==
       m_data.categories.end()) {
     m_data.categories.push_back(name);
-    return SaveDatabase();
+    MarkDirty();
   }
   return true;
 }
@@ -381,7 +442,8 @@ bool DatabaseManager::DeleteCategory(const std::string &name) {
       std::remove(m_data.categories.begin(), m_data.categories.end(), name);
   if (it != m_data.categories.end()) {
     m_data.categories.erase(it, m_data.categories.end());
-    return SaveDatabase();
+    MarkDirty();
+    return true;
   }
   return false;
 }
@@ -413,13 +475,15 @@ bool DatabaseManager::SetSetting(const std::string &key,
   } else {
     m_data.settings.push_back({key, value});
   }
-  return SaveDatabase();
+  MarkDirty();
+  return true;
 }
 
 bool DatabaseManager::ClearHistory() {
   std::lock_guard<std::mutex> lock(m_mutex);
   m_data.downloads.clear();
-  return SaveDatabase();
+  MarkDirty();
+  return true;
 }
 
 bool DatabaseManager::ClearCompleted() {
@@ -430,10 +494,11 @@ bool DatabaseManager::ClearCompleted() {
                        return d->GetStatus() == DownloadStatus::Completed;
                      }),
       m_data.downloads.end());
-  return SaveDatabase();
+  MarkDirty();
+  return true;
 }
 
 void DatabaseManager::CreateDefaultCategories() {
   m_data.categories = {"All Downloads", "Compressed", "Documents",
-                       "Music",         "Programs",   "Video"};
+                       "Images",        "Music",      "Programs",   "Video"};
 }

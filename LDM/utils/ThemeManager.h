@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../core/Download.h"
+#include <mutex>
 #include <wx/settings.h>
 #include <wx/wx.h>
 
@@ -30,6 +31,7 @@ private:
   ThemeManager(const ThemeManager &) = delete;
   ThemeManager &operator=(const ThemeManager &) = delete;
 
+  mutable std::mutex m_mutex;
   bool m_isDarkMode;
 
   // Dark mode palette

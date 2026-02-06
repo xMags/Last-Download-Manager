@@ -40,6 +40,10 @@ private:
   // Event handlers
   void OnSelectionChanged(wxTreeEvent &event);
   void OnItemRightClick(wxTreeEvent &event);
+  void OnContextMenuOpen(wxCommandEvent &event);
+  void OnContextMenuNewCategory(wxCommandEvent &event);
+  void OnContextMenuRename(wxCommandEvent &event);
+  void OnContextMenuDelete(wxCommandEvent &event);
 
   wxDECLARE_EVENT_TABLE();
 };

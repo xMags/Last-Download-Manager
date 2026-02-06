@@ -1,6 +1,18 @@
 #include "CategoriesPanel.h"
+#include "MainWindow.h"
+#include "../core/DownloadManager.h"
+#include "../database/DatabaseManager.h"
 #include "../utils/ThemeManager.h"
 #include <wx/artprov.h>
+#include <wx/textdlg.h>
+
+// Context menu IDs
+enum {
+  ID_CONTEXT_OPEN_FOLDER = wxID_HIGHEST + 1000,
+  ID_CONTEXT_NEW_CATEGORY,
+  ID_CONTEXT_RENAME,
+  ID_CONTEXT_DELETE
+};
 
 wxBEGIN_EVENT_TABLE(CategoriesPanel, wxPanel)
     EVT_TREE_SEL_CHANGED(wxID_ANY, CategoriesPanel::OnSelectionChanged)
@@ -105,7 +117,15 @@ wxString CategoriesPanel::GetSelectedCategory() const {
     return "All Downloads";
   }
 
-  return m_treeCtrl->GetItemText(selectedId);
+  wxString text = m_treeCtrl->GetItemText(selectedId);
+  
+  // Strip count suffix like " (5)" if present
+  int parenPos = text.Find(" (");
+  if (parenPos != wxNOT_FOUND) {
+    text = text.Left(parenPos);
+  }
+  
+  return text;
 }
 
 void CategoriesPanel::UpdateCategoryCount(const wxString &category, int count) {
@@ -144,8 +164,7 @@ void CategoriesPanel::UpdateCategoryCount(const wxString &category, int count) {
 void CategoriesPanel::OnSelectionChanged(wxTreeEvent &event) {
   wxTreeItemId itemId = event.GetItem();
   if (itemId.IsOk()) {
-    wxString category = m_treeCtrl->GetItemText(itemId);
-    // TODO: Notify parent to filter downloads by this category
+    // Parent (MainWindow) handles filtering via EVT_TREE_SEL_CHANGED binding
   }
   event.Skip();
 }
@@ -157,12 +176,102 @@ void CategoriesPanel::OnItemRightClick(wxTreeEvent &event) {
 
     // Create context menu
     wxMenu contextMenu;
-    contextMenu.Append(wxID_ANY, "Open Folder");
+    contextMenu.Append(ID_CONTEXT_OPEN_FOLDER, "Open Folder");
     contextMenu.AppendSeparator();
-    contextMenu.Append(wxID_ANY, "New Category...");
-    contextMenu.Append(wxID_ANY, "Rename...");
-    contextMenu.Append(wxID_ANY, "Delete");
+    contextMenu.Append(ID_CONTEXT_NEW_CATEGORY, "New Category...");
+    contextMenu.Append(ID_CONTEXT_RENAME, "Rename...");
+    contextMenu.Append(ID_CONTEXT_DELETE, "Delete");
+
+    // Bind handlers
+    contextMenu.Bind(wxEVT_COMMAND_MENU_SELECTED, &CategoriesPanel::OnContextMenuOpen, this, ID_CONTEXT_OPEN_FOLDER);
+    contextMenu.Bind(wxEVT_COMMAND_MENU_SELECTED, &CategoriesPanel::OnContextMenuNewCategory, this, ID_CONTEXT_NEW_CATEGORY);
+    contextMenu.Bind(wxEVT_COMMAND_MENU_SELECTED, &CategoriesPanel::OnContextMenuRename, this, ID_CONTEXT_RENAME);
+    contextMenu.Bind(wxEVT_COMMAND_MENU_SELECTED, &CategoriesPanel::OnContextMenuDelete, this, ID_CONTEXT_DELETE);
 
     PopupMenu(&contextMenu);
+  }
+}
+
+void CategoriesPanel::OnContextMenuOpen(wxCommandEvent &event) {
+  wxString category = GetSelectedCategory();
+  // TODO: Open the download folder for this category
+  wxMessageBox("Open folder for category: " + category, "Open Folder", wxOK | wxICON_INFORMATION);
+}
+
+void CategoriesPanel::OnContextMenuNewCategory(wxCommandEvent &event) {
+  wxTextEntryDialog dialog(this, "Enter new category name:", "New Category");
+  if (dialog.ShowModal() == wxID_OK) {
+    wxString name = dialog.GetValue();
+    if (!name.IsEmpty()) {
+      // Add to database
+      DatabaseManager::GetInstance().AddCategory(name.ToStdString());
+      
+      // Add to tree (under All Downloads)
+      m_treeCtrl->AppendItem(m_allDownloadsId, name, 0, 0);
+      m_treeCtrl->Expand(m_allDownloadsId);
+    }
+  }
+}
+
+void CategoriesPanel::OnContextMenuRename(wxCommandEvent &event) {
+  wxTreeItemId selectedId = m_treeCtrl->GetSelection();
+  if (!selectedId.IsOk() || selectedId == m_rootId || selectedId == m_allDownloadsId) {
+    wxMessageBox("Cannot rename this category.", "Rename", wxOK | wxICON_WARNING);
+    return;
+  }
+  
+  wxString currentName = GetSelectedCategory();
+  wxTextEntryDialog dialog(this, "Enter new name:", "Rename Category", currentName);
+  if (dialog.ShowModal() == wxID_OK) {
+    wxString newName = dialog.GetValue();
+    if (!newName.IsEmpty() && newName != currentName) {
+      // Update in database
+      DatabaseManager &db = DatabaseManager::GetInstance();
+      db.DeleteCategory(currentName.ToStdString());
+      db.AddCategory(newName.ToStdString());
+
+      // Update downloads that referenced the old category
+      auto *mainWindow = wxDynamicCast(wxGetTopLevelParent(this), MainWindow);
+      if (mainWindow) {
+        DownloadManager::GetInstance().UpdateDownloadsCategory(
+            currentName.ToStdString(), newName.ToStdString());
+      }
+      
+      // Update tree item
+      m_treeCtrl->SetItemText(selectedId, newName);
+    }
+  }
+}
+
+void CategoriesPanel::OnContextMenuDelete(wxCommandEvent &event) {
+  wxTreeItemId selectedId = m_treeCtrl->GetSelection();
+  
+  // Prevent deleting built-in categories
+  if (!selectedId.IsOk() || selectedId == m_rootId || 
+      selectedId == m_allDownloadsId || selectedId == m_compressedId ||
+      selectedId == m_documentsId || selectedId == m_musicId ||
+      selectedId == m_programsId || selectedId == m_videoId ||
+      selectedId == m_imagesId || selectedId == m_unfinishedId ||
+      selectedId == m_finishedId) {
+    wxMessageBox("Cannot delete built-in categories.", "Delete", wxOK | wxICON_WARNING);
+    return;
+  }
+  
+  wxString category = GetSelectedCategory();
+  int result = wxMessageBox("Are you sure you want to delete category '" + category + "'?",
+                            "Confirm Delete", wxYES_NO | wxICON_QUESTION);
+  if (result == wxYES) {
+    // Delete from database
+    DatabaseManager::GetInstance().DeleteCategory(category.ToStdString());
+
+    // Move downloads to All Downloads before deleting the node
+    auto *mainWindow = wxDynamicCast(wxGetTopLevelParent(this), MainWindow);
+    if (mainWindow) {
+      DownloadManager::GetInstance().UpdateDownloadsCategory(
+          category.ToStdString(), "All Downloads");
+    }
+    
+    // Delete from tree
+    m_treeCtrl->Delete(selectedId);
   }
 }

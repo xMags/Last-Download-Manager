@@ -5,6 +5,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include <wx/datetime.h>
@@ -23,6 +24,7 @@ public:
   int AddDownload(const std::string &url, const std::string &savePath = "");
   void RemoveDownload(int downloadId, bool deleteFile = false);
   void StartDownload(int downloadId);
+  void StartDownloadWithFormat(int downloadId, const std::string &formatId);
   void PauseDownload(int downloadId);
   void ResumeDownload(int downloadId);
   void CancelDownload(int downloadId);
@@ -61,8 +63,18 @@ public:
   void SetMaxSimultaneousDownloads(int max) {
     m_maxSimultaneousDownloads = max;
   }
+  int GetMaxSimultaneousDownloads() const { return m_maxSimultaneousDownloads; }
   void SetDefaultSavePath(const std::string &path) { m_defaultSavePath = path; }
   void ApplySettings(const class Settings &settings);
+
+  // Schedule getters for dialog
+  bool IsScheduleStartEnabled() const { return m_schedStartEnabled; }
+  bool IsScheduleStopEnabled() const { return m_schedStopEnabled; }
+  wxDateTime GetScheduleStartTime() const { return m_schedStartTime; }
+  wxDateTime GetScheduleStopTime() const { return m_schedStopTime; }
+  bool IsScheduleHangUp() const { return m_schedHangUp; }
+  bool IsScheduleExit() const { return m_schedExit; }
+  bool IsScheduleShutdown() const { return m_schedShutdown; }
 
   // Callbacks for UI updates
   using DownloadUpdateCallback = std::function<void(int downloadId)>;
@@ -74,11 +86,16 @@ public:
   // Database persistence (public for periodic saves)
   void SaveAllDownloadsToDatabase();
 
+  // Update category for matching downloads (used by UI category rename/delete)
+  void UpdateDownloadsCategory(const std::string &fromCategory,
+                               const std::string &toCategory);
+
 private:
   DownloadManager();
   ~DownloadManager();
 
   std::vector<std::shared_ptr<Download>> m_downloads;
+  std::unordered_map<int, std::shared_ptr<Download>> m_downloadIndex;  // O(1) lookup by ID
   mutable std::mutex m_downloadsMutex;
   mutable std::mutex m_callbackMutex;
 
@@ -94,6 +111,8 @@ private:
   bool m_schedHangUp;
   bool m_schedExit;
   bool m_schedShutdown;
+  int m_lastSchedStartMinute = -1;  // Track last triggered minute to prevent double-trigger
+  int m_lastSchedStopMinute = -1;
 
   // Internal event handler for timer
   void OnSchedulerTimer(wxTimerEvent &event);

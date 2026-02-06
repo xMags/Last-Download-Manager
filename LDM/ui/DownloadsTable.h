@@ -2,6 +2,7 @@
 
 #include "../core/Download.h"
 #include <memory>
+#include <unordered_map>
 #include <vector>
 #include <wx/listctrl.h>
 #include <wx/wx.h>
@@ -45,6 +46,8 @@ private:
   std::vector<std::shared_ptr<Download>> m_downloads;
   std::vector<std::shared_ptr<Download>>
       m_filteredDownloads;  // Visible downloads after filtering
+  std::unordered_map<int, size_t> m_downloadIndex;  // Map download ID to index for O(1) lookup
+  std::unordered_map<int, size_t> m_filteredIndex;  // Map download ID to filtered index for O(1) lookup
   wxString m_currentFilter; // Current category filter
   int m_contextMenuDownloadId;  // ID of right-clicked download (stable across refreshes)
 

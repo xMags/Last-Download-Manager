@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls -la \"C:\\\\Users\\\\Dev\\\\Documents\\\\GitHub\\\\Last-Download-Manager\\\\BrowserExtension\\\\icons\"\" 2>/dev/null || dir \"C:UsersDevDocumentsGitHubLast-Download-ManagerBrowserExtensionicons\" 2>nul || echo \"Icons folder may not exist or be empty \")",
+      "Bash(dir:*)",
+      "Bash(findstr:*)",
+      "Bash(grep:*)"
+    ]
+  }
+}
