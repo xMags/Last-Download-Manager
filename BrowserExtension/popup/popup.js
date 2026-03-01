@@ -30,7 +30,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     setupEventListeners();
 
     // Focus input
-    document.getElementById('manualUrl').focus();
+    document.getElementById('urlInput').focus();
 });
 
 // Cleanup on popup close
@@ -70,7 +70,7 @@ function toggleTheme() {
 function updateThemeIcon() {
     const btn = document.getElementById('themeToggle');
     const isDark = document.documentElement.classList.contains('dark');
-    btn.innerHTML = isDark ? '&#9728;' : '&#127769;';
+    btn.innerHTML = isDark ? '&#9788;' : '&#9790;';
 }
 
 function setColorTheme(theme) {
@@ -85,7 +85,7 @@ function setColorTheme(theme) {
         gray: { primary: '#6b7280', dark: '#4b5563', light: '#9ca3af' }
     };
 
-    const colors = themes[theme] || themes.indigo;
+    const colors = themes[theme] || themes.blue;
     document.documentElement.style.setProperty('--primary', colors.primary);
     document.documentElement.style.setProperty('--primary-dark', colors.dark);
     document.documentElement.style.setProperty('--primary-light', colors.light);
@@ -118,7 +118,7 @@ async function checkConnection() {
             }
 
             isConnected = true;
-            statusEl.innerHTML = `<span style="color: #4ade80;">●</span> Connected (v${data.version || '?'})`;
+            statusEl.innerHTML = `<span class="status-dot-inline online"></span>Connected (v${data.version || '?'})`;
             btn.disabled = false;
             offlineNotice.classList.remove('show');
 
@@ -131,7 +131,7 @@ async function checkConnection() {
     }
 
     isConnected = false;
-    statusEl.innerHTML = '<span style="color: #f87171;">●</span> LDM Offline';
+    statusEl.innerHTML = '<span class="status-dot-inline offline"></span>LDM Offline';
     btn.disabled = true;
     offlineNotice.classList.add('show');
 
@@ -167,20 +167,10 @@ function loadStats() {
 
         document.getElementById('statDownloads').textContent = stats.totalDownloads || 0;
         document.getElementById('statToday').textContent = stats.todayDownloads || 0;
-
-        // Format data size
-        const bytes = stats.totalBytes || 0;
-        let dataStr;
-        if (bytes >= 1024 * 1024 * 1024) {
-            dataStr = (bytes / (1024 * 1024 * 1024)).toFixed(1) + ' GB';
-        } else if (bytes >= 1024 * 1024) {
-            dataStr = (bytes / (1024 * 1024)).toFixed(1) + ' MB';
-        } else if (bytes >= 1024) {
-            dataStr = (bytes / 1024).toFixed(1) + ' KB';
-        } else {
-            dataStr = bytes + ' B';
+        const speedStat = document.getElementById('statSpeed');
+        if (speedStat && !speedStat.textContent.trim()) {
+            speedStat.textContent = '0 KB/s';
         }
-        document.getElementById('statData').textContent = dataStr;
     });
 }
 
@@ -237,23 +227,32 @@ async function fetchDownloadStatus() {
 function renderActiveDownloads(data) {
     const container = document.getElementById('activeList');
     const speedBadge = document.getElementById('totalSpeedBadge');
+    const speedStat = document.getElementById('statSpeed');
+    const totalSpeed = formatSpeed(data.totalSpeed || 0);
 
-    // Update total speed badge
-    speedBadge.textContent = formatSpeed(data.totalSpeed || 0);
+    // Update speed in stats strip (and legacy badge if present)
+    if (speedStat) {
+        speedStat.textContent = totalSpeed;
+    }
+    if (speedBadge) {
+        speedBadge.textContent = totalSpeed;
+    }
 
-    // Update Active tab badge - sanitize the count
-    const activeTab = document.querySelector('[data-tab="active"]');
+    // Update Download tab badge with active count.
+    const downloadTab = document.querySelector('[data-tab="download"]');
     const count = parseInt(data.activeDownloads) || 0;
-    if (count > 0) {
-        activeTab.innerHTML = `<span class="tab-icon">&#9889;</span>Active (${count})`;
-    } else {
-        activeTab.innerHTML = `<span class="tab-icon">&#9889;</span>Active`;
+    if (downloadTab) {
+        if (count > 0) {
+            downloadTab.innerHTML = `<span class="tab-icon icon-mono">&#8595;</span>Download (${count})`;
+        } else {
+            downloadTab.innerHTML = `<span class="tab-icon icon-mono">&#8595;</span>Download`;
+        }
     }
 
     if (!data.downloads || data.downloads.length === 0) {
         container.innerHTML = `
             <div class="empty-state">
-                <div class="empty-state-icon">&#128260;</div>
+                <div class="empty-state-icon icon-mono">&#8635;</div>
                 <div class="empty-state-text">No active downloads</div>
             </div>
         `;
@@ -360,7 +359,7 @@ function loadRecentDownloads() {
         if (recent.length === 0) {
             container.innerHTML = `
                 <div class="empty-state">
-                    <div class="empty-state-icon">&#128230;</div>
+                    <div class="empty-state-icon icon-mono">&#9716;</div>
                     <div class="empty-state-text">No recent downloads</div>
                 </div>
             `;
@@ -435,7 +434,8 @@ function clearHistory() {
 // DOWNLOAD FUNCTIONS
 // ============================================
 
-async function sendToLDM(url, referer = null) {
+async function sendToLDM(url, referer = null, options = {}) {
+    const clearInput = options.clearInput !== undefined ? options.clearInput : (referer === null);
     const btn = document.getElementById('downloadBtn');
     const originalText = btn.innerHTML;
 
@@ -470,7 +470,9 @@ async function sendToLDM(url, referer = null) {
 
         if (response.ok) {
             showStatus("Download started!", "success");
-            document.getElementById('manualUrl').value = "";
+            if (clearInput) {
+                clearUrlInput();
+            }
             addToRecent(url, true);
             updateStats(url, true);
             playSound('success');
@@ -503,7 +505,9 @@ async function sendToLDM(url, referer = null) {
 
                     if (retryResponse.ok) {
                         showStatus("Download started!", "success");
-                        document.getElementById('manualUrl').value = "";
+                        if (clearInput) {
+                            clearUrlInput();
+                        }
                         addToRecent(url, true);
                         updateStats(url, true);
                         playSound('success');
@@ -540,16 +544,28 @@ async function sendToLDM(url, referer = null) {
     btn.disabled = !isConnected;
 }
 
-async function downloadBulk() {
-    const textarea = document.getElementById('bulkUrls');
-    const urls = textarea.value.split('\n')
+function parseUrlsFromText(text) {
+    return text
+        .split(/\s+/)
         .map(url => url.trim())
         .filter(url => url.length > 0 && (url.startsWith('http://') || url.startsWith('https://')));
+}
+
+async function downloadBulk(urlsFromInput = null) {
+    const textarea = document.getElementById('urlInput');
+    const urls = Array.isArray(urlsFromInput)
+        ? urlsFromInput
+        : parseUrlsFromText(textarea ? textarea.value : '');
 
     if (urls.length === 0) {
         showStatus("No valid URLs found", "error");
         return;
     }
+
+    const btn = document.getElementById('downloadBtn');
+    const originalText = btn.innerHTML;
+    btn.innerHTML = `<span>&#8987;</span> Sending ${urls.length}...`;
+    btn.disabled = true;
 
     let successCount = 0;
     let failCount = 0;
@@ -579,7 +595,9 @@ async function downloadBulk() {
     }
 
     updateStats(null, true);
-    textarea.value = "";
+    if (textarea) {
+        textarea.value = "";
+    }
     updateUrlCount();
 
     if (failCount === 0) {
@@ -589,6 +607,9 @@ async function downloadBulk() {
         showStatus(`${successCount} started, ${failCount} failed`, "error");
         playSound('error');
     }
+
+    btn.innerHTML = originalText;
+    btn.disabled = !isConnected;
 }
 
 // ============================================
@@ -605,7 +626,7 @@ function scanForVideos() {
             if (chrome.runtime.lastError || !response || !response.videos || response.videos.length === 0) {
                 container.innerHTML = `
                     <div class="empty-state">
-                        <div class="empty-state-icon">&#127909;</div>
+                        <div class="empty-state-icon icon-mono">&#9658;</div>
                         <div class="empty-state-text">No videos detected on this page</div>
                     </div>
                 `;
@@ -623,10 +644,10 @@ function scanForVideos() {
                 thumb.className = 'video-thumb';
                 // Use different icon for yt-dlp page downloads
                 if (video.type === 'page') {
-                    thumb.innerHTML = '&#127760;';  // Globe icon for page downloads
+                    thumb.innerHTML = '&#9675;';
                     thumb.title = 'Download via yt-dlp';
                 } else {
-                    thumb.innerHTML = '&#127909;';  // Video icon
+                    thumb.innerHTML = '&#9658;';
                 }
 
                 const info = document.createElement('div');
@@ -650,7 +671,7 @@ function scanForVideos() {
 
                 const btn = document.createElement('button');
                 btn.className = 'video-btn';
-                btn.innerHTML = '&#9660;';
+                btn.innerHTML = '&#9662;';
                 btn.addEventListener('click', function() {
                     // Pass page URL as referer for protected video downloads
                     sendToLDM(video.url, tabs[0].url);
@@ -682,7 +703,7 @@ function grabLinks(mediaOnly) {
             if (chrome.runtime.lastError || !response || !response.links || response.links.length === 0) {
                 container.innerHTML = `
                     <div class="empty-state">
-                        <div class="empty-state-icon">&#128279;</div>
+                        <div class="empty-state-icon icon-mono">&#8644;</div>
                         <div class="empty-state-text">No ${mediaOnly ? 'media ' : ''}links found</div>
                     </div>
                 `;
@@ -690,7 +711,7 @@ function grabLinks(mediaOnly) {
             }
 
             // Show links in textarea for selection
-            const textarea = document.getElementById('bulkUrls');
+            const textarea = document.getElementById('urlInput');
             textarea.value = response.links.join('\n');
 
             // Switch to URLs mode
@@ -732,17 +753,22 @@ function setupEventListeners() {
 
     // Download button
     document.getElementById('downloadBtn').addEventListener('click', function() {
-        const url = document.getElementById('manualUrl').value.trim();
-        if (url) {
-            sendToLDM(url);
+        const inputValue = document.getElementById('urlInput').value;
+        const urls = parseUrlsFromText(inputValue);
+
+        if (urls.length === 1) {
+            sendToLDM(urls[0]);
+        } else if (urls.length > 1) {
+            downloadBulk(urls);
         } else {
             showStatus("Please enter a URL", "error");
         }
     });
 
-    // Enter key in URL input
-    document.getElementById('manualUrl').addEventListener('keypress', function(e) {
-        if (e.key === 'Enter') {
+    // Ctrl+Enter / Cmd+Enter submits URL list
+    document.getElementById('urlInput').addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+            e.preventDefault();
             document.getElementById('downloadBtn').click();
         }
     });
@@ -782,49 +808,14 @@ function setupEventListeners() {
         });
     });
 
-    // Bulk URLs textarea
-    document.getElementById('bulkUrls').addEventListener('input', updateUrlCount);
-
-    // Download bulk
-    document.getElementById('downloadBulk').addEventListener('click', downloadBulk);
+    // URLs textarea
+    document.getElementById('urlInput').addEventListener('input', updateUrlCount);
 
     // Grab links
     document.getElementById('grabAllLinks').addEventListener('click', () => grabLinks(false));
     document.getElementById('grabMediaLinks').addEventListener('click', () => grabLinks(true));
 
-    // Drop zone
-    const dropZone = document.getElementById('dropZone');
-
-    dropZone.addEventListener('dragover', function(e) {
-        e.preventDefault();
-        this.classList.add('dragover');
-    });
-
-    dropZone.addEventListener('dragleave', function() {
-        this.classList.remove('dragover');
-    });
-
-    dropZone.addEventListener('drop', function(e) {
-        e.preventDefault();
-        this.classList.remove('dragover');
-
-        let url = '';
-        if (e.dataTransfer.types.includes('text/uri-list')) {
-            url = e.dataTransfer.getData('text/uri-list');
-        } else if (e.dataTransfer.types.includes('text/plain')) {
-            url = e.dataTransfer.getData('text/plain');
-        }
-
-        if (url && (url.startsWith('http://') || url.startsWith('https://'))) {
-            sendToLDM(url);
-        } else {
-            showStatus("Invalid URL", "error");
-        }
-    });
-
-    dropZone.addEventListener('click', function() {
-        document.getElementById('manualUrl').focus();
-    });
+    updateUrlCount();
 }
 
 // ============================================
@@ -850,9 +841,17 @@ function showStatus(message, type) {
 }
 
 function updateUrlCount() {
-    const textarea = document.getElementById('bulkUrls');
-    const urls = textarea.value.split('\n').filter(url => url.trim().length > 0);
+    const textarea = document.getElementById('urlInput');
+    const urls = parseUrlsFromText(textarea.value);
     document.getElementById('urlCount').textContent = urls.length;
+}
+
+function clearUrlInput() {
+    const textarea = document.getElementById('urlInput');
+    if (textarea) {
+        textarea.value = "";
+        updateUrlCount();
+    }
 }
 
 function getFilenameFromUrl(url) {
@@ -869,19 +868,19 @@ function getFileIcon(url) {
     const ext = url.split('.').pop().split('?')[0].toLowerCase();
     const icons = {
         // Video
-        'mp4': '&#127909;', 'mkv': '&#127909;', 'avi': '&#127909;', 'mov': '&#127909;', 'webm': '&#127909;',
+        'mp4': '&#9658;', 'mkv': '&#9658;', 'avi': '&#9658;', 'mov': '&#9658;', 'webm': '&#9658;',
         // Audio
-        'mp3': '&#127925;', 'wav': '&#127925;', 'flac': '&#127925;', 'aac': '&#127925;', 'ogg': '&#127925;',
+        'mp3': '&#9834;', 'wav': '&#9834;', 'flac': '&#9834;', 'aac': '&#9834;', 'ogg': '&#9834;',
         // Images
-        'jpg': '&#128247;', 'jpeg': '&#128247;', 'png': '&#128247;', 'gif': '&#128247;', 'webp': '&#128247;',
+        'jpg': '&#9635;', 'jpeg': '&#9635;', 'png': '&#9635;', 'gif': '&#9635;', 'webp': '&#9635;',
         // Documents
-        'pdf': '&#128196;', 'doc': '&#128196;', 'docx': '&#128196;', 'txt': '&#128196;',
+        'pdf': '&#9776;', 'doc': '&#9776;', 'docx': '&#9776;', 'txt': '&#9776;',
         // Archives
-        'zip': '&#128451;', 'rar': '&#128451;', '7z': '&#128451;', 'tar': '&#128451;',
+        'zip': '&#9638;', 'rar': '&#9638;', '7z': '&#9638;', 'tar': '&#9638;',
         // Executables
-        'exe': '&#128190;', 'msi': '&#128190;', 'dmg': '&#128190;'
+        'exe': '&#9881;', 'msi': '&#9881;', 'dmg': '&#9881;'
     };
-    return icons[ext] || '&#128196;';
+    return `<span class="icon-mono">${icons[ext] || '&#9679;'}</span>`;
 }
 
 function formatTime(timestamp) {

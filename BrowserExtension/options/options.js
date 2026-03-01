@@ -1,4 +1,4 @@
-// LDM Options Page v3.0
+// LDM Options Page v4.0
 
 const LDM_URL = "http://127.0.0.1:45678";
 
@@ -32,7 +32,7 @@ function loadTheme() {
                 opt.classList.toggle('active', opt.dataset.theme === result.colorTheme);
             });
         } else {
-            document.querySelector('[data-theme="indigo"]').classList.add('active');
+            document.querySelector('[data-theme="blue"]').classList.add('active');
         }
     });
 }
@@ -61,7 +61,7 @@ function setColorTheme(theme) {
         gray: { primary: '#6b7280', dark: '#4b5563', light: '#9ca3af' }
     };
 
-    const colors = themes[theme] || themes.indigo;
+    const colors = themes[theme] || themes.blue;
     document.documentElement.style.setProperty('--primary', colors.primary);
     document.documentElement.style.setProperty('--primary-dark', colors.dark);
     document.documentElement.style.setProperty('--primary-light', colors.light);
@@ -162,7 +162,7 @@ function exportSettings() {
     chrome.storage.sync.get(null, function(syncData) {
         chrome.storage.local.get(null, function(localData) {
             const exportData = {
-                version: '3.0',
+                version: '4.0',
                 timestamp: new Date().toISOString(),
                 sync: syncData,
                 local: {

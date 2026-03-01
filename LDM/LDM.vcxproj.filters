@@ -57,6 +57,9 @@
     <ClCompile Include="ui\MainWindow.cpp">
       <Filter>Source Files\ui</Filter>
     </ClCompile>
+    <ClCompile Include="ui\AppArtProvider.cpp">
+      <Filter>Source Files\ui</Filter>
+    </ClCompile>
     <ClCompile Include="ui\CategoriesPanel.cpp">
       <Filter>Source Files\ui</Filter>
     </ClCompile>
@@ -104,6 +107,9 @@
     <ClInclude Include="ui\MainWindow.h">
       <Filter>Header Files\ui</Filter>
     </ClInclude>
+    <ClInclude Include="ui\AppArtProvider.h">
+      <Filter>Header Files\ui</Filter>
+    </ClInclude>
     <ClInclude Include="ui\CategoriesPanel.h">
       <Filter>Header Files\ui</Filter>
     </ClInclude>
@@ -146,67 +152,10 @@
     <Image Include="resources\app_icon.ico">
       <Filter>Resource Files</Filter>
     </Image>
-    <Image Include="resources\icon_32.png">
-      <Filter>Resource Files</Filter>
-    </Image>
-    <Image Include="resources\icon_add_url.ico">
-      <Filter>Resource Files</Filter>
-    </Image>
-    <Image Include="resources\icon_add_url.png">
-      <Filter>Resource Files</Filter>
-    </Image>
-    <Image Include="resources\icon_delete.ico">
-      <Filter>Resource Files</Filter>
-    </Image>
-    <Image Include="resources\icon_delete.png">
-      <Filter>Resource Files</Filter>
-    </Image>
-    <Image Include="resources\icon_grabber.ico">
-      <Filter>Resource Files</Filter>
-    </Image>
-    <Image Include="resources\icon_grabber.png">
-      <Filter>Resource Files</Filter>
-    </Image>
-    <Image Include="resources\icon_options.ico">
-      <Filter>Resource Files</Filter>
-    </Image>
-    <Image Include="resources\icon_options.png">
-      <Filter>Resource Files</Filter>
-    </Image>
-    <Image Include="resources\icon_pause.ico">
-      <Filter>Resource Files</Filter>
-    </Image>
-    <Image Include="resources\icon_pause.png">
-      <Filter>Resource Files</Filter>
-    </Image>
-    <Image Include="resources\icon_resume.ico">
-      <Filter>Resource Files</Filter>
-    </Image>
-    <Image Include="resources\icon_resume.png">
-      <Filter>Resource Files</Filter>
-    </Image>
-    <Image Include="resources\icon_scheduler.ico">
-      <Filter>Resource Files</Filter>
-    </Image>
-    <Image Include="resources\icon_scheduler.png">
-      <Filter>Resource Files</Filter>
-    </Image>
-    <Image Include="resources\icon_start_queue.png">
-      <Filter>Resource Files</Filter>
-    </Image>
-    <Image Include="resources\icon_stop_queue.ico">
-      <Filter>Resource Files</Filter>
-    </Image>
-    <Image Include="resources\icon_stop_queue.png">
-      <Filter>Resource Files</Filter>
-    </Image>
     <Image Include="resources\Interface.png">
       <Filter>Resource Files</Filter>
     </Image>
     <Image Include="resources\LDM Github Readme.png">
-      <Filter>Resource Files</Filter>
-    </Image>
-    <Image Include="resources\icon_start_queue.ico">
       <Filter>Resource Files</Filter>
     </Image>
   </ItemGroup>

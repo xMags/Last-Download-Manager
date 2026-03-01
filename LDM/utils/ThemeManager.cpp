@@ -1,13 +1,11 @@
 #include "ThemeManager.h"
-#include "../database/DatabaseManager.h"
-#include <mutex>
+
 #include <wx/button.h>
 #include <wx/checkbox.h>
 #include <wx/choice.h>
 #include <wx/combobox.h>
 #include <wx/datectrl.h>
 #include <wx/filepicker.h>
-#include <wx/headerctrl.h>
 #include <wx/listctrl.h>
 #include <wx/notebook.h>
 #include <wx/panel.h>
@@ -24,153 +22,94 @@ ThemeManager &ThemeManager::GetInstance() {
   return instance;
 }
 
-ThemeManager::ThemeManager() : m_isDarkMode(false) {}
+ThemeManager::ThemeManager() {}
 
 void ThemeManager::Initialize() {
-  std::lock_guard<std::mutex> lock(m_mutex);
-  // Load dark mode setting from database
-  DatabaseManager &db = DatabaseManager::GetInstance();
-  std::string darkModeSetting = db.GetSetting("dark_mode", "0");
-  m_isDarkMode = (darkModeSetting == "1");
-}
-
-void ThemeManager::SetDarkMode(bool enable) {
-  std::lock_guard<std::mutex> lock(m_mutex);
-  m_isDarkMode = enable;
-
-  // Persist to database
-  DatabaseManager &db = DatabaseManager::GetInstance();
-  db.SetSetting("dark_mode", enable ? "1" : "0");
+  // Intentionally no-op for system/light-only theming.
 }
 
 wxColour ThemeManager::GetBackgroundColor() const {
-  return m_isDarkMode ? m_darkBg
-                      : wxSystemSettings::GetColour(wxSYS_COLOUR_WINDOW);
+  return wxSystemSettings::GetColour(wxSYS_COLOUR_WINDOW);
 }
 
 wxColour ThemeManager::GetForegroundColor() const {
-  return m_isDarkMode ? m_darkFg
-                      : wxSystemSettings::GetColour(wxSYS_COLOUR_WINDOWTEXT);
+  return wxSystemSettings::GetColour(wxSYS_COLOUR_WINDOWTEXT);
 }
 
 wxColour ThemeManager::GetControlBackgroundColor() const {
-  return m_isDarkMode ? m_darkControlBg
-                      : wxSystemSettings::GetColour(wxSYS_COLOUR_LISTBOX);
+  return wxSystemSettings::GetColour(wxSYS_COLOUR_LISTBOX);
 }
 
 wxColour ThemeManager::GetControlBorderColor() const {
-  return m_isDarkMode ? m_darkBorder
-                      : wxSystemSettings::GetColour(wxSYS_COLOUR_3DSHADOW);
+  return wxSystemSettings::GetColour(wxSYS_COLOUR_3DSHADOW);
 }
 
 wxColour ThemeManager::GetHighlightColor() const {
-  return m_isDarkMode ? m_darkHighlight
-                      : wxSystemSettings::GetColour(wxSYS_COLOUR_HIGHLIGHT);
+  return wxSystemSettings::GetColour(wxSYS_COLOUR_HIGHLIGHT);
 }
 
 wxColour ThemeManager::GetHighlightTextColor() const {
-  return m_isDarkMode ? m_darkHighlightText
-                      : wxSystemSettings::GetColour(wxSYS_COLOUR_HIGHLIGHTTEXT);
+  return wxSystemSettings::GetColour(wxSYS_COLOUR_HIGHLIGHTTEXT);
 }
 
 wxColour ThemeManager::GetStatusColor(DownloadStatus status) const {
-  if (m_isDarkMode) {
-    switch (status) {
-    case DownloadStatus::Downloading:
-      return wxColour(0, 100, 0); // Dark Green
-    case DownloadStatus::Paused:
-      return wxColour(100, 100, 0); // Dark Yellow
-    case DownloadStatus::Error:
-      return wxColour(100, 0, 0); // Dark Red
-    case DownloadStatus::Completed:
-      return wxColour(60, 60, 60); // Dark Gray
-    default:
-      return m_darkBg;
-    }
-  } else {
-    switch (status) {
-    case DownloadStatus::Downloading:
-      return wxColour(230, 255, 230); // Light Green
-    case DownloadStatus::Paused:
-      return wxColour(255, 255, 200); // Light Yellow
-    case DownloadStatus::Error:
-      return wxColour(255, 230, 230); // Light Red
-    case DownloadStatus::Completed:
-      return wxColour(240, 240, 240); // Light Gray
-    default:
-      return wxColour(255, 255, 255); // White
-    }
+  switch (status) {
+  case DownloadStatus::Downloading:
+    return wxColour(230, 255, 230);
+  case DownloadStatus::Paused:
+    return wxColour(255, 255, 200);
+  case DownloadStatus::Error:
+    return wxColour(255, 230, 230);
+  case DownloadStatus::Completed:
+    return wxColour(240, 240, 240);
+  default:
+    return wxColour(255, 255, 255);
   }
 }
 
 void ThemeManager::ApplyTheme(wxWindow *window, bool recursive) {
-  if (!window)
+  if (!window) {
     return;
+  }
 
-  wxColour bgColor = m_isDarkMode
-                         ? m_darkBg
-                         : wxSystemSettings::GetColour(wxSYS_COLOUR_3DFACE);
-  wxColour fgColor = m_isDarkMode
-                         ? m_darkFg
-                         : wxSystemSettings::GetColour(wxSYS_COLOUR_WINDOWTEXT);
-  wxColour controlBg = m_isDarkMode
-                           ? m_darkControlBg
-                           : wxSystemSettings::GetColour(wxSYS_COLOUR_WINDOW);
+  const wxColour bgColor = wxSystemSettings::GetColour(wxSYS_COLOUR_3DFACE);
+  const wxColour fgColor = wxSystemSettings::GetColour(wxSYS_COLOUR_WINDOWTEXT);
+  const wxColour controlBg = wxSystemSettings::GetColour(wxSYS_COLOUR_WINDOW);
 
-  // Apply to the window itself
   window->SetBackgroundColour(bgColor);
   window->SetForegroundColour(fgColor);
 
-  // Recursive application for children
   if (recursive) {
     wxWindowList &children = window->GetChildren();
     for (wxWindowList::iterator iter = children.begin(); iter != children.end();
          ++iter) {
       wxWindow *child = *iter;
 
-      // Apply colors to all common control types
       if (child->IsKindOf(CLASSINFO(wxTextCtrl)) ||
           child->IsKindOf(CLASSINFO(wxListBox)) ||
           child->IsKindOf(CLASSINFO(wxTreeCtrl)) ||
           child->IsKindOf(CLASSINFO(wxListCtrl)) ||
           child->IsKindOf(CLASSINFO(wxComboBox)) ||
           child->IsKindOf(CLASSINFO(wxChoice))) {
-        // These controls use "window" style background
         child->SetBackgroundColour(controlBg);
         child->SetForegroundColour(fgColor);
-      } else if (child->IsKindOf(CLASSINFO(wxStaticText))) {
-        // Static text - needs foreground only, background from parent
-        child->SetForegroundColour(fgColor);
-        child->SetBackgroundColour(bgColor);
-      } else if (child->IsKindOf(CLASSINFO(wxCheckBox))) {
-        // Checkboxes need foreground color for text
+      } else if (child->IsKindOf(CLASSINFO(wxStaticText)) ||
+                 child->IsKindOf(CLASSINFO(wxCheckBox))) {
         child->SetForegroundColour(fgColor);
         child->SetBackgroundColour(bgColor);
       } else if (child->IsKindOf(CLASSINFO(wxButton))) {
-        // Buttons - keep system styling but set foreground
         child->SetForegroundColour(fgColor);
-        if (m_isDarkMode) {
-          child->SetBackgroundColour(wxColour(70, 70, 70));
-        } else {
-          child->SetBackgroundColour(wxNullColour);
-        }
+        child->SetBackgroundColour(wxNullColour);
       } else if (child->IsKindOf(CLASSINFO(wxSpinCtrl))) {
         child->SetBackgroundColour(controlBg);
         child->SetForegroundColour(fgColor);
-      } else if (child->IsKindOf(CLASSINFO(wxPanel))) {
+      } else if (child->IsKindOf(CLASSINFO(wxPanel)) ||
+                 child->IsKindOf(CLASSINFO(wxNotebook)) ||
+                 child->IsKindOf(CLASSINFO(wxStaticBox))) {
         child->SetBackgroundColour(bgColor);
         child->SetForegroundColour(fgColor);
-        ApplyTheme(child, true);
-      } else if (child->IsKindOf(CLASSINFO(wxNotebook))) {
-        child->SetBackgroundColour(bgColor);
-        child->SetForegroundColour(fgColor);
-        ApplyTheme(child, true);
-      } else if (child->IsKindOf(CLASSINFO(wxStaticBox))) {
-        child->SetForegroundColour(fgColor);
-        child->SetBackgroundColour(bgColor);
         ApplyTheme(child, true);
       } else {
-        // Default: apply recursively
         ApplyTheme(child, true);
       }
     }

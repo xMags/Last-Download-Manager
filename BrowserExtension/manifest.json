@@ -1,7 +1,7 @@
 {
   "name": "LDM - Download Manager Integration",
   "description": "Intercept browser downloads and send them to LDM for accelerated multi-segment downloading.",
-  "version": "3.0",
+  "version": "4.0",
   "manifest_version": 3,
   "permissions": [
     "downloads",

@@ -5,6 +5,7 @@
 #include <WinInet.h>
 #include <algorithm>
 #include <chrono>
+#include <cctype>
 #include <cstdio>
 #include <fstream>
 #include <iostream>
@@ -13,6 +14,99 @@
 #include <thread>
 
 #pragma comment(lib, "wininet.lib")
+
+namespace {
+std::string ToLowerCopy(const std::string &value) {
+  std::string lower = value;
+  std::transform(lower.begin(), lower.end(), lower.begin(),
+                 [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+  return lower;
+}
+
+bool TryParseUrlParts(const std::string &lowerUrl, std::string *hostOut,
+                      std::string *pathOut) {
+  if (!hostOut || !pathOut) {
+    return false;
+  }
+
+  const size_t schemePos = lowerUrl.find("://");
+  if (schemePos == std::string::npos) {
+    return false;
+  }
+
+  const size_t hostStart = schemePos + 3;
+  const size_t hostEnd = lowerUrl.find_first_of("/?#", hostStart);
+  if (hostStart >= lowerUrl.size()) {
+    return false;
+  }
+
+  std::string host = lowerUrl.substr(hostStart, hostEnd - hostStart);
+  if (host.empty()) {
+    return false;
+  }
+
+  // Strip credentials if present (user:pass@host).
+  const size_t atPos = host.rfind('@');
+  if (atPos != std::string::npos) {
+    host = host.substr(atPos + 1);
+  }
+
+  // Strip port if present (host:port).
+  const size_t colonPos = host.rfind(':');
+  if (colonPos != std::string::npos) {
+    host = host.substr(0, colonPos);
+  }
+
+  if (host.empty()) {
+    return false;
+  }
+
+  const size_t pathStart = (hostEnd == std::string::npos) ? lowerUrl.size() : hostEnd;
+  const size_t pathEnd = lowerUrl.find_first_of("?#", pathStart);
+  std::string path = lowerUrl.substr(pathStart, pathEnd - pathStart);
+  if (path.empty()) {
+    path = "/";
+  }
+
+  *hostOut = host;
+  *pathOut = path;
+  return true;
+}
+
+std::string GetPathExtension(const std::string &path) {
+  const size_t slashPos = path.find_last_of('/');
+  const size_t dotPos = path.find_last_of('.');
+  if (dotPos == std::string::npos ||
+      (slashPos != std::string::npos && dotPos < slashPos + 1)) {
+    return "";
+  }
+
+  std::string extension = path.substr(dotPos + 1);
+  const size_t suffixPos = extension.find_first_of(";/");
+  if (suffixPos != std::string::npos) {
+    extension = extension.substr(0, suffixPos);
+  }
+  return extension;
+}
+
+bool HostMatchesPattern(const std::string &host, const std::string &pattern) {
+  if (host == pattern) {
+    return true;
+  }
+  if (host.size() <= pattern.size()) {
+    return false;
+  }
+  const size_t suffixStart = host.size() - pattern.size();
+  return host.compare(suffixStart, pattern.size(), pattern) == 0 &&
+         host[suffixStart - 1] == '.';
+}
+
+const std::unordered_set<std::string> NON_VIDEO_FILE_EXTENSIONS = {
+    "7z",   "apk",  "bin",  "bz2",  "cab", "dmg", "doc",   "docx", "exe",
+    "gz",   "img",  "iso",  "jar",  "lz",  "msi", "pdf",   "pkg",  "rar",
+    "rpm",  "tar",  "tgz",  "txt",  "vhd", "vhdx", "xz",   "zip",  "zst"
+};
+} // namespace
 
 // Helper function to run a command silently and capture output (with timeout)
 static std::string RunCommandSilent(const std::string &cmd, int timeoutMs = 30000) {
@@ -231,15 +325,31 @@ void YtDlpManager::SetOutputDirectory(const std::string &dir) {
 }
 
 bool YtDlpManager::IsVideoSiteUrl(const std::string &url) const {
-  // Convert to lowercase for matching
-  std::string lowerUrl = url;
-  std::transform(lowerUrl.begin(), lowerUrl.end(), lowerUrl.begin(), ::tolower);
+  if (url.empty()) {
+    return false;
+  }
+
+  const std::string lowerUrl = ToLowerCopy(url);
+  std::string host;
+  std::string path;
+  if (!TryParseUrlParts(lowerUrl, &host, &path)) {
+    return false;
+  }
+
+  // Direct downloadable assets (e.g. .iso) should always use normal HTTP download,
+  // even when hosted on domains that can also contain media.
+  const std::string extension = GetPathExtension(path);
+  if (!extension.empty() &&
+      NON_VIDEO_FILE_EXTENSIONS.find(extension) != NON_VIDEO_FILE_EXTENSIONS.end()) {
+    return false;
+  }
 
   for (const auto &pattern : VIDEO_SITE_PATTERNS) {
-    if (lowerUrl.find(pattern) != std::string::npos) {
+    if (HostMatchesPattern(host, pattern)) {
       return true;
     }
   }
+
   return false;
 }
 

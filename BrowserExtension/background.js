@@ -1,4 +1,4 @@
-// LDM Browser Extension v3.0 - Background Service Worker
+// LDM Browser Extension v4.0 - Background Service Worker
 // Full-featured download manager integration
 
 const LDM_URL = "http://127.0.0.1:45678";

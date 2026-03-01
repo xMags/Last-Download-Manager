@@ -3,6 +3,7 @@
 #include "../core/YtDlpManager.h"
 #include "../database/DatabaseManager.h"
 #include "../utils/HttpServer.h"
+#include "../utils/Settings.h"
 #include "../utils/ThemeManager.h"
 #include "OptionsDialog.h"
 #include "SchedulerDialog.h"
@@ -12,9 +13,13 @@
 #include <wx/dir.h>
 #include <wx/utils.h>
 #include <wx/filename.h>
+#include <wx/graphics.h>
+#include <wx/settings.h>
 #include <wx/msgdlg.h>
 #include <wx/stdpaths.h>
 #include <wx/progdlg.h>
+#include <algorithm>
+#include <cmath>
 #include <vector>
 #include <thread>
 #include <iostream>
@@ -42,6 +47,178 @@ private:
   MainWindow *m_parent;
 };
 
+wxFont CreateFluentGlyphFont(int pixelSize) {
+  wxFont font(pixelSize, wxFONTFAMILY_DEFAULT, wxFONTSTYLE_NORMAL,
+              wxFONTWEIGHT_SEMIBOLD, false, "Segoe Fluent Icons");
+  if (font.IsOk() && font.SetFaceName("Segoe Fluent Icons")) {
+    font.SetPixelSize(wxSize(pixelSize, pixelSize));
+    return font;
+  }
+
+  // Some systems still render these codepoints from MDL2.
+  wxFont mdl2(pixelSize, wxFONTFAMILY_DEFAULT, wxFONTSTYLE_NORMAL,
+              wxFONTWEIGHT_SEMIBOLD, false, "Segoe MDL2 Assets");
+  if (mdl2.IsOk() && mdl2.SetFaceName("Segoe MDL2 Assets")) {
+    mdl2.SetPixelSize(wxSize(pixelSize, pixelSize));
+    return mdl2;
+  }
+
+  wxFont fallback = wxSystemSettings::GetFont(wxSYS_DEFAULT_GUI_FONT);
+  fallback.SetPixelSize(wxSize(pixelSize, pixelSize));
+  return fallback;
+}
+
+wxColour GetToolbarAccentColor() {
+  // App accent color used by toolbar glyphs (independent from OS accent).
+  return wxColour(0, 120, 215);
+}
+
+wxBitmap CreateToolbarGlyphBitmap(wxWindow *win, const wxString &glyph) {
+  const wxSize size = win ? win->FromDIP(wxSize(24, 24)) : wxSize(24, 24);
+  const int width = size.GetWidth();
+  const int height = size.GetHeight();
+  if (width <= 0 || height <= 0) {
+    return wxBitmap();
+  }
+
+  // Use a keyed transparent background so MSW wxToolBar can mask correctly.
+  const wxColour keyColor(255, 0, 255);
+
+  wxImage img(width, height, true);
+  if (!img.IsOk()) {
+    return wxBitmap();
+  }
+
+  img.SetRGB(wxRect(0, 0, width, height), keyColor.Red(), keyColor.Green(),
+             keyColor.Blue());
+  img.InitAlpha();
+  unsigned char *alpha = img.GetAlpha();
+  if (alpha != nullptr) {
+    const int pixelCount = width * height;
+    for (int i = 0; i < pixelCount; ++i) {
+      alpha[i] = 0;
+    }
+  }
+
+  wxBitmap bmp(img);
+  if (!bmp.IsOk()) {
+    return wxBitmap();
+  }
+
+  wxMemoryDC dc;
+  dc.SelectObject(bmp);
+  dc.SetBackground(wxBrush(keyColor));
+  dc.Clear();
+
+  const wxColour accent = GetToolbarAccentColor();
+  dc.SetBackgroundMode(wxBRUSHSTYLE_TRANSPARENT);
+
+  // Render at full icon height to keep edges smooth under DPI scaling.
+  wxFont glyphFont = CreateFluentGlyphFont(size.GetHeight());
+  wxGraphicsContext *gc = wxGraphicsContext::Create(dc);
+  if (gc != nullptr) {
+    gc->SetFont(glyphFont, accent);
+
+    wxDouble textW = 0.0;
+    wxDouble textH = 0.0;
+    wxDouble descent = 0.0;
+    wxDouble externalLeading = 0.0;
+    gc->GetTextExtent(glyph, &textW, &textH, &descent, &externalLeading);
+
+    // Snap to whole pixels to avoid sub-pixel blur on small toolbar icons.
+    const wxDouble x =
+        std::floor((static_cast<wxDouble>(width) - textW) / 2.0 + 0.5);
+    const wxDouble y =
+        std::floor((static_cast<wxDouble>(height) - textH) / 2.0 + 0.5);
+    gc->DrawText(glyph, x, y);
+    delete gc;
+  } else {
+    dc.SetTextForeground(accent);
+    dc.SetFont(glyphFont);
+    int textW = 0;
+    int textH = 0;
+    dc.GetTextExtent(glyph, &textW, &textH);
+    const int x = (width - textW) / 2;
+    const int y = (height - textH) / 2;
+    dc.DrawText(glyph, x, y);
+  }
+
+  dc.SelectObject(wxNullBitmap);
+
+  wxImage out = bmp.ConvertToImage();
+  if (!out.IsOk()) {
+    return bmp;
+  }
+
+  out.SetMaskColour(keyColor.Red(), keyColor.Green(), keyColor.Blue());
+  if (!out.HasAlpha()) {
+    out.InitAlpha();
+  }
+
+  unsigned char *outData = out.GetData();
+  unsigned char *outAlpha = out.GetAlpha();
+  if (outData != nullptr && outAlpha != nullptr) {
+    const int keyR = keyColor.Red();
+    const int keyG = keyColor.Green();
+    const int keyB = keyColor.Blue();
+    const int fgR = accent.Red();
+    const int fgG = accent.Green();
+    const int fgB = accent.Blue();
+    const int diffR = std::abs(fgR - keyR);
+    const int diffG = std::abs(fgG - keyG);
+    const int diffB = std::abs(fgB - keyB);
+
+    // Use the channel with highest contrast for alpha recovery to avoid
+    // softening from low-contrast channel noise.
+    int bg = keyR;
+    int fg = fgR;
+    int ch = 0;
+    if (diffG > diffR && diffG >= diffB) {
+      ch = 1;
+      bg = keyG;
+      fg = fgG;
+    } else if (diffB > diffR && diffB > diffG) {
+      ch = 2;
+      bg = keyB;
+      fg = fgB;
+    }
+
+    const int pixelCount = width * height;
+    for (int i = 0; i < pixelCount; ++i) {
+      const int idx = i * 3;
+      const int r = outData[idx];
+      const int g = outData[idx + 1];
+      const int b = outData[idx + 2];
+      const bool isKey = (r == keyR && g == keyG && b == keyB);
+      if (isKey) {
+        outAlpha[i] = 0;
+        outData[idx] = 0;
+        outData[idx + 1] = 0;
+        outData[idx + 2] = 0;
+        continue;
+      }
+
+      const int src = (ch == 0) ? r : ((ch == 1) ? g : b);
+      double alpha = 1.0;
+      if (fg != bg) {
+        alpha = static_cast<double>(src - bg) /
+                static_cast<double>(fg - bg);
+      }
+      alpha = std::clamp(alpha, 0.0, 1.0);
+      unsigned char alphaByte = static_cast<unsigned char>(alpha * 255.0 + 0.5);
+      if (alphaByte < 4) {
+        alphaByte = 0;
+      }
+      outAlpha[i] = alphaByte;
+      outData[idx] = static_cast<unsigned char>(fgR);
+      outData[idx + 1] = static_cast<unsigned char>(fgG);
+      outData[idx + 2] = static_cast<unsigned char>(fgB);
+    }
+  }
+
+  return wxBitmap(out);
+}
+
 wxBEGIN_EVENT_TABLE(MainWindow, wxFrame) EVT_MENU(
     wxID_EXIT, MainWindow::OnExit) EVT_MENU(wxID_ABOUT, MainWindow::OnAbout)
     EVT_MENU(ID_ADD_URL, MainWindow::OnAddUrl) EVT_MENU(
@@ -67,15 +244,13 @@ wxBEGIN_EVENT_TABLE(MainWindow, wxFrame) EVT_MENU(
                                     EVT_TREE_SEL_CHANGED(
                                         wxID_ANY,
                                         MainWindow::OnCategorySelected)
-                                        EVT_MENU(ID_VIEW_DARK_MODE,
-                                                                                     MainWindow::OnViewDarkMode)
-                                                                                        EVT_MENU(ID_INSTALL_EXTENSION, MainWindow::OnInstallExtension)
+                                                                                         EVT_MENU(ID_INSTALL_EXTENSION, MainWindow::OnInstallExtension)
                                                                                         EVT_MENU(ID_GRABBER, MainWindow::OnGrabber)
                                                                                         EVT_TOOL(ID_GRABBER, MainWindow::OnGrabber)
                                                                                         wxEND_EVENT_TABLE()
 
-                                                            MainWindow::MainWindow()
-                                        : wxFrame(nullptr, wxID_ANY, "Last Download Manager v2.0.0", wxDefaultPosition,
+MainWindow::MainWindow()
+                                        : wxFrame(nullptr, wxID_ANY, "Last Download Manager v2.1.1", wxDefaultPosition,
                                                   wxSize(1050, 700)),
                                           m_splitter(nullptr), m_categoriesPanel(nullptr),
                                           m_downloadsTable(nullptr), m_toolbar(nullptr), m_statusBar(nullptr),
@@ -221,11 +396,25 @@ wxBEGIN_EVENT_TABLE(MainWindow, wxFrame) EVT_MENU(
     wxLogDebug("Failed to start HTTP server on port 45678");
   }
 
+  // Window lifecycle events for minimize-to-tray.
+  Bind(wxEVT_ICONIZE, &MainWindow::OnIconize, this);
+  Bind(wxEVT_CLOSE_WINDOW, &MainWindow::OnClose, this);
+
   // Center on screen
   Centre();
 }
 
 MainWindow::~MainWindow() {
+  CleanupEventHandlers();
+
+  if (m_taskBarIcon) {
+    if (m_taskBarIcon->IsIconInstalled()) {
+      m_taskBarIcon->RemoveIcon();
+    }
+    delete m_taskBarIcon;
+    m_taskBarIcon = nullptr;
+  }
+
   // Signal shutdown to prevent new background saves
   m_shuttingDown.store(true);
 
@@ -291,12 +480,6 @@ void MainWindow::CreateMenuBar() {
                               "Show/hide categories panel");
   m_viewMenu->Check(ID_CATEGORIES_PANEL, true);
 
-  // Dark mode temporarily disabled
-  // m_viewMenu->AppendCheckItem(ID_VIEW_DARK_MODE, "&Dark Mode",
-  //                             "Toggle dark/light theme");
-  // m_viewMenu->Check(ID_VIEW_DARK_MODE,
-  //                   ThemeManager::GetInstance().IsDarkMode());
-
   m_viewMenu->AppendSeparator();
   m_viewMenu->Append(ID_OPTIONS, "&Options...\tCtrl+O", "Open options dialog");
   m_menuBar->Append(m_viewMenu, "&View");
@@ -315,82 +498,39 @@ void MainWindow::CreateMenuBar() {
 void MainWindow::CreateToolBar() {
   wxFrame::CreateToolBar(wxTB_HORIZONTAL | wxTB_TEXT);
   m_toolbar = GetToolBar();
-  m_toolbar->SetToolBitmapSize(wxSize(32, 32));
+  const wxSize iconSize = m_toolbar->FromDIP(wxSize(24, 24));
+  m_toolbar->SetToolBitmapSize(iconSize);
 
-  // Helper lambda to load toolbar icon
-  auto loadIcon = [](const wxString &name) -> wxBitmap {
-    // Try embedded resource first (Permanent Cure)
-    wxIcon resIcon(name, wxBITMAP_TYPE_ICO_RESOURCE);
-    if (resIcon.IsOk()) {
-      wxBitmap bmp(resIcon);
-      wxImage img = bmp.ConvertToImage();
-      img.Rescale(32, 32, wxIMAGE_QUALITY_HIGH);
-      return wxBitmap(img);
-    }
-
-    // Fallback: Get executable path and construct icon path relative to it
-    wxString exePath = wxStandardPaths::Get().GetExecutablePath();
-
-    // Try ./resources first
-    wxFileName iconPath(exePath);
-    iconPath.SetFullName(name + ".png");
-    iconPath.AppendDir("resources");
-    iconPath.Normalize(wxPATH_NORM_DOTS | wxPATH_NORM_ABSOLUTE | wxPATH_NORM_TILDE);
-
-    if (!wxFileExists(iconPath.GetFullPath())) {
-      // Try ../resources
-      iconPath = wxFileName(exePath);
-      iconPath.SetFullName(name + ".png");
-      iconPath.AppendDir("..");
-      iconPath.AppendDir("resources");
-      iconPath.Normalize(wxPATH_NORM_DOTS | wxPATH_NORM_ABSOLUTE | wxPATH_NORM_TILDE);
-    }
-
-    wxString path = iconPath.GetFullPath();
-    wxImage img(path, wxBITMAP_TYPE_PNG);
-    if (img.IsOk()) {
-      img.Rescale(32, 32, wxIMAGE_QUALITY_HIGH);
-      return wxBitmap(img);
-    }
-    // Fallback to default art if icon not found
-    return wxArtProvider::GetBitmap(wxART_NORMAL_FILE, wxART_TOOLBAR,
-                                    wxSize(32, 32));
+  auto getToolbarBitmap = [this](const wxString &glyph) {
+    return CreateToolbarGlyphBitmap(m_toolbar, glyph);
   };
 
-  // Add toolbar buttons with custom icons
-  m_toolbar->AddTool(ID_ADD_URL, "Add URL", loadIcon("icon_add_url"),
+  // Fluent/MDL2 glyphs (fallback font: Segoe MDL2 Assets)
+  m_toolbar->AddTool(ID_ADD_URL, "Add URL", getToolbarBitmap(L"\xE710"),
                      "Add a new download URL");
-
-  m_toolbar->AddTool(ID_RESUME, "Resume", loadIcon("icon_resume"),
+  m_toolbar->AddTool(ID_RESUME, "Resume", getToolbarBitmap(L"\xE768"),
                      "Resume download");
-
-  m_toolbar->AddTool(ID_PAUSE, "Pause", loadIcon("icon_pause"),
+  m_toolbar->AddTool(ID_PAUSE, "Pause", getToolbarBitmap(L"\xE769"),
                      "Pause download");
 
   m_toolbar->AddSeparator();
-
-  m_toolbar->AddTool(ID_DELETE, "Delete", loadIcon("icon_delete"),
+  m_toolbar->AddTool(ID_DELETE, "Delete", getToolbarBitmap(L"\xE74D"),
                      "Delete download");
 
   m_toolbar->AddSeparator();
-
-  m_toolbar->AddTool(ID_OPTIONS, "Options", loadIcon("icon_options"),
+  m_toolbar->AddTool(ID_OPTIONS, "Options", getToolbarBitmap(L"\xE713"),
                      "Open options");
-
-  m_toolbar->AddTool(ID_SCHEDULER, "Scheduler", loadIcon("icon_scheduler"),
-                     "Open scheduler");
+  m_toolbar->AddTool(ID_SCHEDULER, "Scheduler",
+                     getToolbarBitmap(L"\xE787"), "Open scheduler");
 
   m_toolbar->AddSeparator();
-
   m_toolbar->AddTool(ID_START_QUEUE, "Start Queue",
-                     loadIcon("icon_start_queue"), "Start download queue");
-
-  m_toolbar->AddTool(ID_STOP_QUEUE, "Stop Queue", loadIcon("icon_stop_queue"),
+                     getToolbarBitmap(L"\xE72A"), "Start download queue");
+  m_toolbar->AddTool(ID_STOP_QUEUE, "Stop Queue", getToolbarBitmap(L"\xE71A"),
                      "Stop download queue");
 
   m_toolbar->AddSeparator();
-
-  m_toolbar->AddTool(ID_GRABBER, "Grabber", loadIcon("icon_grabber"),
+  m_toolbar->AddTool(ID_GRABBER, "Grabber", getToolbarBitmap(L"\xE721"),
                      "Open URL grabber");
 
   m_toolbar->Realize();
@@ -434,11 +574,113 @@ void MainWindow::CreateMainContent() {
   SetSizer(mainSizer);
 }
 
-void MainWindow::OnExit(wxCommandEvent &event) { Close(true); }
+void MainWindow::OnExit(wxCommandEvent &event) { OnTrayExitRequest(); }
+
+void MainWindow::ApplyStartupMinimizedState() {
+  if (Settings::GetInstance().GetMinimizeToTray()) {
+    EnsureTrayIcon();
+    Hide();
+    m_minimizedToTray = true;
+  } else {
+    Iconize(true);
+  }
+}
+
+void MainWindow::OnIconize(wxIconizeEvent &event) {
+  // Keep minimize button behavior normal (taskbar minimize).
+  // Tray minimize is handled only by close (X) when enabled in settings.
+  event.Skip();
+}
+
+void MainWindow::OnClose(wxCloseEvent &event) {
+  if (!m_isClosing && event.CanVeto() &&
+      Settings::GetInstance().GetMinimizeToTray()) {
+    EnsureTrayIcon();
+    Hide();
+    m_minimizedToTray = true;
+    event.Veto();
+
+    if (Settings::GetInstance().GetShowNotifications()) {
+      ShowNotification("Last Download Manager",
+                       "LDM is still running in the system tray.");
+    }
+    return;
+  }
+
+  m_isClosing = true;
+  m_minimizedToTray = false;
+
+  if (m_taskBarIcon) {
+    if (m_taskBarIcon->IsIconInstalled()) {
+      m_taskBarIcon->RemoveIcon();
+    }
+  }
+
+  event.Skip();
+}
+
+void MainWindow::ShowFromTray() {
+  if (m_isClosing) {
+    return;
+  }
+
+  if (m_taskBarIcon && m_taskBarIcon->IsIconInstalled()) {
+    m_taskBarIcon->RemoveIcon();
+  }
+
+  m_minimizedToTray = false;
+  Iconize(false);
+  Show(true);
+  Raise();
+  RequestUserAttention(wxUSER_ATTENTION_INFO);
+}
+
+void MainWindow::ShowNotification(const wxString &title,
+                                  const wxString &message) {
+  if (!m_taskBarIcon || !m_taskBarIcon->IsIconInstalled()) {
+    return;
+  }
+
+#ifdef _WIN32
+  m_taskBarIcon->ShowBalloon(title, message, 2000, wxICON_INFORMATION);
+#else
+  wxUnusedVar(title);
+  wxUnusedVar(message);
+#endif
+}
+
+void MainWindow::OnTrayExitRequest() {
+  if (m_isClosing) {
+    return;
+  }
+
+  m_isClosing = true;
+  Close(true);
+}
+
+void MainWindow::CleanupEventHandlers() {
+  Unbind(wxEVT_ICONIZE, &MainWindow::OnIconize, this);
+  Unbind(wxEVT_CLOSE_WINDOW, &MainWindow::OnClose, this);
+}
+
+void MainWindow::EnsureTrayIcon() {
+  if (!m_taskBarIcon) {
+    m_taskBarIcon = new LDMTaskBarIcon(this);
+  }
+
+  if (!m_taskBarIcon->IsIconInstalled()) {
+    wxIcon icon = GetIcon();
+    if (!icon.IsOk()) {
+      icon = wxArtProvider::GetIcon(wxART_INFORMATION, wxART_OTHER,
+                                    wxSize(16, 16));
+    }
+    m_taskBarIcon->SetIcon(icon, "Last Download Manager");
+  }
+}
 
 void MainWindow::OnAbout(wxCommandEvent &event) {
   wxMessageBox("Last Download Manager\n\n"
-               "Version 2.0.0\n\n"
+               "Version 2.1.1\n\n"
                "A powerful download manager built with wxWidgets, WinINet, and "
                "XML storage.\n\n"
                "Features:\n"
@@ -814,17 +1056,6 @@ void MainWindow::OnStopQueue(wxCommandEvent &event) {
   m_statusBar->SetStatusText("Download queue stopped", 0);
 }
 
-void MainWindow::OnViewDarkMode(wxCommandEvent &event) {
-  bool isDarkMode = event.IsChecked();
-  ThemeManager::GetInstance().SetDarkMode(isDarkMode);
-  ThemeManager::GetInstance().ApplyTheme(this);
-
-  // Refresh specific controls that might need re-layout or data refresh
-  if (m_downloadsTable) {
-    m_downloadsTable->RefreshAll();
-  }
-}
-
 void MainWindow::OnCategorySelected(wxTreeEvent &event) {
   // Guard against this being called during construction before m_downloadsTable
   // exists
@@ -962,8 +1193,10 @@ WXLRESULT MainWindow::MSWWindowProc(WXUINT nMsg, WXWPARAM wParam, WXLPARAM lPara
         wxString urlStr = wxString::FromUTF8(url);
         // We need to process this on the main thread, but we are already on it.
         // However, bringing the window to front is important.
-        if (IsIconized()) {
-            Restore();
+        if (m_minimizedToTray) {
+            ShowFromTray();
+        } else if (IsIconized()) {
+            Iconize(false);
         }
         Show(true);
         Raise();
@@ -977,6 +1210,34 @@ WXLRESULT MainWindow::MSWWindowProc(WXUINT nMsg, WXWPARAM wParam, WXLPARAM lPara
   return wxFrame::MSWWindowProc(nMsg, wParam, lParam);
 }
 #endif
+
+LDMTaskBarIcon::LDMTaskBarIcon(MainWindow *parent) : m_parent(parent) {
+  Bind(wxEVT_MENU, &LDMTaskBarIcon::OnTrayShow, this, ID_TRAY_SHOW);
+  Bind(wxEVT_MENU, &LDMTaskBarIcon::OnTrayExit, this, ID_TRAY_EXIT);
+  Bind(wxEVT_TASKBAR_LEFT_DOWN, &LDMTaskBarIcon::OnLeftClick, this);
+  Bind(wxEVT_TASKBAR_LEFT_DCLICK, &LDMTaskBarIcon::OnLeftClick, this);
+}
+
+void LDMTaskBarIcon::OnTrayShow(wxCommandEvent &event) {
+  wxUnusedVar(event);
+  if (m_parent) {
+    m_parent->CallAfter(&MainWindow::ShowFromTray);
+  }
+}
+
+void LDMTaskBarIcon::OnTrayExit(wxCommandEvent &event) {
+  wxUnusedVar(event);
+  if (m_parent) {
+    m_parent->CallAfter(&MainWindow::OnTrayExitRequest);
+  }
+}
+
+void LDMTaskBarIcon::OnLeftClick(wxTaskBarIconEvent &event) {
+  wxUnusedVar(event);
+  if (m_parent) {
+    m_parent->CallAfter(&MainWindow::ShowFromTray);
+  }
+}
 
 void MainWindow::OnGrabber(wxCommandEvent &event) {
   wxMessageBox(

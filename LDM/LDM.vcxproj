@@ -45,12 +45,12 @@
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
-    <OutDir>$(SolutionDir)bin\$(Platform)\$(Configuration)\</OutDir>
-    <IntDir>$(SolutionDir)obj\$(Platform)\$(Configuration)\</IntDir>
+    <OutDir>$(MSBuildProjectDirectory)\..\bin\$(Platform)\$(Configuration)\</OutDir>
+    <IntDir>$(MSBuildProjectDirectory)\..\obj\$(Platform)\$(Configuration)\</IntDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
-    <OutDir>$(SolutionDir)bin\$(Platform)\$(Configuration)\</OutDir>
-    <IntDir>$(SolutionDir)obj\$(Platform)\$(Configuration)\</IntDir>
+    <OutDir>$(MSBuildProjectDirectory)\..\bin\$(Platform)\$(Configuration)\</OutDir>
+    <IntDir>$(MSBuildProjectDirectory)\..\obj\$(Platform)\$(Configuration)\</IntDir>
     <LibraryPath>$(WXWIN)\lib\vc_x64_lib;$(LibraryPath)</LibraryPath>
     <IncludePath>$(WXWIN)\include;$(WXWIN)\lib\vc_x64_lib\mswu;$(IncludePath)</IncludePath>
   </PropertyGroup>
@@ -64,7 +64,7 @@
       <ActionMode>true</ActionMode>
       <AdditionalIncludeDirectories>$(ProjectDir);$(WXWIN)\include;$(WXWIN)\lib\vc_x64_lib\mswud;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp17</LanguageStandard>
-      <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
+      <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -72,6 +72,10 @@
       <AdditionalLibraryDirectories>$(WXWIN)\lib\vc_x64_lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalDependencies>wxmsw33ud_core.lib;wxbase33ud.lib;wxbase33ud_xml.lib;wxmsw33ud_adv.lib;wxpngd.lib;wxjpegd.lib;wxtiffd.lib;wxzlibd.lib;wxexpatd.lib;wxregexud.lib;wxwebpd.lib;wininet.lib;comctl32.lib;rpcrt4.lib;ws2_32.lib;bcrypt.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
+    <PostBuildEvent>
+      <Message>Copying required runtime DLLs to $(OutDir)</Message>
+      <Command>powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-ChildItem -Path '$(OutDir)' -File -Filter '*.dll' -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^(msvcp140.*|vcruntime140.*|concrt140.*|vccorlib140.*)\.dll$' } | Remove-Item -Force -ErrorAction SilentlyContinue; $root='$(VCInstallDir)Redist\MSVC'; $needed=@('msvcp140d.dll','vcruntime140d.dll','vcruntime140_1d.dll'); if(Test-Path $root){ $crtDir = Get-ChildItem -Path $root -Directory | Sort-Object Name -Descending | ForEach-Object { Get-ChildItem -Path (Join-Path $_.FullName 'debug_nonredist\x64\Microsoft.VC*.DebugCRT') -Directory -ErrorAction SilentlyContinue } | Select-Object -First 1; if($crtDir){ foreach($dll in $needed){ $src = Join-Path $crtDir.FullName $dll; if(Test-Path $src){ Copy-Item -Path $src -Destination '$(OutDir)' -Force } } } }; $wx='$(WXWIN)\lib\vc_x64_dll'; $db='$(VCInstallDir)Tools\MSVC\$(VCToolsVersion)\bin\Hostx64\x64\dumpbin.exe'; if((Test-Path $wx) -and (Test-Path $db) -and (Test-Path '$(TargetPath)')){ $deps = &amp; $db /DEPENDENTS '$(TargetPath)' | ForEach-Object { $_.Trim() } | Where-Object { $_ -match '^[A-Za-z0-9_.-]+\.dll$' -and $_ -like 'wx*.dll' } | Sort-Object -Unique; foreach($dll in $deps){ $src = Join-Path $wx $dll; if(Test-Path $src){ Copy-Item -Path $src -Destination '$(OutDir)' -Force } } }"</Command>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
@@ -85,7 +89,7 @@
       <ActionMode>true</ActionMode>
       <AdditionalIncludeDirectories>$(ProjectDir);$(WXWIN)\include;$(WXWIN)\lib\vc_x64_lib\mswu;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp17</LanguageStandard>
-      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -95,6 +99,10 @@
       <AdditionalLibraryDirectories>$(WXWIN)\lib\vc_x64_lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalDependencies>wxmsw33u_core.lib;wxbase33u.lib;wxbase33u_xml.lib;wxmsw33u_adv.lib;wxpng.lib;wxjpeg.lib;wxtiff.lib;wxzlib.lib;wxexpat.lib;wxregexu.lib;wxwebp.lib;wininet.lib;comctl32.lib;rpcrt4.lib;ws2_32.lib;bcrypt.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
+    <PostBuildEvent>
+      <Message>Copying required runtime DLLs to $(OutDir)</Message>
+      <Command>powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-ChildItem -Path '$(OutDir)' -File -Filter '*.dll' -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^(msvcp140.*|vcruntime140.*|concrt140.*|vccorlib140.*)\.dll$' } | Remove-Item -Force -ErrorAction SilentlyContinue; $root='$(VCInstallDir)Redist\MSVC'; $needed=@('msvcp140.dll','vcruntime140.dll','vcruntime140_1.dll'); if(Test-Path $root){ $crtDir = Get-ChildItem -Path $root -Directory | Sort-Object Name -Descending | ForEach-Object { Get-ChildItem -Path (Join-Path $_.FullName 'x64\Microsoft.VC*.CRT') -Directory -ErrorAction SilentlyContinue } | Select-Object -First 1; if($crtDir){ foreach($dll in $needed){ $src = Join-Path $crtDir.FullName $dll; if(Test-Path $src){ Copy-Item -Path $src -Destination '$(OutDir)' -Force } } } }; $wx='$(WXWIN)\lib\vc_x64_dll'; $db='$(VCInstallDir)Tools\MSVC\$(VCToolsVersion)\bin\Hostx64\x64\dumpbin.exe'; if((Test-Path $wx) -and (Test-Path $db) -and (Test-Path '$(TargetPath)')){ $deps = &amp; $db /DEPENDENTS '$(TargetPath)' | ForEach-Object { $_.Trim() } | Where-Object { $_ -match '^[A-Za-z0-9_.-]+\.dll$' -and $_ -like 'wx*.dll' } | Sort-Object -Unique; foreach($dll in $deps){ $src = Join-Path $wx $dll; if(Test-Path $src){ Copy-Item -Path $src -Destination '$(OutDir)' -Force } } }"</Command>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="core\Download.cpp" />
@@ -103,6 +111,7 @@
     <ClCompile Include="core\YtDlpManager.cpp" />
     <ClCompile Include="database\DatabaseManager.cpp" />
     <ClCompile Include="main.cpp" />
+    <ClCompile Include="ui\AppArtProvider.cpp" />
     <ClCompile Include="ui\CategoriesPanel.cpp" />
     <ClCompile Include="ui\DownloadsTable.cpp" />
     <ClCompile Include="ui\MainWindow.cpp" />
@@ -121,6 +130,7 @@
     <ClInclude Include="core\DownloadManager.h" />
     <ClInclude Include="core\YtDlpManager.h" />
     <ClInclude Include="database\DatabaseManager.h" />
+    <ClInclude Include="ui\AppArtProvider.h" />
     <ClInclude Include="ui\CategoriesPanel.h" />
     <ClInclude Include="ui\DownloadsTable.h" />
     <ClInclude Include="ui\MainWindow.h" />
@@ -143,25 +153,6 @@
   </ItemGroup>
   <ItemGroup>
     <Image Include="resources\app_icon.ico" />
-    <Image Include="resources\icon_32.png" />
-    <Image Include="resources\icon_add_url.ico" />
-    <Image Include="resources\icon_add_url.png" />
-    <Image Include="resources\icon_delete.ico" />
-    <Image Include="resources\icon_delete.png" />
-    <Image Include="resources\icon_grabber.ico" />
-    <Image Include="resources\icon_grabber.png" />
-    <Image Include="resources\icon_options.ico" />
-    <Image Include="resources\icon_options.png" />
-    <Image Include="resources\icon_pause.ico" />
-    <Image Include="resources\icon_pause.png" />
-    <Image Include="resources\icon_resume.ico" />
-    <Image Include="resources\icon_resume.png" />
-    <Image Include="resources\icon_scheduler.ico" />
-    <Image Include="resources\icon_scheduler.png" />
-    <Image Include="resources\icon_start_queue.ico" />
-    <Image Include="resources\icon_start_queue.png" />
-    <Image Include="resources\icon_stop_queue.ico" />
-    <Image Include="resources\icon_stop_queue.png" />
     <Image Include="resources\Interface.png" />
     <Image Include="resources\LDM Github Readme.png" />
   </ItemGroup>
