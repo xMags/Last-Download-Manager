@@ -61,14 +61,15 @@ void OptionsDialog::CreateGeneralTab(wxNotebook *notebook) {
   // Startup options
   wxStaticBoxSizer *startupBox =
       new wxStaticBoxSizer(wxVERTICAL, panel, "Startup");
-  m_autoStartCheck =
-      new wxCheckBox(panel, wxID_ANY, "Start downloads automatically");
+  m_autoStartCheck = new wxCheckBox(panel, wxID_ANY, "Start with Windows");
+  m_startMinimizedCheck = new wxCheckBox(panel, wxID_ANY, "Start minimized");
   m_minimizeToTrayCheck =
       new wxCheckBox(panel, wxID_ANY, "Minimize to system tray on close");
   m_showNotificationsCheck =
       new wxCheckBox(panel, wxID_ANY, "Show download notifications");
 
   startupBox->Add(m_autoStartCheck, 0, wxALL, 5);
+  startupBox->Add(m_startMinimizedCheck, 0, wxALL, 5);
   startupBox->Add(m_minimizeToTrayCheck, 0, wxALL, 5);
   startupBox->Add(m_showNotificationsCheck, 0, wxALL, 5);
   sizer->Add(startupBox, 0, wxEXPAND | wxALL, 10);
@@ -207,20 +208,6 @@ void OptionsDialog::CreateInterfaceTab(wxNotebook *notebook) {
   wxStaticBoxSizer *appearanceBox =
       new wxStaticBoxSizer(wxVERTICAL, panel, "Appearance");
 
-  // Theme selection (placeholder)
-  wxBoxSizer *themeSizer = new wxBoxSizer(wxHORIZONTAL);
-  themeSizer->Add(new wxStaticText(panel, wxID_ANY, "Theme:"), 0,
-                  wxALIGN_CENTER_VERTICAL | wxRIGHT, 10);
-  wxArrayString themes;
-  themes.Add("Light");
-  themes.Add("Dark");
-  themes.Add("System Default");
-  wxChoice *themeChoice =
-      new wxChoice(panel, wxID_ANY, wxDefaultPosition, wxDefaultSize, themes);
-  themeChoice->SetSelection(0);
-  themeSizer->Add(themeChoice, 0);
-  appearanceBox->Add(themeSizer, 0, wxALL, 5);
-
   // Show toolbar text
   wxCheckBox *showToolbarTextCheck =
       new wxCheckBox(panel, wxID_ANY, "Show text on toolbar buttons");
@@ -243,7 +230,8 @@ void OptionsDialog::LoadSettings() {
   Settings &settings = Settings::GetInstance();
 
   m_downloadFolderPicker->SetPath(settings.GetDownloadFolder());
-  m_autoStartCheck->SetValue(settings.GetAutoStart());
+  m_autoStartCheck->SetValue(settings.GetStartWithWindows());
+  m_startMinimizedCheck->SetValue(settings.GetStartMinimized());
   m_minimizeToTrayCheck->SetValue(settings.GetMinimizeToTray());
   m_showNotificationsCheck->SetValue(settings.GetShowNotifications());
   m_maxConnectionsSpin->SetValue(settings.GetMaxConnections());
@@ -267,7 +255,8 @@ void OptionsDialog::SaveSettings() {
   Settings &settings = Settings::GetInstance();
 
   settings.SetDownloadFolder(m_downloadFolderPicker->GetPath());
-  settings.SetAutoStart(m_autoStartCheck->GetValue());
+  settings.SetStartWithWindows(m_autoStartCheck->GetValue());
+  settings.SetStartMinimized(m_startMinimizedCheck->GetValue());
   settings.SetMinimizeToTray(m_minimizeToTrayCheck->GetValue());
   settings.SetShowNotifications(m_showNotificationsCheck->GetValue());
   settings.SetMaxConnections(m_maxConnectionsSpin->GetValue());

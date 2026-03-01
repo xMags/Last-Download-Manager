@@ -3,13 +3,21 @@
 #include <algorithm>
 #include <wx/filename.h>
 
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <Windows.h>
+#endif
+
 Settings &Settings::GetInstance() {
   static Settings instance;
   return instance;
 }
 
 Settings::Settings()
-    : m_autoStart(true), m_minimizeToTray(true), m_showNotifications(true),
+    : m_startWithWindows(false), m_startMinimized(false),
+      m_minimizeToTray(true), m_showNotifications(true),
       m_maxConnections(8), m_maxSimultaneousDownloads(3), m_speedLimit(0),
       m_useProxy(false), m_proxyPort(8080) {
   // Set default download folder to Windows Downloads folder
@@ -31,7 +39,14 @@ void Settings::Load() {
   // Load general settings
   m_downloadFolder =
       db.GetSetting("download_folder", m_downloadFolder.ToStdString());
-  m_autoStart = db.GetSetting("auto_start", "1") == "1";
+  std::string startWithWindows = db.GetSetting("start_with_windows", "");
+  if (startWithWindows.empty()) {
+    // Legacy key fallback for older versions.
+    m_startWithWindows = db.GetSetting("auto_start", "0") == "1";
+  } else {
+    m_startWithWindows = (startWithWindows == "1");
+  }
+  m_startMinimized = db.GetSetting("start_minimized", "0") == "1";
   m_minimizeToTray = db.GetSetting("minimize_to_tray", "1") == "1";
   m_showNotifications = db.GetSetting("show_notifications", "1") == "1";
 
@@ -53,6 +68,8 @@ void Settings::Load() {
   } catch (...) {
     m_proxyPort = 8080;
   }
+
+  SyncStartupRegistrationLocked();
 }
 
 void Settings::Save() {
@@ -62,7 +79,9 @@ void Settings::Save() {
 
   // Save general settings
   db.SetSetting("download_folder", m_downloadFolder.ToStdString());
-  db.SetSetting("auto_start", m_autoStart ? "1" : "0");
+  db.SetSetting("start_with_windows", m_startWithWindows ? "1" : "0");
+  db.SetSetting("start_minimized", m_startMinimized ? "1" : "0");
+  db.SetSetting("auto_start", m_startWithWindows ? "1" : "0"); // Legacy key
   db.SetSetting("minimize_to_tray", m_minimizeToTray ? "1" : "0");
   db.SetSetting("show_notifications", m_showNotifications ? "1" : "0");
 
@@ -76,4 +95,39 @@ void Settings::Save() {
   db.SetSetting("use_proxy", m_useProxy ? "1" : "0");
   db.SetSetting("proxy_host", m_proxyHost);
   db.SetSetting("proxy_port", std::to_string(m_proxyPort));
+
+  SyncStartupRegistrationLocked();
+}
+
+void Settings::SyncStartupRegistrationLocked() const {
+#ifdef _WIN32
+  constexpr const wchar_t *kRunKeyPath =
+      L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
+  constexpr const wchar_t *kRunValueName = L"LastDownloadManager";
+
+  HKEY runKey = nullptr;
+  LONG result = RegCreateKeyExW(HKEY_CURRENT_USER, kRunKeyPath, 0, nullptr, 0,
+                                KEY_SET_VALUE, nullptr, &runKey, nullptr);
+  if (result != ERROR_SUCCESS || !runKey) {
+    return;
+  }
+
+  if (m_startWithWindows) {
+    wxString exePath = wxStandardPaths::Get().GetExecutablePath();
+    wxString command = wxString::Format("\"%s\" --autostart", exePath);
+    if (m_startMinimized) {
+      command += " --minimized";
+    }
+
+    std::wstring commandW = command.ToStdWstring();
+    RegSetValueExW(
+        runKey, kRunValueName, 0, REG_SZ,
+        reinterpret_cast<const BYTE *>(commandW.c_str()),
+        static_cast<DWORD>((commandW.size() + 1) * sizeof(wchar_t)));
+  } else {
+    RegDeleteValueW(runKey, kRunValueName);
+  }
+
+  RegCloseKey(runKey);
+#endif
 }

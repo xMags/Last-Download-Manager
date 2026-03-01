@@ -2,6 +2,7 @@
 // Main Entry Point
 
 #include "ui/MainWindow.h"
+#include "ui/AppArtProvider.h"
 #include <wx/image.h>
 #include <wx/wx.h>
 #include <wx/cmdline.h>
@@ -25,19 +26,23 @@ public:
       return false;
     }
 
+    LaunchArgs launchArgs = ParseLaunchArgs();
+
     // Check for existing instance
     m_singleInstanceChecker = new wxSingleInstanceChecker;
     if (m_singleInstanceChecker->IsAnotherRunning()) {
-        // Another instance is running. Check if we have arguments (URL) to pass.
-        if (argc > 1) {
-            wxString url = argv[1];
-            SendUrlToExistingInstance(url);
+        // Another instance is running. Forward only URL arguments.
+        if (!launchArgs.url.IsEmpty()) {
+            SendUrlToExistingInstance(launchArgs.url);
         }
         return false; // Exit this instance
     }
 
     // Initialize image handlers (required for PNG, JPEG, etc.)
     wxInitAllImageHandlers();
+
+    // Use app-provided vector icons for toolbar art.
+    wxArtProvider::Push(new AppArtProvider);
 
     // Enable high DPI support
 #ifdef _WIN32
@@ -48,9 +53,15 @@ public:
     MainWindow *mainWindow = new MainWindow();
     mainWindow->Show(true);
 
-    // If we were started with an argument, process it immediately
-    if (argc > 1) {
-        mainWindow->ProcessUrl(argv[1]);
+    if (launchArgs.startMinimized) {
+      mainWindow->CallAfter([mainWindow]() {
+        mainWindow->ApplyStartupMinimizedState();
+      });
+    }
+
+    // If we were started with a URL argument, process it immediately.
+    if (!launchArgs.url.IsEmpty()) {
+      mainWindow->ProcessUrl(launchArgs.url);
     }
 
     return true;
@@ -75,6 +86,12 @@ public:
   }
 
 private:
+    struct LaunchArgs {
+      bool isAutoStart = false;
+      bool startMinimized = false;
+      wxString url;
+    };
+
     static const wxCmdLineEntryDesc g_cmdLineDesc[];
   
   virtual int OnExit() override {
@@ -84,6 +101,41 @@ private:
 
 private:
     wxSingleInstanceChecker* m_singleInstanceChecker;
+
+    LaunchArgs ParseLaunchArgs() const {
+      LaunchArgs args;
+
+      for (int i = 1; i < argc; ++i) {
+        wxString arg = argv[i];
+
+        if (arg.CmpNoCase("--autostart") == 0 ||
+            arg.CmpNoCase("/autostart") == 0) {
+          args.isAutoStart = true;
+          continue;
+        }
+        if (arg.CmpNoCase("--minimized") == 0 ||
+            arg.CmpNoCase("/minimized") == 0 ||
+            arg.CmpNoCase("-m") == 0) {
+          args.startMinimized = true;
+          continue;
+        }
+        if (arg.CmpNoCase("--debug") == 0 || arg.CmpNoCase("-d") == 0 ||
+            arg.CmpNoCase("/debug") == 0) {
+          continue;
+        }
+
+        if (!arg.IsEmpty() && (arg[0] == '-' || arg[0] == '/')) {
+          // Ignore unsupported switches for forward compatibility.
+          continue;
+        }
+
+        if (args.url.IsEmpty()) {
+          args.url = arg;
+        }
+      }
+
+      return args;
+    }
 
     void SendUrlToExistingInstance(const wxString& url) {
 #ifdef _WIN32
@@ -119,6 +171,9 @@ private:
 };
 
 const wxCmdLineEntryDesc LDMApp::g_cmdLineDesc[] = {
+    { wxCMD_LINE_SWITCH, "a", "autostart", "launched from Windows startup" },
+    { wxCMD_LINE_SWITCH, "m", "minimized", "start minimized" },
+    { wxCMD_LINE_SWITCH, "d", "debug", "enable debug console" },
     { wxCMD_LINE_PARAM, NULL, NULL, "url", wxCMD_LINE_VAL_STRING, wxCMD_LINE_PARAM_OPTIONAL },
     { wxCMD_LINE_NONE }
 };

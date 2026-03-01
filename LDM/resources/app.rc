@@ -6,21 +6,10 @@
 // Application icon
 IDI_ICON1 ICON "app_icon.ico"
 
-// Toolbar Icons
-icon_add_url ICON "icon_add_url.ico"
-icon_resume ICON "icon_resume.ico"
-icon_pause ICON "icon_pause.ico"
-icon_delete ICON "icon_delete.ico"
-icon_options ICON "icon_options.ico"
-icon_scheduler ICON "icon_scheduler.ico"
-icon_grabber ICON "icon_grabber.ico"
-icon_stop_queue ICON "icon_stop_queue.ico"
-icon_start_queue ICON "icon_start_queue.ico"
-
 // Version information
 VS_VERSION_INFO VERSIONINFO
-FILEVERSION 1,0,0,0
-PRODUCTVERSION 1,0,0,0
+FILEVERSION 2,1,1,0
+PRODUCTVERSION 2,1,1,0
 FILEFLAGSMASK 0x3fL
 FILEFLAGS 0x0L
 FILEOS VOS__WINDOWS32
@@ -33,12 +22,12 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "LDM"
             VALUE "FileDescription", "LDM"
-            VALUE "FileVersion", "1.0.0.0"
+            VALUE "FileVersion", "2.1.1.0"
             VALUE "InternalName", "LDM"
             VALUE "LegalCopyright", "Copyright (C) 2026"
             VALUE "OriginalFilename", "LDM.exe"
             VALUE "ProductName", "LDM"
-            VALUE "ProductVersion", "1.0.0.0"
+            VALUE "ProductVersion", "2.1.1.0"
         END
     END
     BLOCK "VarFileInfo"

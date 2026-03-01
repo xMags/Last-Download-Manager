@@ -294,7 +294,7 @@ bool DownloadEngine::ParseContentRangeStart(const std::string &value,
 DownloadEngine::DownloadEngine()
     : m_maxConnections(8), m_useNativeCAStore(true),
       m_state(std::make_shared<EngineState>()) {
-  m_state->userAgent = "LastDownloadManager/2.0.0";
+  m_state->userAgent = "LastDownloadManager/2.1.1";
   m_state->proxyUrl.clear();
   m_state->verifySSL.store(true);
   m_state->speedLimitBytes.store(0);

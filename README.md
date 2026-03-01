@@ -2,11 +2,17 @@
 
 A modern, feature-rich download manager built with C++ and wxWidgets.
 
+## Known Issue
+
+![Animated known issue marker](LDM/resources/known-issue-alert.svg)
+
+**!! Known issue:** LDM may freeze or delay for a couple of seconds when downloading videos using yt-dlp. This will be fixed in future updates.
+
 ![LDM Banner](LDM/resources/LDM%20Github%20Readme.png)
 
 ## Screenshot
 
-![LDM Interface](LDM/resources/Interface.png)
+![LDM Interface v2.1.1](LDM/resources/Interface.png)
 
 ## Features
 

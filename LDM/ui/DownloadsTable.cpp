@@ -182,20 +182,11 @@ void DownloadsTable::UpdateRow(long row, std::shared_ptr<Download> download) {
   m_listCtrl->SetItem(row, 6, download->GetLastTryTime());
 
   // Set row color based on status
-  // Set row color based on status
-  wxColour bgColor;
-  if (ThemeManager::GetInstance().IsDarkMode()) {
-    // In dark mode, row background is control background, but we might want
-    // slight tint Actually, simple list control usually handles selection, but
-    // for specific rows we use:
-    bgColor = ThemeManager::GetInstance().GetStatusColor(status);
-  } else {
-    bgColor = ThemeManager::GetInstance().GetStatusColor(status);
-  }
+  wxColour bgColor = ThemeManager::GetInstance().GetStatusColor(status);
 
   m_listCtrl->SetItemBackgroundColour(row, bgColor);
 
-  // Set text color if needed (e.g. for dark mode readability)
+  // Set row text color
   m_listCtrl->SetItemTextColour(
       row, ThemeManager::GetInstance().GetForegroundColor());
 }

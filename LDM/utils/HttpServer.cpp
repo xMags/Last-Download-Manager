@@ -354,7 +354,7 @@ void HttpServer::HandleClient(uintptr_t clientSocket) {
 
   // Handle GET /ping - public endpoint for extension to check if LDM is running
   if (request.find("GET /ping") != std::string::npos) {
-    std::string body = "{\"status\":\"ok\",\"app\":\"LDM\",\"version\":\"2.0.0\"}";
+    std::string body = "{\"status\":\"ok\",\"app\":\"LDM\",\"version\":\"2.1.1\"}";
     std::string response = "HTTP/1.1 200 OK\r\n" + corsHeaders +
                            "Content-Type: application/json\r\n"
                            "Content-Length: " +

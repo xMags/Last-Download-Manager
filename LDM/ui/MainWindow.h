@@ -24,6 +24,7 @@ public:
 
   // Helper to process URL (used by DnD and browser extension)
   void ProcessUrl(const wxString &url, const wxString &referer = wxEmptyString);
+  void ApplyStartupMinimizedState();
 
 private:
   // UI Components
@@ -76,7 +77,6 @@ private:
   void OnScheduler(wxCommandEvent &event);
   void OnStartQueue(wxCommandEvent &event);
   void OnStopQueue(wxCommandEvent &event);
-  void OnViewDarkMode(wxCommandEvent &event);
   void OnCategorySelected(wxTreeEvent &event);
   void OnUpdateTimer(wxTimerEvent &event);
   void OnInstallExtension(wxCommandEvent &event);
@@ -116,7 +116,6 @@ enum {
   ID_TELL_FRIEND,
   ID_CATEGORIES_PANEL,
   ID_DOWNLOADS_TABLE,
-  ID_VIEW_DARK_MODE,
   ID_UPDATE_TIMER,
   ID_INSTALL_EXTENSION,
   ID_TRAY_SHOW,
@@ -126,7 +125,8 @@ enum {
 // System tray icon class
 class LDMTaskBarIcon : public wxTaskBarIcon {
 public:
-  LDMTaskBarIcon(MainWindow *parent) : m_parent(parent) {}
+  explicit LDMTaskBarIcon(MainWindow *parent);
+  ~LDMTaskBarIcon() override = default;
 
   wxMenu *CreatePopupMenu() override {
     wxMenu *menu = new wxMenu;
@@ -142,6 +142,4 @@ public:
 
 private:
   MainWindow *m_parent;
-
-  wxDECLARE_EVENT_TABLE();
 };

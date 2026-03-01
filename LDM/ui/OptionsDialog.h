@@ -17,6 +17,7 @@ private:
   // General tab controls
   wxDirPickerCtrl *m_downloadFolderPicker;
   wxCheckBox *m_autoStartCheck;
+  wxCheckBox *m_startMinimizedCheck;
   wxCheckBox *m_minimizeToTrayCheck;
   wxCheckBox *m_showNotificationsCheck;
 

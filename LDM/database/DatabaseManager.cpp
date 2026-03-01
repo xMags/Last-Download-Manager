@@ -57,6 +57,11 @@ void DatabaseManager::Flush() {
 }
 
 bool DatabaseManager::LoadDatabase() {
+  // First run: database file may not exist yet.
+  if (m_dbPath.empty() || !wxFileExists(m_dbPath)) {
+    return false;
+  }
+
   wxXmlDocument doc;
   if (!doc.Load(m_dbPath))
     return false;
@@ -194,6 +199,13 @@ bool DatabaseManager::LoadDatabase() {
 }
 
 bool DatabaseManager::SaveDatabase() {
+  // Ensure database directory exists before writing.
+  wxFileName dbFileName(wxString::FromUTF8(m_dbPath.c_str()));
+  wxString dbDir = dbFileName.GetPath();
+  if (!dbDir.empty() && !wxDirExists(dbDir)) {
+    wxFileName::Mkdir(dbDir, wxS_DIR_DEFAULT, wxPATH_MKDIR_FULL);
+  }
+
   wxXmlDocument doc;
   wxXmlNode *root = new wxXmlNode(NULL, wxXML_ELEMENT_NODE, "LDM");
   doc.SetRoot(root);

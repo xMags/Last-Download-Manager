@@ -9,9 +9,6 @@ class ThemeManager {
 public:
   static ThemeManager &GetInstance();
 
-  bool IsDarkMode() const { return m_isDarkMode; }
-  void SetDarkMode(bool enable);
-
   // Colors
   wxColour GetBackgroundColor() const;
   wxColour GetForegroundColor() const;
@@ -32,13 +29,4 @@ private:
   ThemeManager &operator=(const ThemeManager &) = delete;
 
   mutable std::mutex m_mutex;
-  bool m_isDarkMode;
-
-  // Dark mode palette
-  const wxColour m_darkBg = wxColour(32, 32, 32);
-  const wxColour m_darkFg = wxColour(240, 240, 240);
-  const wxColour m_darkControlBg = wxColour(45, 45, 45);
-  const wxColour m_darkBorder = wxColour(60, 60, 60);
-  const wxColour m_darkHighlight = wxColour(0, 120, 215);
-  const wxColour m_darkHighlightText = wxColour(255, 255, 255);
 };

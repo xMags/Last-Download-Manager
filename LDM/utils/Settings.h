@@ -27,14 +27,28 @@ public:
     m_downloadFolder = folder; 
   }
 
-  bool GetAutoStart() const { 
+  // Startup behavior
+  bool GetStartWithWindows() const {
     std::lock_guard<std::mutex> lock(m_mutex);
-    return m_autoStart; 
+    return m_startWithWindows;
   }
-  void SetAutoStart(bool value) { 
+  void SetStartWithWindows(bool value) {
     std::lock_guard<std::mutex> lock(m_mutex);
-    m_autoStart = value; 
+    m_startWithWindows = value;
   }
+
+  bool GetStartMinimized() const {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return m_startMinimized;
+  }
+  void SetStartMinimized(bool value) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_startMinimized = value;
+  }
+
+  // Backward-compatible aliases
+  bool GetAutoStart() const { return GetStartWithWindows(); }
+  void SetAutoStart(bool value) { SetStartWithWindows(value); }
 
   bool GetMinimizeToTray() const { 
     std::lock_guard<std::mutex> lock(m_mutex);
@@ -118,7 +132,8 @@ private:
 
   // General
   wxString m_downloadFolder;
-  bool m_autoStart;
+  bool m_startWithWindows;
+  bool m_startMinimized;
   bool m_minimizeToTray;
   bool m_showNotifications;
 
@@ -131,4 +146,6 @@ private:
   bool m_useProxy;
   std::string m_proxyHost;
   int m_proxyPort;
+
+  void SyncStartupRegistrationLocked() const;
 };

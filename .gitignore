@@ -1,53 +1,69 @@
-# Build directories
+# Build outputs
 build/
 bin/
 obj/
 out/
+dist/
 cmake-build-*/
-x64/
-x86/
-# Debug/
-# Release/
-!release/
-
-# IDE files
-# Visual Studio
-.vs/
-out/
 x64/
 x86/
 Debug/
 Release/
-*.user
-*.suo
-*.pdb
-*.iobj
-*.ipdb
-*.log
-*.tlog
+**/Debug/
+**/Release/
 
-# CMake generated (Removed)
-
-# Compiled files
+# Compiled/intermediate files
 *.obj
 *.o
-*.exe
-# *.dll # Allow DLLs to be tracked if needed, or specifically un-ignore below
-*.lib
+*.idb
+*.iobj
+*.ipdb
 *.pdb
 *.ilk
 *.exp
+*.lib
+*.tlog
+*.lastbuildstate
+*.cache
+*.exe
+*.dll
+*.log
 
-# Distribution
-dist/
+# IDE files
+.vs/
+*.user
+*.suo
+*.VC.db
+*.VC.opendb
+
+# Distribution archives
 *.zip
+*.7z
+
+# Temporary/scratch files
+tmp/
+temp/
+*.tmp
+*.temp
+*.bak
+*.orig
+Old_UI.png
+
+# Signing keys / secrets
+*.pfx
+*.p12
+*.snk
+*.pvk
+*.jks
+*.keystore
+*.kdbx
+*.key
+*.privatekey
 
 # OS files
 .DS_Store
 Thumbs.db
 desktop.ini
 
-# Temporary files
-*.tmp
-*.temp
-*.log
+# Keep required CA bundle used by the app
+!LDM/resources/cacert.pem
