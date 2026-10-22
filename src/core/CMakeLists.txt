@@ -1,6 +1,21 @@
 add_library(ldm_core STATIC
+    Commands.h
+    Coordinator.cpp
+    Coordinator.h
+    CoreThread.cpp
+    CoreThread.h
+    FailureText.cpp
+    FailureText.h
+    FileNames.cpp
+    FileNames.h
+    Matching.cpp
+    Matching.h
+    Ports.h
     SegmentPlanner.cpp
     SegmentPlanner.h
+    Snapshot.h
     Store.h
-    TransferEngine.h)
+    TransferEngine.h
+    Url.cpp
+    Url.h)
 target_link_libraries(ldm_core PUBLIC ldm_model)

@@ -1,0 +1,72 @@
+#pragma once
+
+#include "base/Result.h"
+#include "model/Settings.h"
+
+#include <chrono>
+#include <cstdint>
+#include <filesystem>
+#include <optional>
+#include <span>
+#include <string>
+#include <string_view>
+#include <vector>
+
+// Narrow interfaces the coordinator uses to reach the operating system. Implementations live in
+// platform/win (production) and in the tests (fakes). Every port is called on the core thread only.
+namespace ldm::core {
+
+class Clock {
+public:
+    virtual ~Clock() = default;
+    // Wall-clock time for stored timestamps (created, last try, completed): Unix milliseconds, UTC.
+    [[nodiscard]] virtual std::int64_t NowUnixMs() = 0;
+    // Monotonic time for timers.
+    [[nodiscard]] virtual std::chrono::steady_clock::time_point Steady() = 0;
+};
+
+// The few synchronous file operations the core performs itself. Transfers and the final move go
+// through the engine's disk thread instead.
+class FileSystem {
+public:
+    virtual ~FileSystem() = default;
+    [[nodiscard]] virtual bool Exists(const std::filesystem::path& path) = 0;
+    [[nodiscard]] virtual std::optional<std::int64_t> FileSize(const std::filesystem::path& path) = 0;
+    // Deletes a file. A file that does not exist counts as deleted.
+    [[nodiscard]] virtual base::Status Remove(const std::filesystem::path& path) = 0;
+    [[nodiscard]] virtual base::Status CreateDirectories(const std::filesystem::path& path) = 0;
+};
+
+// Protects passwords at rest (DPAPI for the current user in production).
+class SecretProtector {
+public:
+    virtual ~SecretProtector() = default;
+    [[nodiscard]] virtual base::Result<std::vector<std::uint8_t>> Protect(std::string_view secret) = 0;
+    [[nodiscard]] virtual base::Result<std::string> Unprotect(std::span<const std::uint8_t> protectedSecret) = 0;
+};
+
+// Random identifiers that may leave the process (design section 5: public_id).
+class IdGenerator {
+public:
+    virtual ~IdGenerator() = default;
+    [[nodiscard]] virtual std::string NewPublicId() = 0;
+};
+
+// Keeps Windows awake while transfers run (checklist ENG-17).
+class PowerRequests {
+public:
+    virtual ~PowerRequests() = default;
+    virtual void SetTransfersActive(bool active) = 0;
+};
+
+// Chooses the proxy for one address according to Options > Proxy (checklist O-06). Returns a
+// libcurl proxy URL, or nothing for a direct connection.
+class ProxyResolver {
+public:
+    virtual ~ProxyResolver() = default;
+    // Called at startup and whenever settings change.
+    virtual void Configure(const model::Settings& settings) = 0;
+    [[nodiscard]] virtual std::optional<std::string> ProxyFor(const std::string& url) = 0;
+};
+
+}  // namespace ldm::core
