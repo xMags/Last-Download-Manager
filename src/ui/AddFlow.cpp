@@ -1,0 +1,395 @@
+#include "ui/AddFlow.h"
+
+#include "base/Utf.h"
+#include "core/FileNames.h"
+#include "core/Matching.h"
+#include "core/Url.h"
+#include "ui/Clipboard.h"
+#include "ui/History.h"
+#include "ui/dialogs/AddUrlDialog.h"
+#include "ui/dialogs/BatchDialog.h"
+#include "ui/dialogs/CategoryDialog.h"
+#include "ui/dialogs/ConfirmDialogs.h"
+#include "ui/dialogs/DownloadInfoDialog.h"
+#include "ui/dialogs/ListDialogs.h"
+
+#include <algorithm>
+#include <filesystem>
+
+namespace ldm::ui {
+
+namespace {
+
+constexpr size_t kAddressHistoryLimit = 20;
+constexpr size_t kFolderHistoryLimit = 10;
+// Clipboard text worth scanning for addresses; larger texts are ignored.
+constexpr size_t kClipboardLimit = 1024 * 1024;
+
+std::optional<model::CategoryId> GeneralCategory(const std::vector<model::Category>& categories)
+{
+    const auto general = std::find_if(categories.begin(), categories.end(),
+                                      [](const model::Category& c) { return c.builtin && c.extensions.empty(); });
+    if (general != categories.end()) {
+        return general->id;
+    }
+    return categories.empty() ? std::nullopt : std::optional<model::CategoryId>(categories.front().id);
+}
+
+}  // namespace
+
+AddFlow::AddFlow(Context context) : context_(std::move(context)) {}
+
+AddFlow::~AddFlow() = default;
+
+void AddFlow::Post(core::Command command)
+{
+    context_.commands->Post(std::move(command));
+}
+
+void AddFlow::ModifySettings(std::function<void(model::Settings&)> modify)
+{
+    Post(core::ModifySettingsCommand{std::move(modify)});
+}
+
+void AddFlow::ShowError(const std::wstring& message) const
+{
+    ::MessageBoxW(context_.owner, message.c_str(), L"Last Download Manager", MB_OK | MB_ICONWARNING);
+}
+
+bool AddFlow::ResolveDuplicate(const std::string& url, std::optional<model::DuplicatePolicy>& policy)
+{
+    const auto snapshot = context_.snapshot();
+    if (!snapshot || snapshot->settings.duplicatePolicy != model::DuplicatePolicy::Ask) {
+        return true;
+    }
+    const auto existing = std::find_if(snapshot->downloads.begin(), snapshot->downloads.end(),
+                                       [&](const auto& view) { return view->download.url == url; });
+    if (existing == snapshot->downloads.end()) {
+        return true;
+    }
+    DuplicateDialog duplicate(*context_.theme, base::ToUtf16((*existing)->download.fileName),
+                              (*existing)->download.status == model::DownloadStatus::Completed);
+    const auto answer = duplicate.Run(context_.owner);
+    if (!answer) {
+        return false;
+    }
+    policy = answer->policy;
+    if (answer->remember) {
+        const model::DuplicatePolicy chosen = answer->policy;
+        ModifySettings([chosen](model::Settings& s) { s.duplicatePolicy = chosen; });
+    }
+    if (answer->policy == model::DuplicatePolicy::ResumeOrShowComplete) {
+        core::AddDownloadCommand command;
+        command.token = nextToken_++;
+        command.url = url;
+        command.duplicatePolicy = answer->policy;
+        Post(std::move(command));
+        return false;
+    }
+    return true;
+}
+
+void AddFlow::AddAddress(const std::string& url, bool silent)
+{
+    const auto snapshot = context_.snapshot();
+    if (!snapshot) {
+        return;
+    }
+    std::optional<model::DuplicatePolicy> policy;
+    if (silent) {
+        policy = model::DuplicatePolicy::AddNumbered;  // nobody to ask; never replace silently
+    } else if (!ResolveDuplicate(url, policy)) {
+        return;
+    }
+    if (silent || !snapshot->settings.showStartDialog) {
+        core::AddDownloadCommand command;
+        command.token = nextToken_++;
+        command.url = url;
+        command.duplicatePolicy = policy;
+        command.mode = snapshot->settings.queueOnly ? core::AddMode::Later : core::AddMode::StartNow;
+        if (!silent && command.mode == core::AddMode::StartNow) {
+            progressOnAdd_.push_back(command.token);
+        }
+        Post(std::move(command));
+        return;
+    }
+    AddWithInfoDialog(url, std::nullopt, std::nullopt, policy);
+}
+
+void AddFlow::AddUrl(std::string initialUrl)
+{
+    const auto snapshot = context_.snapshot();
+    if (!snapshot) {
+        return;
+    }
+    if (initialUrl.empty()) {
+        // A single address on the clipboard is offered.
+        const auto urls = core::ExtractUrls(base::ToUtf8(ReadClipboardText(context_.owner, 4096)));
+        if (urls.size() == 1) {
+            initialUrl = urls.front();
+        }
+    }
+    AddUrlDialog dialog(*context_.theme, HistoryEntries(snapshot->settings.addressHistory), std::move(initialUrl));
+    const auto input = dialog.Run(context_.owner);
+    if (!input) {
+        return;
+    }
+    const std::string url = input->url;
+    ModifySettings([url](model::Settings& s) { s.addressHistory = PushHistory(s.addressHistory, url, kAddressHistoryLimit); });
+
+    // The duplicate question comes before the info dialog (checklist A-05).
+    std::optional<model::DuplicatePolicy> policy;
+    if (!ResolveDuplicate(url, policy)) {
+        return;
+    }
+    if (!snapshot->settings.showStartDialog) {
+        core::AddDownloadCommand command;
+        command.token = nextToken_++;
+        command.url = url;
+        command.loginUser = input->user;
+        command.loginPassword = input->password;
+        command.mode = snapshot->settings.queueOnly ? core::AddMode::Later : core::AddMode::StartNow;
+        command.duplicatePolicy = policy;
+        if (command.mode == core::AddMode::StartNow) {
+            progressOnAdd_.push_back(command.token);
+        }
+        Post(std::move(command));
+        return;
+    }
+    AddWithInfoDialog(url, input->user, input->password, policy);
+}
+
+void AddFlow::AddWithInfoDialog(const std::string& url, std::optional<std::string> user, std::optional<std::string> password,
+                                std::optional<model::DuplicatePolicy> duplicatePolicy)
+{
+    const auto snapshot = context_.snapshot();
+    const auto parsed = core::ParseUrl(url);
+    if (!snapshot || !parsed || snapshot->categories.empty()) {
+        return;
+    }
+    const model::Settings& settings = snapshot->settings;
+
+    DownloadInfoDialog::Initial initial;
+    initial.url = url;
+    initial.fileName = core::SanitizeFileName(core::FileNameFromUrlPath(parsed->path));
+    initial.categories = snapshot->categories;
+    initial.category = core::MatchCategory(snapshot->categories, initial.fileName, *parsed);
+    if (!initial.category) {
+        initial.category = GeneralCategory(snapshot->categories);
+    }
+    for (const model::Category& category : snapshot->categories) {
+        if (category.id == *initial.category) {
+            initial.saveDir = category.folder;
+        }
+    }
+    initial.recentFolders = HistoryEntries(settings.recentFolders);
+
+    const bool speculative = settings.speculativeStart;
+    const std::uint64_t token = nextToken_++;
+    if (speculative) {
+        core::AddDownloadCommand command;
+        command.token = token;
+        command.url = url;
+        command.loginUser = user;
+        command.loginPassword = password;
+        command.mode = core::AddMode::Speculative;
+        command.duplicatePolicy = duplicatePolicy;
+        pendingAdds_[token] = PendingAdd{token};
+        Post(std::move(command));
+    }
+
+    // "+" next to the category: the new category arrives with a later snapshot and is selected then.
+    const auto addCategory = [this, snapshot](HWND owner) -> std::optional<model::Category> {
+        model::Category category;
+        const auto general = GeneralCategory(snapshot->categories);
+        for (const model::Category& c : snapshot->categories) {
+            if (general && c.id == *general) {
+                category.folder = c.folder;
+            }
+        }
+        CategoryDialog dialog(*context_.theme, std::move(category));
+        if (auto created = dialog.Run(owner)) {
+            categoryToSelect_ = created->name;
+            Post(core::SaveCategoryCommand{std::move(*created)});
+        }
+        return std::nullopt;
+    };
+    DownloadInfoDialog dialog(*context_.theme, std::move(initial), addCategory);
+    pendingAdds_[token].token = token;
+    pendingAdds_[token].dialog = &dialog;
+    const DownloadInfoDialog::Choice choice = dialog.Run(context_.owner);
+    categoryToSelect_.reset();
+
+    if (choice.action != DownloadInfoDialog::Action::Cancel) {
+        const std::string folder = choice.saveDir;
+        ModifySettings([folder](model::Settings& s) { s.recentFolders = PushHistory(s.recentFolders, folder, kFolderHistoryLimit); });
+    }
+    const auto pending = pendingAdds_.find(token);
+    if (!speculative) {
+        if (pending != pendingAdds_.end()) {
+            pendingAdds_.erase(pending);
+        }
+        if (choice.action == DownloadInfoDialog::Action::Cancel) {
+            return;
+        }
+        core::AddDownloadCommand command;
+        command.token = token;
+        command.url = url;
+        command.fileName = choice.fileName;
+        command.saveDir = choice.saveDir;
+        command.categoryId = choice.category;
+        command.description = choice.description;
+        command.loginUser = user;
+        command.loginPassword = password;
+        command.mode = choice.action == DownloadInfoDialog::Action::Start ? core::AddMode::StartNow : core::AddMode::Later;
+        command.duplicatePolicy = duplicatePolicy;
+        if (command.mode == core::AddMode::StartNow) {
+            progressOnAdd_.push_back(token);
+        }
+        Post(std::move(command));
+        return;
+    }
+
+    if (pending == pendingAdds_.end()) {
+        return;  // the add failed and its error was shown
+    }
+    pending->second.dialog = nullptr;
+    if (choice.action == DownloadInfoDialog::Action::Cancel) {
+        if (pending->second.id) {
+            Post(core::DeleteCommand{{*pending->second.id}, true});
+            pendingAdds_.erase(pending);
+        } else {
+            pending->second.cancelled = true;
+        }
+        return;
+    }
+    core::ConfirmDownloadCommand confirm;
+    confirm.fileName = choice.fileName;
+    confirm.saveDir = choice.saveDir;
+    confirm.categoryId = choice.category;
+    confirm.description = choice.description;
+    confirm.start = choice.action == DownloadInfoDialog::Action::Start;
+    confirm.rememberFolderForCategory = choice.rememberFolder;
+    if (pending->second.id) {
+        confirm.id = *pending->second.id;
+        Post(confirm);
+        if (confirm.start) {
+            context_.openProgress(confirm.id);
+        }
+        pendingAdds_.erase(pending);
+        return;
+    }
+    if (confirm.start) {
+        progressOnAdd_.push_back(token);
+    }
+    pending->second.confirmation = confirm;
+}
+
+void AddFlow::AddMany(const std::vector<std::string>& urls, bool start, std::optional<std::string> user,
+                      std::optional<std::string> password)
+{
+    for (const std::string& url : urls) {
+        core::AddDownloadCommand command;
+        command.token = nextToken_++;
+        command.url = url;
+        command.loginUser = user;
+        command.loginPassword = password;
+        command.mode = start ? core::AddMode::StartNow : core::AddMode::Later;
+        // A batch never stops to ask about each duplicate.
+        command.duplicatePolicy = model::DuplicatePolicy::AddNumbered;
+        Post(std::move(command));
+    }
+}
+
+void AddFlow::AddBatch()
+{
+    BatchDialog dialog(*context_.theme);
+    if (const auto choice = dialog.Run(context_.owner)) {
+        AddMany(choice->urls, choice->start, choice->user, choice->password);
+    }
+}
+
+void AddFlow::AddFromClipboard()
+{
+    const std::wstring text = ReadClipboardText(context_.owner, kClipboardLimit);
+    std::vector<std::string> urls = core::ExtractUrls(base::ToUtf8(text));
+    if (urls.empty()) {
+        ShowError(L"The clipboard holds no download addresses.");
+        return;
+    }
+    AddList(std::move(urls), L"Add batch download from clipboard");
+}
+
+void AddFlow::AddList(std::vector<std::string> urls, const std::wstring& title)
+{
+    UrlListDialog dialog(*context_.theme, title, std::move(urls));
+    if (const auto choice = dialog.Run(context_.owner); choice && !choice->urls.empty()) {
+        AddMany(choice->urls, choice->start, std::nullopt, std::nullopt);
+    }
+}
+
+void AddFlow::OnSnapshot(const core::Snapshot& snapshot)
+{
+    for (auto& [token, pending] : pendingAdds_) {
+        if (pending.dialog == nullptr) {
+            continue;
+        }
+        if (categoryToSelect_) {
+            const auto added = std::find_if(snapshot.categories.begin(), snapshot.categories.end(),
+                                            [this](const model::Category& c) { return c.name == *categoryToSelect_; });
+            if (added != snapshot.categories.end()) {
+                pending.dialog->SetCategories(snapshot.categories, added->id);
+                categoryToSelect_.reset();
+            }
+        }
+        if (!pending.id) {
+            continue;
+        }
+        for (const auto& view : snapshot.downloads) {
+            if (view->download.id == *pending.id) {
+                pending.dialog->Update(*view);
+                break;
+            }
+        }
+    }
+}
+
+void AddFlow::OnAddResult(const core::AddResult& result)
+{
+    const auto pending = pendingAdds_.find(result.token);
+    if (result.error) {
+        if (pending != pendingAdds_.end() && pending->second.dialog != nullptr) {
+            ::EndDialog(pending->second.dialog->Handle(), IDCANCEL);
+        }
+        ShowError(base::ToUtf16(*result.error));
+    }
+    if (result.showExistingComplete && result.id) {
+        context_.select(*result.id);
+    }
+    if (const auto wanted = std::find(progressOnAdd_.begin(), progressOnAdd_.end(), result.token);
+        wanted != progressOnAdd_.end()) {
+        progressOnAdd_.erase(wanted);
+        if (result.id && !result.error) {
+            context_.openProgress(*result.id);
+        }
+    }
+    if (pending == pendingAdds_.end()) {
+        return;
+    }
+    pending->second.id = result.id;
+    if (result.id) {
+        if (pending->second.cancelled) {
+            Post(core::DeleteCommand{{*result.id}, true});
+        } else if (pending->second.confirmation) {
+            pending->second.confirmation->id = *result.id;
+            Post(*pending->second.confirmation);
+        }
+    }
+    if (pending->second.dialog == nullptr) {
+        pendingAdds_.erase(pending);
+    } else if (const auto snapshot = context_.snapshot()) {
+        OnSnapshot(*snapshot);
+    }
+}
+
+}  // namespace ldm::ui

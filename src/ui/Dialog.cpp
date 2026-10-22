@@ -67,6 +67,7 @@ INT_PTR CALLBACK Dialog::DialogProc(HWND window, UINT message, WPARAM wParam, LP
     }
     case WM_DESTROY:
         if (!self->modal_) {
+            self->OnDestroying();
             ::SetWindowLongPtrW(window, DWLP_USER, 0);
             self->window_ = nullptr;
             self->OnDestroyed();  // may delete `self`; nothing below touches it

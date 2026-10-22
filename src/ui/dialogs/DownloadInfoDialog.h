@@ -48,6 +48,8 @@ public:
     [[nodiscard]] Choice Run(HWND owner);
     // Live values of the download being added (speculative start). Safe to call while running.
     void Update(const core::DownloadView& view);
+    // A refreshed category list, for example after "+" added one; `select` becomes the choice.
+    void SetCategories(std::vector<model::Category> categories, std::optional<model::CategoryId> select);
 
 private:
     bool OnInit() override;

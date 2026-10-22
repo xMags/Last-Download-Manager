@@ -1,15 +1,16 @@
 #include "ui/MainController.h"
 
 #include "base/Utf.h"
-#include "core/FileNames.h"
-#include "core/Matching.h"
-#include "core/Url.h"
 #include "resource.h"
 #include "ui/CommandState.h"
 #include "ui/History.h"
-#include "ui/dialogs/AddUrlDialog.h"
+#include "ui/dialogs/CategoryDialog.h"
 #include "ui/dialogs/ConfirmDialogs.h"
-#include "ui/dialogs/DownloadInfoDialog.h"
+#include "core/Url.h"
+#include "ui/dialogs/ListDialogs.h"
+#include "ui/dialogs/LoginDialog.h"
+#include "ui/dialogs/OptionsDialog.h"
+#include "ui/dialogs/PropertiesDialog.h"
 
 #include <commdlg.h>
 
@@ -20,35 +21,12 @@ namespace ldm::ui {
 
 namespace {
 
-constexpr size_t kAddressHistoryLimit = 20;
-constexpr size_t kFolderHistoryLimit = 10;
 constexpr wchar_t kHelpUrl[] = L"https://github.com/xMags/Last-Download-Manager#readme";
 constexpr wchar_t kAppTitle[] = L"Last Download Manager";
 
 std::filesystem::path FinalPath(const model::Download& download)
 {
     return std::filesystem::path(base::ToUtf16(download.saveDir)) / base::ToUtf16(download.fileName);
-}
-
-std::string ClipboardUrl(HWND owner)
-{
-    if (!::IsClipboardFormatAvailable(CF_UNICODETEXT) || !::OpenClipboard(owner)) {
-        return {};
-    }
-    std::string text;
-    if (const HANDLE data = ::GetClipboardData(CF_UNICODETEXT); data != nullptr) {
-        if (const auto* chars = static_cast<const wchar_t*>(::GlobalLock(data)); chars != nullptr) {
-            // Only a short, single address is worth prefilling; anything else is ignored.
-            const size_t length = ::wcsnlen(chars, 4096);
-            if (length < 4096) {
-                text = base::ToUtf8(std::wstring_view(chars, length));
-            }
-            ::GlobalUnlock(data);
-        }
-    }
-    ::CloseClipboard();
-    const auto urls = core::ExtractUrls(text);
-    return urls.size() == 1 ? urls.front() : std::string();
 }
 
 void AppendItem(HMENU menu, UINT id, const wchar_t* text, bool enabled = true, bool checked = false)
@@ -63,7 +41,15 @@ void AppendSeparator(HMENU menu)
 
 }  // namespace
 
-MainController::MainController(Context context) : context_(std::move(context)) {}
+MainController::MainController(Context context)
+    : context_(std::move(context)),
+      transfers_(TransferWindows::Context{context_.owner, context_.commands, context_.shell, context_.system,
+                                          context_.theme, context_.snapshot, context_.exit}),
+      adds_(AddFlow::Context{context_.owner, context_.commands, context_.theme, context_.snapshot,
+                             [this](model::DownloadId id) { transfers_.OpenProgress(id); },
+                             [this](model::DownloadId id) { context_.list->SelectOnly(id); }})
+{
+}
 
 MainController::~MainController() = default;
 
@@ -98,12 +84,26 @@ void MainController::ShowError(const std::wstring& message) const
     ::MessageBoxW(context_.owner, message.c_str(), kAppTitle, MB_OK | MB_ICONWARNING);
 }
 
+bool MainController::PreTranslate(MSG& message)
+{
+    if (find_ && find_->Handle() != nullptr && ::IsDialogMessageW(find_->Handle(), &message)) {
+        return true;
+    }
+    return transfers_.PreTranslate(message);
+}
+
 bool MainController::OnCommand(int id)
 {
     const auto selectedIds = [this] { return context_.list->SelectedIds(); };
     switch (id) {
     case ID_TASKS_ADD_URL:
-        AddUrl(ClipboardUrl(context_.owner));
+        adds_.AddUrl({});
+        return true;
+    case ID_TASKS_ADD_BATCH:
+        adds_.AddBatch();
+        return true;
+    case ID_TASKS_ADD_BATCH_CLIPBOARD:
+        adds_.AddFromClipboard();
         return true;
     case ID_TASKS_EXIT:
         context_.exit();
@@ -111,9 +111,17 @@ bool MainController::OnCommand(int id)
     case ID_TRAY_RESTORE:
         context_.restore();
         return true;
-    case ID_FILE_DOWNLOAD_NOW:
-        Post(core::ResumeCommand{selectedIds()});
+    case ID_FILE_DOWNLOAD_NOW: {
+        const auto ids = selectedIds();
+        Post(core::ResumeCommand{ids});
+        // One window per started download, but never a flood of them.
+        if (ids.size() <= 3) {
+            for (const model::DownloadId started : ids) {
+                transfers_.OpenProgress(started);
+            }
+        }
         return true;
+    }
     case ID_FILE_STOP:
         Post(core::StopCommand{selectedIds()});
         return true;
@@ -141,11 +149,23 @@ bool MainController::OnCommand(int id)
             Post(core::DeleteCompletedCommand{});
         }
         return true;
+    case ID_DOWNLOADS_FIND:
+        Find(true);
+        return true;
+    case ID_DOWNLOADS_FIND_NEXT:
+        Find(false);
+        return true;
     case ID_DOWNLOADS_LIMITER_ON:
         Post(core::SetSpeedLimiterCommand{true, std::nullopt});
         return true;
     case ID_DOWNLOADS_LIMITER_OFF:
         Post(core::SetSpeedLimiterCommand{false, std::nullopt});
+        return true;
+    case ID_DOWNLOADS_LIMITER_SETTINGS:
+        SpeedLimiterSettings();
+        return true;
+    case ID_DOWNLOADS_OPTIONS:
+        ShowOptions();
         return true;
     case ID_VIEW_HIDE_CATEGORIES:
         ModifySettings([](model::Settings& s) { s.hideCategories = !s.hideCategories; });
@@ -168,34 +188,30 @@ bool MainController::OnCommand(int id)
     case ID_VIEW_TRAY_HIDDEN:
         ModifySettings([](model::Settings& s) { s.trayIconStyle = model::TrayIconStyle::Hidden; });
         return true;
+    case ID_VIEW_COLUMNS:
+        CustomizeColumns();
+        return true;
     case ID_VIEW_DARK_MODE:
         ModifySettings([](model::Settings& s) { s.darkModeSupport = !s.darkModeSupport; });
         return true;
-    case ID_VIEW_FONT_CHOOSE: {
-        LOGFONTW font{};
-        if (const auto current = reinterpret_cast<HFONT>(::SendMessageW(context_.list->Handle(), WM_GETFONT, 0, 0))) {
-            ::GetObjectW(current, sizeof(font), &font);
-        }
-        CHOOSEFONTW choose{sizeof(choose)};
-        choose.hwndOwner = context_.owner;
-        choose.lpLogFont = &font;
-        choose.Flags = CF_SCREENFONTS | CF_INITTOLOGFONTSTRUCT | CF_NOVERTFONTS;
-        if (::ChooseFontW(&choose)) {
-            const std::string setting = base::ToUtf8(font.lfFaceName) + ";" + std::to_string(choose.iPointSize / 10);
-            ModifySettings([setting](model::Settings& s) { s.listFont = setting; });
-            ::MessageBoxW(context_.owner, L"The new font is used after Last Download Manager restarts.", kAppTitle,
-                          MB_OK | MB_ICONINFORMATION);
-        }
+    case ID_VIEW_FONT_CHOOSE:
+        ChooseListFont();
         return true;
-    }
     case ID_VIEW_FONT_RESET:
         ModifySettings([](model::Settings& s) { s.listFont.clear(); });
+        ::MessageBoxW(context_.owner, L"The default font is used after Last Download Manager restarts.", kAppTitle,
+                      MB_OK | MB_ICONINFORMATION);
         return true;
     case ID_HELP_CONTENTS:
         if (!context_.shell->OpenUrl(context_.owner, kHelpUrl)) {
             ShowError(L"The help page could not be opened.");
         }
         return true;
+    case ID_HELP_ABOUT: {
+        AboutDialog about(*context_.theme);
+        about.RunModal(context_.owner);
+        return true;
+    }
     case ID_ROW_OPEN:
         OpenSelected();
         return true;
@@ -211,6 +227,12 @@ bool MainController::OnCommand(int id)
             }
         }
         return true;
+    case ID_ROW_MOVE_RENAME:
+        MoveSelected(context_.owner);
+        return true;
+    case ID_ROW_PROPERTIES:
+        ShowProperties();
+        return true;
     case ID_ROW_DOUBLE_CLICK_OPEN:
         ModifySettings([](model::Settings& s) { s.doubleClickAction = model::DoubleClickAction::Open; });
         return true;
@@ -223,11 +245,32 @@ bool MainController::OnCommand(int id)
     case ID_EDIT_SELECT_ALL:
         context_.list->SelectAll();
         return true;
+    case ID_CATEGORY_ADD:
+        EditCategory(std::nullopt);
+        return true;
+    case ID_CATEGORY_EDIT:
+        if (categoryMenuTarget_) {
+            EditCategory(categoryMenuTarget_);
+        }
+        return true;
+    case ID_CATEGORY_DELETE:
+        if (categoryMenuTarget_) {
+            DeleteCategory(*categoryMenuTarget_);
+        }
+        return true;
     default:
         break;
     }
     if (id >= ID_VIEW_ARRANGE_FIRST && id <= ID_VIEW_ARRANGE_LAST) {
         SetSort(static_cast<SortKey>(id - ID_VIEW_ARRANGE_FIRST));
+        return true;
+    }
+    if (id >= ID_TRAY_WINDOW_FIRST && id <= ID_TRAY_WINDOW_LAST) {
+        const auto index = static_cast<size_t>(id - ID_TRAY_WINDOW_FIRST);
+        if (index < trayWindows_.size() && ::IsWindow(trayWindows_[index])) {
+            ::ShowWindow(trayWindows_[index], SW_RESTORE);
+            ::SetForegroundWindow(trayWindows_[index]);
+        }
         return true;
     }
     return false;
@@ -293,246 +336,25 @@ void MainController::OnSelectionChanged()
 
 void MainController::OnSnapshot(const core::Snapshot& snapshot)
 {
-    for (auto& [token, pending] : pendingAdds_) {
-        if (pending.dialog == nullptr || !pending.id) {
-            continue;
-        }
-        for (const auto& view : snapshot.downloads) {
-            if (view->download.id == *pending.id) {
-                pending.dialog->Update(*view);
-                break;
-            }
-        }
-    }
+    transfers_.OnSnapshot(snapshot);
+    adds_.OnSnapshot(snapshot);
 }
 
 void MainController::OnNotifications(std::vector<core::Notification> notifications)
 {
-    for (core::Notification& notification : notifications) {
-        if (auto* added = std::get_if<core::AddResult>(&notification)) {
-            const auto pending = pendingAdds_.find(added->token);
-            if (added->error) {
-                if (pending != pendingAdds_.end() && pending->second.dialog != nullptr) {
-                    ::EndDialog(pending->second.dialog->Handle(), IDCANCEL);
-                }
-                ShowError(base::ToUtf16(*added->error));
+    for (const core::Notification& notification : notifications) {
+        if (const auto* added = std::get_if<core::AddResult>(&notification)) {
+            adds_.OnAddResult(*added);
+        } else if (const auto* completed = std::get_if<core::DownloadCompleted>(&notification)) {
+            transfers_.OnCompleted(*completed);
+        } else if (const auto* failed = std::get_if<core::DownloadFailed>(&notification)) {
+            transfers_.OnFailed(*failed);
+            if (failed->failure.reason == core::FailureReason::AuthRequired) {
+                AskForLogin(*failed);
             }
-            if (added->showExistingComplete && added->id) {
-                context_.list->SelectOnly(*added->id);
-            }
-            if (pending == pendingAdds_.end()) {
-                continue;
-            }
-            pending->second.id = added->id;
-            if (added->id) {
-                if (pending->second.cancelled) {
-                    Post(core::DeleteCommand{{*added->id}, true});
-                } else if (pending->second.confirmation) {
-                    pending->second.confirmation->id = *added->id;
-                    Post(*pending->second.confirmation);
-                }
-            }
-            if (pending->second.dialog == nullptr) {
-                pendingAdds_.erase(pending);
-            } else if (const auto snapshot = Snapshot()) {
-                OnSnapshot(*snapshot);
-            }
-            continue;
-        }
-        if (const auto* error = std::get_if<core::CoreError>(&notification)) {
+        } else if (const auto* error = std::get_if<core::CoreError>(&notification)) {
             ShowError(base::ToUtf16(error->message));
         }
-    }
-}
-
-bool MainController::ResolveDuplicate(const std::string& url, std::optional<model::DuplicatePolicy>& policy)
-{
-    const auto snapshot = Snapshot();
-    if (!snapshot || snapshot->settings.duplicatePolicy != model::DuplicatePolicy::Ask) {
-        return true;
-    }
-    const auto existing = std::find_if(snapshot->downloads.begin(), snapshot->downloads.end(),
-                                       [&](const auto& view) { return view->download.url == url; });
-    if (existing == snapshot->downloads.end()) {
-        return true;
-    }
-    DuplicateDialog duplicate(*context_.theme, base::ToUtf16((*existing)->download.fileName),
-                              (*existing)->download.status == model::DownloadStatus::Completed);
-    const auto answer = duplicate.Run(context_.owner);
-    if (!answer) {
-        return false;
-    }
-    policy = answer->policy;
-    if (answer->remember) {
-        const model::DuplicatePolicy chosen = answer->policy;
-        ModifySettings([chosen](model::Settings& s) { s.duplicatePolicy = chosen; });
-    }
-    if (answer->policy == model::DuplicatePolicy::ResumeOrShowComplete) {
-        core::AddDownloadCommand command;
-        command.token = nextToken_++;
-        command.url = url;
-        command.duplicatePolicy = answer->policy;
-        Post(std::move(command));
-        return false;
-    }
-    return true;
-}
-
-void MainController::AddAddress(const std::string& url, bool silent)
-{
-    const auto snapshot = Snapshot();
-    if (!snapshot) {
-        return;
-    }
-    std::optional<model::DuplicatePolicy> policy;
-    if (silent) {
-        policy = model::DuplicatePolicy::AddNumbered;  // nobody to ask; never replace silently
-    } else if (!ResolveDuplicate(url, policy)) {
-        return;
-    }
-    if (silent || !snapshot->settings.showStartDialog) {
-        core::AddDownloadCommand command;
-        command.token = nextToken_++;
-        command.url = url;
-        command.duplicatePolicy = policy;
-        command.mode = snapshot->settings.queueOnly ? core::AddMode::Later : core::AddMode::StartNow;
-        Post(std::move(command));
-        return;
-    }
-    AddWithInfoDialog(url, std::nullopt, std::nullopt, policy);
-}
-
-void MainController::AddUrl(std::string initialUrl)
-{
-    const auto snapshot = Snapshot();
-    if (!snapshot) {
-        return;
-    }
-    AddUrlDialog dialog(*context_.theme, HistoryEntries(snapshot->settings.addressHistory), std::move(initialUrl));
-    const auto input = dialog.Run(context_.owner);
-    if (!input) {
-        return;
-    }
-    const std::string url = input->url;
-    ModifySettings([url](model::Settings& s) { s.addressHistory = PushHistory(s.addressHistory, url, kAddressHistoryLimit); });
-
-    // The duplicate question comes before the info dialog (checklist A-05).
-    std::optional<model::DuplicatePolicy> policy;
-    if (!ResolveDuplicate(url, policy)) {
-        return;
-    }
-    if (!snapshot->settings.showStartDialog) {
-        core::AddDownloadCommand command;
-        command.token = nextToken_++;
-        command.url = url;
-        command.loginUser = input->user;
-        command.loginPassword = input->password;
-        command.mode = snapshot->settings.queueOnly ? core::AddMode::Later : core::AddMode::StartNow;
-        command.duplicatePolicy = policy;
-        Post(std::move(command));
-        return;
-    }
-    AddWithInfoDialog(url, input->user, input->password, policy);
-}
-
-void MainController::AddWithInfoDialog(const std::string& url, std::optional<std::string> user,
-                                       std::optional<std::string> password,
-                                       std::optional<model::DuplicatePolicy> duplicatePolicy)
-{
-    const auto snapshot = Snapshot();
-    const auto parsed = core::ParseUrl(url);
-    if (!snapshot || !parsed || snapshot->categories.empty()) {
-        return;
-    }
-    const model::Settings& settings = snapshot->settings;
-
-    DownloadInfoDialog::Initial initial;
-    initial.url = url;
-    initial.fileName = core::SanitizeFileName(core::FileNameFromUrlPath(parsed->path));
-    initial.categories = snapshot->categories;
-    initial.category = core::MatchCategory(snapshot->categories, initial.fileName, *parsed);
-    if (!initial.category) {
-        const auto general = std::find_if(snapshot->categories.begin(), snapshot->categories.end(),
-                                          [](const model::Category& c) { return c.builtin && c.extensions.empty(); });
-        initial.category = general != snapshot->categories.end() ? general->id : snapshot->categories.front().id;
-    }
-    for (const model::Category& category : snapshot->categories) {
-        if (category.id == *initial.category) {
-            initial.saveDir = category.folder;
-        }
-    }
-    initial.recentFolders = HistoryEntries(settings.recentFolders);
-
-    const bool speculative = settings.speculativeStart;
-    const std::uint64_t token = nextToken_++;
-    if (speculative) {
-        core::AddDownloadCommand command;
-        command.token = token;
-        command.url = url;
-        command.loginUser = user;
-        command.loginPassword = password;
-        command.mode = core::AddMode::Speculative;
-        command.duplicatePolicy = duplicatePolicy;
-        pendingAdds_[token] = PendingAdd{token};
-        Post(std::move(command));
-    }
-
-    DownloadInfoDialog dialog(*context_.theme, std::move(initial), nullptr);
-    if (speculative) {
-        pendingAdds_[token].dialog = &dialog;
-    }
-    const DownloadInfoDialog::Choice choice = dialog.Run(context_.owner);
-
-    if (choice.action != DownloadInfoDialog::Action::Cancel) {
-        const std::string folder = choice.saveDir;
-        ModifySettings([folder](model::Settings& s) { s.recentFolders = PushHistory(s.recentFolders, folder, kFolderHistoryLimit); });
-    }
-    if (!speculative) {
-        if (choice.action == DownloadInfoDialog::Action::Cancel) {
-            return;
-        }
-        core::AddDownloadCommand command;
-        command.token = token;
-        command.url = url;
-        command.fileName = choice.fileName;
-        command.saveDir = choice.saveDir;
-        command.categoryId = choice.category;
-        command.description = choice.description;
-        command.loginUser = user;
-        command.loginPassword = password;
-        command.mode = choice.action == DownloadInfoDialog::Action::Start ? core::AddMode::StartNow : core::AddMode::Later;
-        command.duplicatePolicy = duplicatePolicy;
-        Post(std::move(command));
-        return;
-    }
-
-    const auto pending = pendingAdds_.find(token);
-    if (pending == pendingAdds_.end()) {
-        return;  // the add failed and its error was shown
-    }
-    pending->second.dialog = nullptr;
-    if (choice.action == DownloadInfoDialog::Action::Cancel) {
-        if (pending->second.id) {
-            Post(core::DeleteCommand{{*pending->second.id}, true});
-            pendingAdds_.erase(pending);
-        } else {
-            pending->second.cancelled = true;
-        }
-        return;
-    }
-    core::ConfirmDownloadCommand confirm;
-    confirm.fileName = choice.fileName;
-    confirm.saveDir = choice.saveDir;
-    confirm.categoryId = choice.category;
-    confirm.description = choice.description;
-    confirm.start = choice.action == DownloadInfoDialog::Action::Start;
-    confirm.rememberFolderForCategory = choice.rememberFolder;
-    if (pending->second.id) {
-        confirm.id = *pending->second.id;
-        Post(confirm);
-        pendingAdds_.erase(pending);
-    } else {
-        pending->second.confirmation = confirm;
     }
 }
 
@@ -595,10 +417,246 @@ void MainController::DefaultAction()
         return;
     }
     if (snapshot->settings.doubleClickAction == model::DoubleClickAction::Properties) {
-        OnCommand(ID_ROW_PROPERTIES);
+        ShowProperties();
+        return;
+    }
+    if (view->download.status == model::DownloadStatus::Downloading) {
+        transfers_.OpenProgress(view->download.id);
         return;
     }
     OpenSelected();
+}
+
+void MainController::ShowProperties()
+{
+    const auto* view = SingleSelection();
+    if (view == nullptr) {
+        return;
+    }
+    const core::DownloadView copy = *view;  // the selection may change while the dialog is open
+    PropertiesDialog dialog(*context_.theme, copy,
+                            PropertiesDialog::Callbacks{
+                                [this, path = FinalPath(copy.download)](HWND owner) {
+                                    if (!context_.shell->Open(owner, path)) {
+                                        ShowError(L"The file could not be opened.");
+                                    }
+                                },
+                                [this](HWND owner) { MoveSelected(owner); }});
+    if (auto update = dialog.Run(context_.owner)) {
+        Post(std::move(*update));
+    }
+}
+
+void MainController::MoveSelected(HWND owner)
+{
+    const auto* selected = SingleSelection();
+    const auto snapshot = Snapshot();
+    if (selected == nullptr || !snapshot) {
+        return;
+    }
+    const model::Download download = selected->download;
+    if (download.status == model::DownloadStatus::Downloading || download.status == model::DownloadStatus::Stopping ||
+        download.status == model::DownloadStatus::Finalizing) {
+        ShowError(L"Stop the download before moving or renaming it.");
+        return;
+    }
+    MoveDialog dialog(*context_.theme, base::ToUtf16(download.saveDir), base::ToUtf16(download.fileName),
+                      HistoryEntries(snapshot->settings.recentFolders));
+    const auto choice = dialog.Run(owner);
+    if (!choice) {
+        return;
+    }
+    const std::filesystem::path target = std::filesystem::path(choice->folder) / choice->fileName;
+    if (target == FinalPath(download)) {
+        return;
+    }
+    // A completed file moves on disk first; an unfinished one only changes where it will be saved.
+    if (download.status == model::DownloadStatus::Completed && !context_.shell->MoveItem(owner, FinalPath(download), target)) {
+        ShowError(L"The file could not be moved. A file with that name may already exist there.");
+        return;
+    }
+    Post(core::MoveDownloadCommand{download.id, base::ToUtf8(choice->folder), base::ToUtf8(choice->fileName)});
+}
+
+void MainController::Find(bool showDialog)
+{
+    if (!showDialog && !findOptions_.text.empty()) {
+        if (!context_.list->Find(findOptions_, false)) {
+            ::MessageBeep(MB_ICONASTERISK);
+        }
+        return;
+    }
+    if (find_ && find_->Handle() != nullptr) {
+        ::SetForegroundWindow(find_->Handle());
+        return;
+    }
+    find_ = std::make_unique<FindDialog>(
+        *context_.theme, findOptions_,
+        [this](const FindOptions& options) {
+            findOptions_ = options;
+            return context_.list->Find(options, false);
+        },
+        [this] {
+            findOptions_ = find_->Options();
+            find_.reset();  // called from the dialog's WM_DESTROY, after which it touches nothing
+        });
+    find_->Open(context_.owner);
+}
+
+void MainController::CustomizeColumns()
+{
+    ColumnsDialog dialog(*context_.theme, context_.list->Columns());
+    if (const auto columns = dialog.Run(context_.owner)) {
+        context_.list->SetColumns(*columns);
+        if (context_.columnsChanged) {
+            context_.columnsChanged(*columns);
+        }
+    }
+}
+
+void MainController::EditCategory(std::optional<model::CategoryId> id)
+{
+    const auto snapshot = Snapshot();
+    if (!snapshot) {
+        return;
+    }
+    model::Category category;
+    std::string previousExtensions;
+    if (id) {
+        const auto it = std::find_if(snapshot->categories.begin(), snapshot->categories.end(),
+                                     [&](const model::Category& c) { return c.id == *id; });
+        if (it == snapshot->categories.end()) {
+            return;
+        }
+        category = *it;
+        previousExtensions = it->extensions;
+    } else if (!snapshot->categories.empty()) {
+        category.folder = snapshot->categories.front().folder;
+    }
+    CategoryDialog dialog(*context_.theme, category);
+    auto edited = dialog.Run(context_.owner);
+    if (!edited) {
+        return;
+    }
+    const bool typesChanged = id && edited->extensions != previousExtensions && !edited->extensions.empty();
+    Post(core::SaveCategoryCommand{*edited});
+    // Offer to move existing downloads of the new types into the category (checklist W-03).
+    if (typesChanged && ::MessageBoxW(context_.owner,
+                                      L"Put the downloads in the list that have these file types into this category too?",
+                                      kAppTitle, MB_YESNO | MB_ICONQUESTION) == IDYES) {
+        Post(core::ReassignCategoryCommand{*id});
+    }
+}
+
+void MainController::DeleteCategory(model::CategoryId id)
+{
+    if (::MessageBoxW(context_.owner, L"Delete this category? Its downloads stay in the list under All Downloads.",
+                      kAppTitle, MB_YESNO | MB_ICONQUESTION) == IDYES) {
+        Post(core::DeleteCategoryCommand{id});
+    }
+}
+
+void MainController::SpeedLimiterSettings()
+{
+    const auto snapshot = Snapshot();
+    if (!snapshot) {
+        return;
+    }
+    SpeedLimitDialog dialog(*context_.theme, SpeedLimitDialog::Choice{snapshot->settings.speedLimiterKilobytesPerSecond,
+                                                                      snapshot->settings.speedLimiterOnStartup});
+    if (const auto choice = dialog.Run(context_.owner)) {
+        Post(core::SetSpeedLimiterCommand{snapshot->speedLimiterOn, choice->kilobytesPerSecond});
+        const bool onStartup = choice->onStartup;
+        ModifySettings([onStartup](model::Settings& s) { s.speedLimiterOnStartup = onStartup; });
+    }
+}
+
+void MainController::ShowOptions()
+{
+    const auto snapshot = Snapshot();
+    if (!snapshot) {
+        return;
+    }
+    OptionsDialog::Input input;
+    input.settings = snapshot->settings;
+    input.categories = snapshot->categories;
+    input.serverLimits = snapshot->serverLimits;
+    input.siteLogins = snapshot->siteLogins;
+    input.launchOnStartup = context_.startup->IsEnabled();
+    OptionsDialog dialog(*context_.theme, std::move(input), *context_.secrets, *context_.system);
+    auto output = dialog.Run(context_.owner);
+    if (!output) {
+        return;
+    }
+    ModifySettings([edited = output->settings](model::Settings& s) { OptionsDialog::ApplyEditedFields(edited, s); });
+    for (model::Category& category : output->changedCategories) {
+        Post(core::SaveCategoryCommand{std::move(category)});
+    }
+    if (output->serverLimits) {
+        Post(core::ReplaceServerLimitsCommand{std::move(*output->serverLimits)});
+    }
+    if (output->siteLogins) {
+        Post(core::ReplaceSiteLoginsCommand{std::move(*output->siteLogins)});
+    }
+    if (output->launchOnStartup != context_.startup->IsEnabled() && !context_.startup->SetEnabled(output->launchOnStartup)) {
+        ShowError(L"Windows did not allow changing the startup setting.");
+    }
+}
+
+void MainController::AskForLogin(const core::DownloadFailed& failed)
+{
+    const auto snapshot = Snapshot();
+    if (!snapshot) {
+        return;
+    }
+    const auto view = std::find_if(snapshot->downloads.begin(), snapshot->downloads.end(),
+                                   [&](const auto& v) { return v->download.id == failed.id; });
+    if (view == snapshot->downloads.end()) {
+        return;
+    }
+    const auto url = core::ParseUrl((*view)->download.url);
+    const std::wstring server = url ? base::ToUtf16(url->host) : std::wstring();
+    LoginDialog dialog(*context_.theme, server, base::ToUtf16(failed.fileName));
+    const auto answer = dialog.Run(context_.owner);
+    if (!answer) {
+        return;
+    }
+    core::UpdateDownloadCommand update;
+    update.id = failed.id;
+    update.loginUser = answer->user;
+    update.loginPassword = answer->password;
+    Post(update);
+    if (answer->save && url) {
+        // Existing logins keep their stored passwords (an empty password means unchanged).
+        std::vector<core::SiteLoginInput> logins;
+        for (const core::SiteLoginView& login : snapshot->siteLogins) {
+            if (login.pattern != url->host) {
+                logins.push_back(core::SiteLoginInput{login.pattern, login.username, {}});
+            }
+        }
+        logins.push_back(core::SiteLoginInput{url->host, answer->user, answer->password});
+        Post(core::ReplaceSiteLoginsCommand{std::move(logins)});
+    }
+    Post(core::ResumeCommand{{failed.id}});
+}
+
+void MainController::ChooseListFont()
+{
+    LOGFONTW font{};
+    if (const auto current = reinterpret_cast<HFONT>(::SendMessageW(context_.list->Handle(), WM_GETFONT, 0, 0))) {
+        ::GetObjectW(current, sizeof(font), &font);
+    }
+    CHOOSEFONTW choose{sizeof(choose)};
+    choose.hwndOwner = context_.owner;
+    choose.lpLogFont = &font;
+    choose.Flags = CF_SCREENFONTS | CF_INITTOLOGFONTSTRUCT | CF_NOVERTFONTS;
+    if (!::ChooseFontW(&choose)) {
+        return;
+    }
+    const std::string setting = base::ToUtf8(font.lfFaceName) + ";" + std::to_string(choose.iPointSize / 10);
+    ModifySettings([setting](model::Settings& s) { s.listFont = setting; });
+    ::MessageBoxW(context_.owner, L"The new font is used after Last Download Manager restarts.", kAppTitle,
+                  MB_OK | MB_ICONINFORMATION);
 }
 
 void MainController::ShowRowMenu(POINT screen)
@@ -649,9 +707,10 @@ void MainController::ShowCategoryMenu(std::optional<model::CategoryId> category,
             deletable = deletable || (c.id == *category && !c.builtin);
         }
     }
+    categoryMenuTarget_ = category;
     UniqueMenu menu(::CreatePopupMenu());
     AppendItem(menu.get(), ID_CATEGORY_ADD, L"&Add category...");
-    AppendItem(menu.get(), ID_CATEGORY_EDIT, L"&Edit category...", category.has_value());
+    AppendItem(menu.get(), ID_CATEGORY_EDIT, L"&Properties...", category.has_value());
     AppendItem(menu.get(), ID_CATEGORY_DELETE, L"&Delete category", deletable);
     ::TrackPopupMenuEx(menu.get(), TPM_RIGHTBUTTON, screen.x, screen.y, context_.owner, nullptr);
 }
@@ -666,6 +725,19 @@ void MainController::ShowTrayMenu(POINT screen)
     AppendItem(limiter.get(), ID_DOWNLOADS_LIMITER_OFF, L"Turn o&ff", limiterOn);
     AppendItem(menu.get(), ID_TRAY_RESTORE, L"&Open Last Download Manager");
     ::SetMenuDefaultItem(menu.get(), ID_TRAY_RESTORE, FALSE);
+    // Download windows, so a hidden or minimized progress window can be brought back (V-01).
+    trayWindows_.clear();
+    const auto windows = transfers_.Windows();
+    if (!windows.empty()) {
+        AppendSeparator(menu.get());
+        for (const auto& [window, title] : windows) {
+            if (ID_TRAY_WINDOW_FIRST + trayWindows_.size() > ID_TRAY_WINDOW_LAST) {
+                break;
+            }
+            AppendItem(menu.get(), static_cast<UINT>(ID_TRAY_WINDOW_FIRST + trayWindows_.size()), title.c_str());
+            trayWindows_.push_back(window);
+        }
+    }
     AppendSeparator(menu.get());
     AppendItem(menu.get(), ID_TASKS_ADD_URL, L"&Add new download...");
     ::AppendMenuW(menu.get(), MF_POPUP, reinterpret_cast<UINT_PTR>(limiter.release()), L"Speed &limiter");  // owned by `menu` now

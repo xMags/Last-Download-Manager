@@ -115,6 +115,7 @@ private:
     void Move(const MoveDownloadCommand& command);
     void SaveCategory(model::Category category);
     void DeleteCategory(model::CategoryId id);
+    void ReassignCategory(model::CategoryId id);
     void UpdateSettings(model::Settings settings);
     void ReplaceSiteLogins(const std::vector<SiteLoginInput>& logins);
     void ReplaceServerLimits(std::vector<model::ServerLimit> limits);

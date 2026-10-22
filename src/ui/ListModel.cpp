@@ -29,7 +29,7 @@ constexpr std::array<ColumnInfo, kColumnCount> kColumns{{
     {Column::Size, "size", L"Size", 80, true, SortKey::Size},
     {Column::Status, "status", L"Status", 90, true, SortKey::Status},
     {Column::TimeLeft, "left", L"Time left", 90, true, SortKey::TimeLeft},
-    {Column::TransferRate, "rate", L"Transfer rate", 100, true, SortKey::TransferRate},
+    {Column::TransferRate, "rate", L"Transfer rate", 115, true, SortKey::TransferRate},
     {Column::LastTryDate, "lasttry", L"Last Try Date", 130, true, SortKey::LastTryDate},
     {Column::Description, "description", L"Description", 200, true, SortKey::Description},
     {Column::DateAdded, "added", L"Date Added", 130, false, SortKey::DateAdded},

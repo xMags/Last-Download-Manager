@@ -4,7 +4,10 @@
 #include <shlobj.h>
 #include <shobjidl.h>
 
+#include <filesystem>
 #include <memory>
+
+#include <wrl/client.h>
 
 namespace ldm::platform {
 
@@ -59,6 +62,34 @@ bool WinShellActions::ShowInFolder(const std::filesystem::path& file)
     }
     const auto item = ParseName(file);
     return item && SUCCEEDED(::SHOpenFolderAndSelectItems(item.get(), 0, nullptr, 0));
+}
+
+bool WinShellActions::MoveItem(HWND owner, const std::filesystem::path& from, const std::filesystem::path& to)
+{
+    std::error_code error;
+    if (std::filesystem::exists(to, error)) {
+        return false;
+    }
+    std::filesystem::create_directories(to.parent_path(), error);
+    Microsoft::WRL::ComPtr<IFileOperation> operation;
+    if (FAILED(::CoCreateInstance(CLSID_FileOperation, nullptr, CLSCTX_ALL, IID_PPV_ARGS(&operation)))) {
+        return false;
+    }
+    operation->SetOwnerWindow(owner);
+    operation->SetOperationFlags(FOF_NOCONFIRMMKDIR | FOF_NOCONFIRMATION | FOF_NO_CONNECTED_ELEMENTS | FOFX_NOCOPYHOOKS);
+    Microsoft::WRL::ComPtr<IShellItem> source;
+    Microsoft::WRL::ComPtr<IShellItem> folder;
+    if (FAILED(::SHCreateItemFromParsingName(from.c_str(), nullptr, IID_PPV_ARGS(&source))) ||
+        FAILED(::SHCreateItemFromParsingName(to.parent_path().c_str(), nullptr, IID_PPV_ARGS(&folder)))) {
+        return false;
+    }
+    if (FAILED(operation->MoveItem(source.Get(), folder.Get(), to.filename().c_str(), nullptr)) ||
+        FAILED(operation->PerformOperations())) {
+        return false;
+    }
+    BOOL aborted = FALSE;
+    operation->GetAnyOperationsAborted(&aborted);
+    return !aborted && std::filesystem::exists(to, error);
 }
 
 bool WinShellActions::OpenUrl(HWND owner, const std::wstring& url)

@@ -111,6 +111,9 @@ LRESULT CALLBACK MainWindow::WindowProc(HWND window, UINT message, WPARAM wParam
 
 bool MainWindow::PreTranslate(MSG& message)
 {
+    if (controller_ && controller_->PreTranslate(message)) {
+        return true;
+    }
     if (window_ != nullptr && accelerators_ != nullptr && (message.hwnd == window_ || ::IsChild(window_, message.hwnd))) {
         return ::TranslateAcceleratorW(window_, accelerators_, &message) != 0;
     }
@@ -142,6 +145,10 @@ void MainWindow::OnCreate()
     context.owner = window_;
     context.commands = services_.commands;
     context.shell = services_.shell;
+    context.system = services_.system;
+    context.secrets = services_.secrets;
+    context.startup = services_.startup;
+    context.columnsChanged = [this](const std::vector<ColumnState>&) { ::PostMessageW(window_, kSaveLayoutMessage, 0, 0); };
     context.list = &list_;
     context.toolbar = &toolbar_;
     context.theme = theme_.get();

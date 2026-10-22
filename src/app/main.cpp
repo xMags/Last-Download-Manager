@@ -4,8 +4,10 @@
 #include "core/CoreThread.h"
 #include "engine/CurlEngine.h"
 #include "platform/win/SystemPorts.h"
+#include "platform/win/RunKeyStartup.h"
 #include "platform/win/WinHttpProxyResolver.h"
 #include "platform/win/WinShellActions.h"
+#include "platform/win/WinSystemActions.h"
 #include "storage/DpapiSecretProtector.h"
 #include "storage/SqliteStore.h"
 #include "ui/MainWindow.h"
@@ -113,6 +115,8 @@ int WINAPI wWinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int sho
     ldm::platform::PowerRequest power;
     ldm::platform::WinHttpProxyResolver proxy(secrets);
     ldm::platform::WinShellActions shell;
+    ldm::platform::WinSystemActions system;
+    ldm::platform::RunKeyStartup startup;
     auto storeInstance = std::make_unique<ldm::storage::SqliteStore>(std::move(store).Value());
     auto engine = std::make_unique<ldm::engine::CurlEngine>(core);
 
@@ -136,7 +140,7 @@ int WINAPI wWinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int sho
 
     int exitCode = 0;
     {
-        ldm::ui::MainWindow window(ldm::ui::MainWindow::Services{&core, &bridge, &shell});
+        ldm::ui::MainWindow window(ldm::ui::MainWindow::Services{&core, &bridge, &shell, &system, &secrets, &startup});
         if (!window.Create(bridge.TakeSnapshot(), showCommand)) {
             Fatal(L"The main window could not be created.");
         } else {
