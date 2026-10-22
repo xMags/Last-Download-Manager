@@ -302,6 +302,11 @@ void VisitSettings(Visitor& v, SettingsType& s)
     v.String("view.toolbarLayout", s.toolbarLayout);
     v.String("view.windowPlacement", s.windowPlacement);
     v.String("view.listSortKey", s.listSortKey);
+    v.Bool("view.showDropTarget", s.showDropTarget);
+    v.String("view.dropTargetPosition", s.dropTargetPosition);
+
+    v.String("history.addresses", s.addressHistory);
+    v.String("history.folders", s.recentFolders);
 
     v.Bool("confirm.deleteCompleted", s.confirmDeleteCompleted);
     v.Bool("confirm.deleteIncomplete", s.confirmDeleteIncomplete);
