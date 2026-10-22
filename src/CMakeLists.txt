@@ -2,5 +2,6 @@
 add_subdirectory(base)
 add_subdirectory(model)
 add_subdirectory(core)
+add_subdirectory(engine)
 add_subdirectory(storage)
 add_subdirectory(app)
