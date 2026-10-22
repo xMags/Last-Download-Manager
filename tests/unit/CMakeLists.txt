@@ -2,7 +2,9 @@ add_executable(ldm_unit_tests
     base/PathsTests.cpp
     base/ResultTests.cpp
     base/UtfTests.cpp
+    core/CoordinatorTests.cpp
     core/SegmentPlannerTests.cpp
+    core/UrlAndNamesTests.cpp
     engine/FailurePolicyTests.cpp
     engine/HttpHeadersTests.cpp
     engine/TokenBucketTests.cpp

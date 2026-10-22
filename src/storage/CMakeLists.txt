@@ -1,6 +1,8 @@
 find_package(unofficial-sqlite3 CONFIG REQUIRED)
 
 add_library(ldm_storage STATIC
+    DpapiSecretProtector.cpp
+    DpapiSecretProtector.h
     Migrations.cpp
     Migrations.h
     Sqlite.cpp
@@ -9,4 +11,4 @@ add_library(ldm_storage STATIC
     SqliteStore.h)
 target_link_libraries(ldm_storage
     PUBLIC ldm_core
-    PRIVATE unofficial::sqlite3::sqlite3)
+    PRIVATE unofficial::sqlite3::sqlite3 crypt32)
