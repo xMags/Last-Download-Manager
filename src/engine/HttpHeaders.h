@@ -25,7 +25,8 @@ struct ResponseHeaders {
     std::optional<std::string> contentEncoding;  // lower case; absent or "identity" means raw bytes
     std::optional<std::string> fileName;         // from Content-Disposition, decoded, not yet sanitized
     std::optional<int> retryAfterSeconds;
-    bool acceptRanges = false;  // "Accept-Ranges: bytes"
+    bool acceptRanges = false;      // "Accept-Ranges: bytes"
+    bool acceptRangesNone = false;  // "Accept-Ranges: none": the server says it cannot serve ranges
 
     // Applies one raw header line as delivered by curl (including CRLF). A status line starts a new
     // response, so headers of redirect hops are discarded.
