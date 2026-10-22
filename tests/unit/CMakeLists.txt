@@ -11,6 +11,7 @@ add_executable(ldm_unit_tests
     model/DownloadTests.cpp
     model/SettingsTests.cpp
     storage/SqliteStoreTests.cpp
+    ui/BatchAndHistoryTests.cpp
     ui/ListModelTests.cpp)
 target_link_libraries(ldm_unit_tests PRIVATE
     ldm_engine

@@ -4,6 +4,7 @@
 
 #include <windows.h>
 
+#include <cstdint>
 #include <optional>
 #include <string>
 
@@ -43,7 +44,9 @@ protected:
         (void)result;
         return false;
     }
-    // Called for modeless dialogs after the window is destroyed.
+    // Modeless dialogs only: OnDestroying runs while the controls still exist; OnDestroyed runs
+    // after the window is gone and may delete the object.
+    virtual void OnDestroying() {}
     virtual void OnDestroyed() {}
 
     void Close(INT_PTR result);

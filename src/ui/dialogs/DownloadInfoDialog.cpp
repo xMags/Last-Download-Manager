@@ -90,6 +90,20 @@ void DownloadInfoDialog::Browse()
     }
 }
 
+void DownloadInfoDialog::SetCategories(std::vector<model::Category> categories, std::optional<model::CategoryId> select)
+{
+    if (Handle() == nullptr) {
+        return;
+    }
+    initial_.categories = std::move(categories);
+    initial_.category = select ? select : SelectedCategory();
+    FillCategories();
+    if (select) {
+        folderEdited_ = false;
+        OnCategoryChanged();
+    }
+}
+
 void DownloadInfoDialog::Update(const core::DownloadView& view)
 {
     if (Handle() == nullptr) {
@@ -171,10 +185,7 @@ bool DownloadInfoDialog::OnCommand(int id, int code, HWND control)
         if (addCategory_) {
             if (auto category = addCategory_(Handle())) {
                 initial_.categories.push_back(*category);
-                initial_.category = category->id;
-                FillCategories();
-                folderEdited_ = false;
-                OnCategoryChanged();
+                SetCategories(initial_.categories, category->id);
             }
         }
         return true;

@@ -7,7 +7,9 @@
 #include "ui/Handles.h"
 #include "ui/MainController.h"
 #include "ui/ShellActions.h"
+#include "ui/StartupRegistration.h"
 #include "ui/StatusBar.h"
+#include "ui/SystemActions.h"
 #include "ui/Theme.h"
 #include "ui/Toolbar.h"
 #include "ui/TrayIcon.h"
@@ -28,6 +30,9 @@ public:
         core::CommandSink* commands = nullptr;
         UiBridge* bridge = nullptr;
         ShellActions* shell = nullptr;
+        SystemActions* system = nullptr;
+        core::SecretProtector* secrets = nullptr;
+        StartupRegistration* startup = nullptr;
     };
 
     explicit MainWindow(const Services& services);

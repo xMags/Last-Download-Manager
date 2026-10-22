@@ -245,6 +245,8 @@ void Coordinator::Handle(Command command)
                 SaveCategory(std::move(typed.category));
             } else if constexpr (std::is_same_v<T, DeleteCategoryCommand>) {
                 DeleteCategory(typed.id);
+            } else if constexpr (std::is_same_v<T, ReassignCategoryCommand>) {
+                ReassignCategory(typed.id);
             } else if constexpr (std::is_same_v<T, UpdateSettingsCommand>) {
                 UpdateSettings(std::move(typed.settings));
             } else if constexpr (std::is_same_v<T, ModifySettingsCommand>) {
@@ -715,6 +717,32 @@ void Coordinator::DeleteCategory(model::CategoryId id)
         }
     }
     snapshotDirty_ = true;
+}
+
+void Coordinator::ReassignCategory(model::CategoryId id)
+{
+    const model::Category* category = FindCategory(id);
+    if (category == nullptr) {
+        return;
+    }
+    std::vector<std::string> extensions;
+    for (size_t pos = 0; pos < category->extensions.size();) {
+        const size_t end = category->extensions.find(' ', pos);
+        const std::string word = category->extensions.substr(pos, end == std::string::npos ? std::string::npos : end - pos);
+        if (!word.empty()) {
+            extensions.push_back(word);
+        }
+        pos = end == std::string::npos ? category->extensions.size() : end + 1;
+    }
+    for (auto& [downloadId, entry] : entries_) {
+        const std::string extension = FileExtension(entry.download.fileName);
+        if (entry.download.categoryId != id && !extension.empty() &&
+            std::find(extensions.begin(), extensions.end(), extension) != extensions.end()) {
+            entry.download.categoryId = id;
+            Save(entry);
+            MarkChanged(entry);
+        }
+    }
 }
 
 void Coordinator::UpdateSettings(model::Settings settings)

@@ -1,6 +1,12 @@
 add_library(ldm_ui STATIC
+    AddFlow.cpp
+    AddFlow.h
+    BatchPattern.cpp
+    BatchPattern.h
     CategoryPane.cpp
     CategoryPane.h
+    Clipboard.cpp
+    Clipboard.h
     CommandState.cpp
     CommandState.h
     Dialog.cpp
@@ -25,22 +31,43 @@ add_library(ldm_ui STATIC
     MainWindow.cpp
     MainWindow.h
     ShellActions.h
+    StartupRegistration.h
     StatusBar.cpp
     StatusBar.h
+    SystemActions.cpp
+    SystemActions.h
     Theme.cpp
     Theme.h
     Toolbar.cpp
     Toolbar.h
+    TransferWindows.cpp
+    TransferWindows.h
     TrayIcon.cpp
     TrayIcon.h
     UiBridge.cpp
     UiBridge.h
     dialogs/AddUrlDialog.cpp
     dialogs/AddUrlDialog.h
+    dialogs/BatchDialog.cpp
+    dialogs/BatchDialog.h
+    dialogs/CategoryDialog.cpp
+    dialogs/CategoryDialog.h
+    dialogs/CompleteDialog.cpp
+    dialogs/CompleteDialog.h
     dialogs/ConfirmDialogs.cpp
     dialogs/ConfirmDialogs.h
     dialogs/DownloadInfoDialog.cpp
-    dialogs/DownloadInfoDialog.h)
+    dialogs/DownloadInfoDialog.h
+    dialogs/ListDialogs.cpp
+    dialogs/ListDialogs.h
+    dialogs/LoginDialog.cpp
+    dialogs/LoginDialog.h
+    dialogs/OptionsDialog.cpp
+    dialogs/OptionsDialog.h
+    dialogs/ProgressWindow.cpp
+    dialogs/ProgressWindow.h
+    dialogs/PropertiesDialog.cpp
+    dialogs/PropertiesDialog.h)
 target_link_libraries(ldm_ui
     PUBLIC ldm_core
     PRIVATE comctl32 uxtheme dwmapi shell32 comdlg32)

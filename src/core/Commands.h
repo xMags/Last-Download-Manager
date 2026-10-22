@@ -109,6 +109,11 @@ struct SaveCategoryCommand {
 struct DeleteCategoryCommand {
     model::CategoryId id;
 };
+// Puts every download whose file type is in the category's list into that category (checklist
+// W-03, offered after the list changed). Folders of existing downloads stay as they are.
+struct ReassignCategoryCommand {
+    model::CategoryId id;
+};
 struct UpdateSettingsCommand {
     model::Settings settings;
 };
@@ -133,7 +138,8 @@ struct ReplaceServerLimitsCommand {
 using Command = std::variant<AddDownloadCommand, ConfirmDownloadCommand, ResumeCommand, StopCommand, StopAllCommand,
                              DeleteCommand, DeleteCompletedCommand, RedownloadCommand, SetDownloadSpeedLimitCommand,
                              SetSpeedLimiterCommand, UpdateDownloadCommand, MoveDownloadCommand, SaveCategoryCommand,
-                             DeleteCategoryCommand, UpdateSettingsCommand, ModifySettingsCommand,
+                             DeleteCategoryCommand, ReassignCategoryCommand, UpdateSettingsCommand,
+                             ModifySettingsCommand,
                              ReplaceSiteLoginsCommand, ReplaceServerLimitsCommand>;
 
 // Where front ends send commands. Thread-safe; returns at once.
