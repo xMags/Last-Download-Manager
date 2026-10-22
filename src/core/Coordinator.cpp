@@ -247,6 +247,12 @@ void Coordinator::Handle(Command command)
                 DeleteCategory(typed.id);
             } else if constexpr (std::is_same_v<T, UpdateSettingsCommand>) {
                 UpdateSettings(std::move(typed.settings));
+            } else if constexpr (std::is_same_v<T, ModifySettingsCommand>) {
+                if (typed.modify) {
+                    model::Settings changed = settings_;
+                    typed.modify(changed);
+                    UpdateSettings(std::move(changed));
+                }
             } else if constexpr (std::is_same_v<T, ReplaceSiteLoginsCommand>) {
                 ReplaceSiteLogins(typed.logins);
             } else if constexpr (std::is_same_v<T, ReplaceServerLimitsCommand>) {

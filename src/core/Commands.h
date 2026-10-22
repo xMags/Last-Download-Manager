@@ -7,6 +7,7 @@
 #include "model/Settings.h"
 
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <string>
 #include <variant>
@@ -111,6 +112,11 @@ struct DeleteCategoryCommand {
 struct UpdateSettingsCommand {
     model::Settings settings;
 };
+// Changes some settings starting from the current values on the core thread, so two front ends
+// that change different settings never overwrite each other's change. In-process callers only.
+struct ModifySettingsCommand {
+    std::function<void(model::Settings&)> modify;
+};
 
 struct SiteLoginInput {
     std::string pattern;
@@ -127,7 +133,14 @@ struct ReplaceServerLimitsCommand {
 using Command = std::variant<AddDownloadCommand, ConfirmDownloadCommand, ResumeCommand, StopCommand, StopAllCommand,
                              DeleteCommand, DeleteCompletedCommand, RedownloadCommand, SetDownloadSpeedLimitCommand,
                              SetSpeedLimiterCommand, UpdateDownloadCommand, MoveDownloadCommand, SaveCategoryCommand,
-                             DeleteCategoryCommand, UpdateSettingsCommand, ReplaceSiteLoginsCommand,
-                             ReplaceServerLimitsCommand>;
+                             DeleteCategoryCommand, UpdateSettingsCommand, ModifySettingsCommand,
+                             ReplaceSiteLoginsCommand, ReplaceServerLimitsCommand>;
+
+// Where front ends send commands. Thread-safe; returns at once.
+class CommandSink {
+public:
+    virtual ~CommandSink() = default;
+    virtual void Post(Command command) = 0;
+};
 
 }  // namespace ldm::core

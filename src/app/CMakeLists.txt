@@ -1,7 +1,13 @@
 add_executable(ldm WIN32
     main.cpp
     ${PROJECT_SOURCE_DIR}/resources/ldm.rc)
-target_link_libraries(ldm PRIVATE ldm_base)
+target_link_libraries(ldm PRIVATE
+    ldm_engine
+    ldm_platform
+    ldm_storage
+    ldm_ui
+    comctl32
+    ole32)
 target_include_directories(ldm PRIVATE ${PROJECT_SOURCE_DIR}/resources)
 
 # The manifest is embedded through ldm.rc, so the linker must not generate a second one.

@@ -153,6 +153,13 @@ struct Settings {
     std::string toolbarLayout;    // owned by the toolbar controller
     std::string windowPlacement;  // owned by the main window
     std::string listSortKey;
+    bool showDropTarget = false;
+    std::string dropTargetPosition;  // owned by the drop target window
+
+    // Recently used values offered again in the add dialogs (checklist A-01, A-02), newest first,
+    // one per line.
+    std::string addressHistory;
+    std::string recentFolders;
 
     // Confirmations
     bool confirmDeleteCompleted = true;

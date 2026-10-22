@@ -41,3 +41,180 @@ BEGIN
         VALUE "Translation", 0x409, 1200
     END
 END
+
+IDR_MAIN_MENU MENU
+BEGIN
+    POPUP "&Tasks"
+    BEGIN
+        MENUITEM "&Add new download...\tCtrl+N", ID_TASKS_ADD_URL
+        MENUITEM "Add &batch download...", ID_TASKS_ADD_BATCH
+        MENUITEM "Add batch download from &clipboard...", ID_TASKS_ADD_BATCH_CLIPBOARD
+        MENUITEM SEPARATOR
+        MENUITEM "Show &drop target", ID_TASKS_DROP_TARGET
+        MENUITEM SEPARATOR
+        POPUP "E&xport"
+        BEGIN
+            MENUITEM "To LDM export &file...", ID_TASKS_EXPORT_LDM
+            MENUITEM "To &text file...", ID_TASKS_EXPORT_TEXT
+        END
+        POPUP "&Import"
+        BEGIN
+            MENUITEM "&From LDM export file...", ID_TASKS_IMPORT_LDM
+            MENUITEM "From &text file...", ID_TASKS_IMPORT_TEXT
+        END
+        MENUITEM SEPARATOR
+        MENUITEM "E&xit", ID_TASKS_EXIT
+    END
+    POPUP "&File"
+    BEGIN
+        MENUITEM "&Stop download", ID_FILE_STOP
+        MENUITEM "&Remove\tDel", ID_FILE_REMOVE
+        MENUITEM "&Download now", ID_FILE_DOWNLOAD_NOW
+        MENUITEM "R&edownload", ID_FILE_REDOWNLOAD
+    END
+    POPUP "&Downloads"
+    BEGIN
+        MENUITEM "&Pause all", ID_DOWNLOADS_PAUSE_ALL
+        MENUITEM "&Stop all", ID_DOWNLOADS_STOP_ALL
+        MENUITEM SEPARATOR
+        MENUITEM "&Delete all completed", ID_DOWNLOADS_DELETE_COMPLETED
+        MENUITEM SEPARATOR
+        MENUITEM "&Find...\tCtrl+F", ID_DOWNLOADS_FIND
+        MENUITEM "Find &next\tF3", ID_DOWNLOADS_FIND_NEXT
+        MENUITEM SEPARATOR
+        POPUP "Speed &limiter"
+        BEGIN
+            MENUITEM "Turn o&n", ID_DOWNLOADS_LIMITER_ON
+            MENUITEM "Turn o&ff", ID_DOWNLOADS_LIMITER_OFF
+            MENUITEM SEPARATOR
+            MENUITEM "S&ettings...", ID_DOWNLOADS_LIMITER_SETTINGS
+        END
+        MENUITEM SEPARATOR
+        MENUITEM "&Options...", ID_DOWNLOADS_OPTIONS
+    END
+    POPUP "&View"
+    BEGIN
+        MENUITEM "Hide &categories", ID_VIEW_HIDE_CATEGORIES
+        POPUP "&Arrange files"
+        BEGIN
+            MENUITEM "By &order of addition", 40041
+            MENUITEM "By &file name", 40042
+            MENUITEM "By &size", 40043
+            MENUITEM "By st&atus", 40044
+            MENUITEM "By &time left", 40045
+            MENUITEM "By transfer &rate", 40046
+            MENUITEM "By &last try date", 40047
+            MENUITEM "By &description", 40048
+            MENUITEM "By save &path", 40049
+            MENUITEM "By r&eferer", 40050
+            MENUITEM "By parent &web page", 40051
+            MENUITEM "By date added", 40052
+        END
+        POPUP "&Toolbar"
+        BEGIN
+            MENUITEM "&Customize...", ID_VIEW_TOOLBAR_CUSTOMIZE
+            MENUITEM SEPARATOR
+            MENUITEM "&Large buttons", ID_VIEW_TOOLBAR_LARGE
+            MENUITEM "&Small buttons", ID_VIEW_TOOLBAR_SMALL
+        END
+        POPUP "Tray &icon"
+        BEGIN
+            MENUITEM "&Color style", ID_VIEW_TRAY_COLOR
+            MENUITEM "C&lassic style", ID_VIEW_TRAY_CLASSIC
+            MENUITEM "Do&n't show", ID_VIEW_TRAY_HIDDEN
+        END
+        MENUITEM "C&ustomize list columns...", ID_VIEW_COLUMNS
+        MENUITEM "Dark &mode support", ID_VIEW_DARK_MODE
+        POPUP "F&ont"
+        BEGIN
+            MENUITEM "&Choose font...", ID_VIEW_FONT_CHOOSE
+            MENUITEM "&Reset to default font", ID_VIEW_FONT_RESET
+        END
+    END
+    POPUP "&Help"
+    BEGIN
+        MENUITEM "&Help contents", ID_HELP_CONTENTS
+        MENUITEM SEPARATOR
+        MENUITEM "&About Last Download Manager", ID_HELP_ABOUT
+    END
+END
+
+IDR_ACCELERATORS ACCELERATORS
+BEGIN
+    "N", ID_TASKS_ADD_URL, VIRTKEY, CONTROL
+    "F", ID_DOWNLOADS_FIND, VIRTKEY, CONTROL
+    VK_F3, ID_DOWNLOADS_FIND_NEXT, VIRTKEY
+    "M", ID_ROW_MOVE_RENAME, VIRTKEY, CONTROL
+    "A", ID_EDIT_SELECT_ALL, VIRTKEY, CONTROL
+    VK_DELETE, ID_FILE_REMOVE, VIRTKEY
+    VK_RETURN, ID_ROW_DEFAULT_ACTION, VIRTKEY
+END
+
+IDD_ADD_URL DIALOGEX 0, 0, 330, 104
+STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Enter new address to download"
+FONT 9, "Segoe UI", 400, 0, 0x1
+BEGIN
+    LTEXT "&Address:", -1, 7, 9, 40, 8
+    COMBOBOX IDC_ADD_URL, 50, 7, 273, 120, CBS_DROPDOWN | CBS_AUTOHSCROLL | WS_VSCROLL | WS_TABSTOP
+    AUTOCHECKBOX "Use &authorization", IDC_ADD_AUTH, 50, 27, 120, 10, WS_TABSTOP
+    LTEXT "&Login:", IDC_ADD_USER_LABEL, 60, 44, 38, 8
+    EDITTEXT IDC_ADD_USER, 100, 42, 130, 13, ES_AUTOHSCROLL | WS_TABSTOP
+    LTEXT "&Password:", IDC_ADD_PASSWORD_LABEL, 60, 62, 38, 8
+    EDITTEXT IDC_ADD_PASSWORD, 100, 60, 130, 13, ES_AUTOHSCROLL | ES_PASSWORD | WS_TABSTOP
+    DEFPUSHBUTTON "OK", IDOK, 219, 83, 50, 14
+    PUSHBUTTON "Cancel", IDCANCEL, 273, 83, 50, 14
+END
+
+IDD_DOWNLOAD_INFO DIALOGEX 0, 0, 360, 170
+STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Download File Info"
+FONT 9, "Segoe UI", 400, 0, 0x1
+BEGIN
+    LTEXT "URL:", -1, 7, 9, 45, 8
+    EDITTEXT IDC_INFO_URL, 55, 7, 298, 13, ES_AUTOHSCROLL | ES_READONLY | WS_TABSTOP
+    LTEXT "&Category:", -1, 7, 27, 45, 8
+    COMBOBOX IDC_INFO_CATEGORY, 55, 25, 120, 120, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    PUSHBUTTON "+", IDC_INFO_ADD_CATEGORY, 178, 25, 14, 13, WS_TABSTOP
+    LTEXT "Save &as:", -1, 7, 45, 45, 8
+    COMBOBOX IDC_INFO_FOLDER, 55, 43, 278, 120, CBS_DROPDOWN | CBS_AUTOHSCROLL | WS_VSCROLL | WS_TABSTOP
+    PUSHBUTTON "...", IDC_INFO_BROWSE, 336, 43, 17, 13, WS_TABSTOP
+    AUTOCHECKBOX "&Remember this path for the category", IDC_INFO_REMEMBER, 55, 60, 200, 10, WS_TABSTOP
+    LTEXT "File &name:", -1, 7, 77, 45, 8
+    EDITTEXT IDC_INFO_NAME, 55, 75, 298, 13, ES_AUTOHSCROLL | WS_TABSTOP
+    LTEXT "&Description:", -1, 7, 95, 45, 8
+    EDITTEXT IDC_INFO_DESCRIPTION, 55, 93, 298, 13, ES_AUTOHSCROLL | WS_TABSTOP
+    ICON "", IDC_INFO_ICON, 7, 115, 20, 20
+    LTEXT "Size: checking...", IDC_INFO_SIZE, 55, 115, 298, 8
+    LTEXT "", IDC_INFO_TYPE, 55, 127, 298, 8
+    DEFPUSHBUTTON "&Start Download", IDC_INFO_START, 175, 149, 66, 14
+    PUSHBUTTON "Download &Later", IDC_INFO_LATER, 245, 149, 62, 14
+    PUSHBUTTON "Cancel", IDCANCEL, 311, 149, 42, 14
+END
+
+IDD_DELETE DIALOGEX 0, 0, 280, 92
+STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Confirm deletion"
+FONT 9, "Segoe UI", 400, 0, 0x1
+BEGIN
+    ICON "", IDC_DELETE_ICON, 10, 10, 20, 20
+    LTEXT "", IDC_DELETE_TEXT, 40, 10, 233, 24
+    AUTOCHECKBOX "Also delete the &files from disk", IDC_DELETE_FILES, 40, 40, 233, 10, WS_TABSTOP
+    AUTOCHECKBOX "&Don't ask me again", IDC_DELETE_DONT_ASK, 40, 54, 233, 10, WS_TABSTOP
+    DEFPUSHBUTTON "OK", IDOK, 169, 71, 50, 14
+    PUSHBUTTON "Cancel", IDCANCEL, 223, 71, 50, 14
+END
+
+IDD_DUPLICATE DIALOGEX 0, 0, 300, 110
+STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Duplicate download address"
+FONT 9, "Segoe UI", 400, 0, 0x1
+BEGIN
+    LTEXT "", IDC_DUP_TEXT, 7, 7, 286, 20
+    AUTORADIOBUTTON "Add it again with a &numbered file name", IDC_DUP_NUMBERED, 14, 32, 270, 10, WS_GROUP | WS_TABSTOP
+    AUTORADIOBUTTON "&Replace the existing download", IDC_DUP_OVERWRITE, 14, 45, 270, 10
+    AUTORADIOBUTTON "Resume it, or &show it if it is complete", IDC_DUP_RESUME, 14, 58, 270, 10
+    AUTOCHECKBOX "Re&member my choice (change it in Options > Downloads)", IDC_DUP_REMEMBER, 14, 74, 270, 10, WS_GROUP | WS_TABSTOP
+    DEFPUSHBUTTON "OK", IDOK, 189, 89, 50, 14
+    PUSHBUTTON "Cancel", IDCANCEL, 243, 89, 50, 14
+END

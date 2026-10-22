@@ -21,7 +21,7 @@ namespace ldm::core {
 // Lifetime: construct, create the engine with this object as its listener, create the
 // coordinator, then Start(). Call Shutdown() before destroying the engine. Events the engine sends
 // after Shutdown() are dropped.
-class CoreThread final : public EngineListener {
+class CoreThread final : public EngineListener, public CommandSink {
 public:
     CoreThread() = default;
     ~CoreThread() override;
@@ -34,7 +34,7 @@ public:
     [[nodiscard]] base::Status Start(Coordinator& coordinator);
 
     // Thread-safe. Ignored before Start() and after Shutdown().
-    void Post(Command command);
+    void Post(Command command) override;
     void OnEngineEvent(EngineEvent event) override;
 
     // Stops every transfer, waits up to `timeout` for the engine to acknowledge, writes the final
