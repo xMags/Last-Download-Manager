@@ -258,7 +258,9 @@ void ResponseHeaders::ApplyLine(std::string_view line)
     } else if (EqualsIgnoreCase(name, "content-disposition")) {
         fileName = ParseContentDispositionFileName(value);
     } else if (EqualsIgnoreCase(name, "accept-ranges")) {
-        acceptRanges = ToLower(value).find("bytes") != std::string::npos;
+        const std::string units = ToLower(value);
+        acceptRanges = units.find("bytes") != std::string::npos;
+        acceptRangesNone = Trim(units) == "none";
     } else if (EqualsIgnoreCase(name, "retry-after")) {
         if (const auto seconds = ParseNonNegative(value)) {
             retryAfterSeconds = static_cast<int>(std::min<std::int64_t>(*seconds, kMaxRetryAfterSeconds));

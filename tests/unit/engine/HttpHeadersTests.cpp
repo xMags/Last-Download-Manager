@@ -98,6 +98,20 @@ TEST(ResponseHeaders, IdentityEncodingIsRaw)
     EXPECT_FALSE(headers.HasContentEncoding());
 }
 
+TEST(ResponseHeaders, DistinguishesRangesNoneFromAbsent)
+{
+    ResponseHeaders absent;
+    absent.ApplyLine("HTTP/1.1 200 OK");
+    EXPECT_FALSE(absent.acceptRanges);
+    EXPECT_FALSE(absent.acceptRangesNone);
+
+    ResponseHeaders none;
+    none.ApplyLine("HTTP/1.1 200 OK");
+    none.ApplyLine("Accept-Ranges: None");
+    EXPECT_FALSE(none.acceptRanges);
+    EXPECT_TRUE(none.acceptRangesNone);
+}
+
 TEST(PercentDecode, DecodesValidAndKeepsInvalid)
 {
     EXPECT_EQ(ldm::engine::PercentDecode("a%20b%2Fc"), "a b/c");

@@ -1,4 +1,6 @@
 add_library(ldm_base STATIC
+    Paths.cpp
+    Paths.h
     Result.h
     Utf.cpp
     Utf.h)
