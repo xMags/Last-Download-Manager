@@ -5,6 +5,7 @@ obj/
 out/
 dist/
 cmake-build-*/
+vcpkg_installed/
 x64/
 x86/
 Debug/
@@ -47,7 +48,6 @@ temp/
 *.temp
 *.bak
 *.orig
-Old_UI.png
 
 # Signing keys / secrets
 *.pfx
@@ -64,6 +64,3 @@ Old_UI.png
 .DS_Store
 Thumbs.db
 desktop.ini
-
-# Keep required CA bundle used by the app
-!LDM/resources/cacert.pem
