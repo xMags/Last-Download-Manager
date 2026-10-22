@@ -1,0 +1,19 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+  "name": "last-download-manager",
+  "version-semver": "5.0.0",
+  "description": "Native Windows download manager",
+  "license": "GPL-3.0-only",
+  "supports": "windows & x64 & !uwp",
+  "builtin-baseline": "0699a19d0c6386247ce50d4dedbb8217d484d536",
+  "dependencies": [
+    {
+      "name": "curl",
+      "default-features": false,
+      "features": ["ssl", "sspi", "http2", "brotli", "idn"]
+    },
+    "sqlite3",
+    "nlohmann-json",
+    "gtest"
+  ]
+}
