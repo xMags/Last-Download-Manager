@@ -43,6 +43,9 @@ public:
     [[nodiscard]] std::vector<ColumnState> Columns() const;
     void ApplyTheme(const Theme& theme);
     void SetFont(HFONT font);
+    // Stretches the last column over the space to its right, so no empty, column-like box shows
+    // after it. Call after the list is resized.
+    void FitLastColumn();
 
     [[nodiscard]] std::vector<const core::DownloadView*> Selection() const;
     [[nodiscard]] std::vector<model::DownloadId> SelectedIds() const;
@@ -70,6 +73,10 @@ private:
     std::vector<size_t> index_;  // list row -> position in snapshot_->downloads
     std::vector<ColumnState> columns_;  // every column, in display order of the visible ones
     std::vector<Column> shown_;         // list view column -> column id
+    // Widths the user chose, at 96 DPI. The last column may be shown wider than this to fill the
+    // list; Columns() reports these so the stretch is never saved.
+    std::map<Column, int> chosenWidths96_;
+    bool fitting_ = false;
     std::map<std::wstring, int> iconCache_;  // extension -> system image list index
     bool updating_ = false;
 };
