@@ -617,6 +617,81 @@ TEST_F(CoordinatorTest, RedownloadReplacesTheCompletedFile)
     EXPECT_EQ(engine_.finalizes.back().finalPath, kRoot / L"a.dat");
 }
 
+void EnableQuota(Coordinator& coordinator, bool warn)
+{
+    coordinator.Handle(ldm::core::ModifySettingsCommand{[warn](ldm::model::Settings& s) {
+        s.quota.enabled = true;
+        s.quota.megabytes = 1;
+        s.quota.hours = 1;
+        s.quota.warnBeforeStopping = warn;
+    }});
+}
+
+ProgressInfo Received(std::int64_t bytes)
+{
+    ProgressInfo progress;
+    progress.receivedBytes = bytes;
+    return progress;
+}
+
+TEST_F(CoordinatorTest, QuotaHoldsDownloadsUntilThePeriodEnds)
+{
+    EnableQuota(*coordinator_, false);
+    const DownloadId first = *Add("http://x.test/a.dat").id;
+    Send(first, 1, Received(600 * 1024));
+    EXPECT_TRUE(engine_.stops.empty());
+    Send(first, 1, Received(1100 * 1024));
+    ASSERT_EQ(engine_.stops.size(), 1u) << "used up: running downloads stop";
+    Finish(first, 1, TransferOutcome::Stopped, {{0, std::nullopt, 1100 * 1024}});
+    EXPECT_EQ(View(first).download.status, DownloadStatus::Paused);
+    EXPECT_TRUE(View(first).waitingForQuota);
+    EXPECT_TRUE(observer_.snapshot->quotaEndsAtUnixMs.has_value());
+
+    // New downloads wait too, and a resume does not get around the quota.
+    const DownloadId second = *Add("http://x.test/b.dat").id;
+    coordinator_->Handle(ldm::core::ResumeCommand{{first}});
+    EXPECT_EQ(engine_.starts.size(), 1u);
+    EXPECT_TRUE(View(second).waitingForQuota);
+
+    // Stopped by the user: it stays stopped when the quota allows again.
+    coordinator_->Handle(ldm::core::StopCommand{{second}});
+    EXPECT_FALSE(View(second).waitingForQuota);
+
+    clock_.Advance(std::chrono::hours(1));
+    coordinator_->Tick();
+    ASSERT_EQ(engine_.starts.size(), 2u);
+    EXPECT_EQ(engine_.starts.back().id, first);
+    EXPECT_EQ(engine_.starts.back().segments.size(), 1u) << "it resumes where it stopped";
+    EXPECT_FALSE(View(first).waitingForQuota);
+}
+
+TEST_F(CoordinatorTest, QuotaWarningLetsTheUserKeepDownloading)
+{
+    EnableQuota(*coordinator_, true);
+    const DownloadId id = *Add("http://x.test/a.dat").id;
+    Send(id, 1, Received(2 * 1024 * 1024));
+    EXPECT_TRUE(engine_.stops.empty()) << "nothing stops before the user answers";
+    ASSERT_EQ(observer_.All<ldm::core::QuotaReached>().size(), 1u);
+    Send(id, 1, Received(3 * 1024 * 1024));
+    EXPECT_EQ(observer_.All<ldm::core::QuotaReached>().size(), 1u) << "asked once";
+
+    coordinator_->Handle(ldm::core::QuotaDecisionCommand{true});
+    Send(id, 1, Received(4 * 1024 * 1024));
+    EXPECT_TRUE(engine_.stops.empty());
+    EXPECT_EQ(observer_.All<ldm::core::QuotaReached>().size(), 1u) << "ignored until the period ends";
+}
+
+TEST_F(CoordinatorTest, QuotaWarningAnsweredWithStop)
+{
+    EnableQuota(*coordinator_, true);
+    const DownloadId id = *Add("http://x.test/a.dat").id;
+    Send(id, 1, Received(2 * 1024 * 1024));
+    coordinator_->Handle(ldm::core::QuotaDecisionCommand{false});
+    ASSERT_EQ(engine_.stops.size(), 1u);
+    Finish(id, 1, TransferOutcome::Stopped, {{0, std::nullopt, 2 * 1024 * 1024}});
+    EXPECT_TRUE(View(id).waitingForQuota);
+}
+
 TEST_F(CoordinatorTest, NamesStayUniqueAcrossDownloads)
 {
     std::set<std::wstring> paths;

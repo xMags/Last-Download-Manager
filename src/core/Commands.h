@@ -135,12 +135,17 @@ struct ReplaceServerLimitsCommand {
     std::vector<model::ServerLimit> limits;
 };
 
+// The answer to QuotaReached when Options ask to warn before stopping (checklist O-05).
+struct QuotaDecisionCommand {
+    bool keepDownloading = false;  // true: ignore the quota until the current period ends
+};
+
 using Command = std::variant<AddDownloadCommand, ConfirmDownloadCommand, ResumeCommand, StopCommand, StopAllCommand,
                              DeleteCommand, DeleteCompletedCommand, RedownloadCommand, SetDownloadSpeedLimitCommand,
                              SetSpeedLimiterCommand, UpdateDownloadCommand, MoveDownloadCommand, SaveCategoryCommand,
                              DeleteCategoryCommand, ReassignCategoryCommand, UpdateSettingsCommand,
-                             ModifySettingsCommand,
-                             ReplaceSiteLoginsCommand, ReplaceServerLimitsCommand>;
+                             ModifySettingsCommand, ReplaceSiteLoginsCommand, ReplaceServerLimitsCommand,
+                             QuotaDecisionCommand>;
 
 // Where front ends send commands. Thread-safe; returns at once.
 class CommandSink {

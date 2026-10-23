@@ -3,6 +3,7 @@
 #include "base/Utf.h"
 #include "resource.h"
 #include "ui/CommandState.h"
+#include "ui/Format.h"
 #include "ui/History.h"
 #include "ui/dialogs/CategoryDialog.h"
 #include "ui/dialogs/ConfirmDialogs.h"
@@ -409,8 +410,21 @@ void MainController::OnNotifications(std::vector<core::Notification> notificatio
             }
         } else if (const auto* error = std::get_if<core::CoreError>(&notification)) {
             ShowError(base::ToUtf16(error->message));
+        } else if (const auto* quota = std::get_if<core::QuotaReached>(&notification)) {
+            AskAboutQuota(*quota);
         }
     }
+}
+
+void MainController::AskAboutQuota(const core::QuotaReached& reached)
+{
+    const std::wstring message =
+        L"The download quota of " + std::to_wstring(reached.megabytes) + L" MB every " + std::to_wstring(reached.hours) +
+        (reached.hours == 1 ? L" hour" : L" hours") + L" is used up.\n\nStop downloading until " +
+        FormatDateTime(reached.periodEndsAtUnixMs) +
+        L"? The downloads continue by themselves then.\n\nChoose No to keep downloading until then.";
+    const int answer = ::MessageBoxW(context_.owner, message.c_str(), kAppTitle, MB_YESNO | MB_ICONINFORMATION | MB_SETFOREGROUND);
+    Post(core::QuotaDecisionCommand{answer == IDNO});
 }
 
 void MainController::RemoveSelected()

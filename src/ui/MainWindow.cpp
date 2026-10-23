@@ -436,6 +436,11 @@ void MainWindow::UpdateStatus()
     if (snapshot.speedLimiterOn) {
         parts.push_back(L"Speed limiter: " + std::to_wstring(snapshot.settings.speedLimiterKilobytesPerSecond) + L" KB/s");
     }
+    if (snapshot.quotaEndsAtUnixMs) {
+        parts.push_back(L"Quota used up; continues at " + FormatDateTime(*snapshot.quotaEndsAtUnixMs));
+    } else if (snapshot.quotaLimitBytes > 0) {
+        parts.push_back(L"Quota: " + FormatSize(snapshot.quotaUsedBytes) + L" of " + FormatSize(snapshot.quotaLimitBytes));
+    }
     status_.SetParts(std::move(parts));
 
     std::wstring tooltip = L"Last Download Manager";
