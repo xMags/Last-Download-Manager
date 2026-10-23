@@ -35,6 +35,9 @@ public:
     [[nodiscard]] virtual std::optional<std::int64_t> FileSize(const std::filesystem::path& path) = 0;
     // Deletes a file. A file that does not exist counts as deleted.
     [[nodiscard]] virtual base::Status Remove(const std::filesystem::path& path) = 0;
+    // Moves a file to the Recycle Bin. Fails and keeps the file when its drive has no Recycle Bin,
+    // rather than deleting it for good. A file that does not exist counts as recycled.
+    [[nodiscard]] virtual base::Status Recycle(const std::filesystem::path& path) = 0;
     [[nodiscard]] virtual base::Status CreateDirectories(const std::filesystem::path& path) = 0;
 };
 

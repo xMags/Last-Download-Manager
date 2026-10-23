@@ -17,6 +17,7 @@ public:
     bool Exists(const std::filesystem::path& path) override;
     std::optional<std::int64_t> FileSize(const std::filesystem::path& path) override;
     base::Status Remove(const std::filesystem::path& path) override;
+    base::Status Recycle(const std::filesystem::path& path) override;
     base::Status CreateDirectories(const std::filesystem::path& path) override;
 };
 

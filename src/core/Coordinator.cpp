@@ -1209,8 +1209,9 @@ void Coordinator::RemoveEntry(model::DownloadId id, bool deleteFinalFile)
         }
     }
     if (deleteFinalFile) {
-        if (base::Status removed = ports_.fileSystem->Remove(FinalPath(d)); !removed) {
-            ReportError("The file could not be deleted: " + removed.GetError().message);
+        // Completed files go to the Recycle Bin, so a mistaken delete can be undone.
+        if (base::Status recycled = ports_.fileSystem->Recycle(FinalPath(d)); !recycled) {
+            ReportError("The file was kept: " + recycled.GetError().message);
         }
     }
     if (base::Status deleted = ports_.store->DeleteDownload(id); !deleted) {

@@ -1,8 +1,13 @@
 #include "platform/win/SystemPorts.h"
 
 #include "base/Paths.h"
+#include "base/Utf.h"
 
 #include <bcrypt.h>
+#include <objbase.h>
+#include <shellapi.h>
+#include <shobjidl.h>
+#include <wrl/client.h>
 
 #include <array>
 #include <cstdio>
@@ -16,6 +21,23 @@ std::string Win32ErrorText(DWORD error)
 {
     return std::system_category().message(static_cast<int>(error));
 }
+
+// COM for the calling thread for one call; the core thread uses COM only here.
+class ComScope {
+public:
+    ComScope() : ok_(SUCCEEDED(::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE))) {}
+    ~ComScope()
+    {
+        if (ok_) {
+            ::CoUninitialize();
+        }
+    }
+    ComScope(const ComScope&) = delete;
+    ComScope& operator=(const ComScope&) = delete;
+
+private:
+    bool ok_;
+};
 
 }  // namespace
 
@@ -60,6 +82,39 @@ base::Status WinFileSystem::Remove(const std::filesystem::path& path)
         return {};
     }
     return base::MakeError(base::ErrorCode::Io, Win32ErrorText(error));
+}
+
+base::Status WinFileSystem::Recycle(const std::filesystem::path& path)
+{
+    std::error_code error;
+    if (!std::filesystem::exists(path, error)) {
+        return {};
+    }
+    // The Shell deletes for good, without asking when told not to ask, on drives without a Recycle
+    // Bin (network shares, some removable drives). Check first and keep the file there.
+    const std::filesystem::path root = path.root_path();
+    SHQUERYRBINFO info{sizeof(info)};
+    if (FAILED(::SHQueryRecycleBinW(root.c_str(), &info))) {
+        return base::MakeError(base::ErrorCode::Io, "the drive of " + base::ToUtf8(path.wstring()) + " has no Recycle Bin");
+    }
+    ComScope com;
+    Microsoft::WRL::ComPtr<IFileOperation> operation;
+    if (FAILED(::CoCreateInstance(CLSID_FileOperation, nullptr, CLSCTX_ALL, IID_PPV_ARGS(&operation)))) {
+        return base::MakeError(base::ErrorCode::Io, "the Recycle Bin is not available");
+    }
+    operation->SetOperationFlags(FOF_ALLOWUNDO | FOFX_RECYCLEONDELETE | FOF_NOCONFIRMATION | FOF_SILENT | FOF_NOERRORUI |
+                                 FOFX_EARLYFAILURE);
+    Microsoft::WRL::ComPtr<IShellItem> item;
+    if (FAILED(::SHCreateItemFromParsingName(path.c_str(), nullptr, IID_PPV_ARGS(&item))) ||
+        FAILED(operation->DeleteItem(item.Get(), nullptr)) || FAILED(operation->PerformOperations())) {
+        return base::MakeError(base::ErrorCode::Io, base::ToUtf8(path.wstring()) + " could not be moved to the Recycle Bin");
+    }
+    BOOL aborted = FALSE;
+    operation->GetAnyOperationsAborted(&aborted);
+    if (aborted || std::filesystem::exists(path, error)) {
+        return base::MakeError(base::ErrorCode::Io, base::ToUtf8(path.wstring()) + " could not be moved to the Recycle Bin");
+    }
+    return {};
 }
 
 base::Status WinFileSystem::CreateDirectories(const std::filesystem::path& path)
