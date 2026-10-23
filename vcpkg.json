@@ -12,6 +12,11 @@
       "default-features": false,
       "features": ["ssl", "sspi", "http2", "brotli", "idn", "non-http"]
     },
+    {
+      "name": "ffmpeg",
+      "default-features": false,
+      "features": ["ffmpeg", "ffprobe", "avcodec", "avformat", "avfilter"]
+    },
     "sqlite3",
     "nlohmann-json",
     "gtest"
