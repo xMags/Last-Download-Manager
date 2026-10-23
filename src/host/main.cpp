@@ -1,7 +1,8 @@
 // ldm-host.exe: the native messaging host (M3 design section 3). The browser starts it with stdio
 // connected to the extension and ends it when the extension disconnects. It relays messages
-// between the extension and the running LDM, starting LDM when needed, and validates what it
-// relays. It holds no state of its own.
+// between the extension and the running LDM and validates what it relays. The extension's first
+// message is a hello; only a hello that asks for it starts LDM when it is not running. The host
+// holds no state of its own.
 #include "browser/Protocol.h"
 #include "platform/win/PipeIo.h"
 
@@ -72,7 +73,7 @@ bool StartLdm()
     return true;
 }
 
-ldm::platform::OwnedHandle ConnectToLdm()
+ldm::platform::OwnedHandle ConnectToLdm(bool startIfMissing)
 {
     const std::wstring name = ldm::platform::BrowserPipeName();
     bool started = false;
@@ -86,6 +87,9 @@ ldm::platform::OwnedHandle ConnectToLdm()
             return pipe;
         }
         const DWORD error = ::GetLastError();
+        if (error == ERROR_FILE_NOT_FOUND && !startIfMissing) {
+            return {};
+        }
         if (error == ERROR_FILE_NOT_FOUND && !started) {
             started = true;
             if (!StartLdm()) {
@@ -204,10 +208,18 @@ int WINAPI wWinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
     if (!host || input == nullptr || input == INVALID_HANDLE_VALUE || output == nullptr || output == INVALID_HANDLE_VALUE) {
         return static_cast<int>(ExitCode::NotStartedByBrowser);
     }
-    const ldm::platform::OwnedHandle pipe = ConnectToLdm();
-    if (!pipe.Valid() || !ldm::platform::WriteFrame(pipe.Get(), ldm::browser::EncodeHostInfo(*host),
-                                                    ldm::browser::kMaxInboundBytes, nullptr)) {
-        // The extension sees the disconnect and shows its "cannot contact LDM" state.
+    const auto first = ReadNativeMessage(input);
+    if (!first) {
+        return static_cast<int>(ExitCode::Done);
+    }
+    if (!ldm::browser::IsValidEnvelope(*first)) {
+        return static_cast<int>(ExitCode::ProtocolError);
+    }
+    const ldm::platform::OwnedHandle pipe = ConnectToLdm(ldm::browser::HelloAsksToStartLdm(*first));
+    if (!pipe.Valid() ||
+        !ldm::platform::WriteFrame(pipe.Get(), ldm::browser::EncodeHostInfo(*host), ldm::browser::kMaxInboundBytes, nullptr) ||
+        !ldm::platform::WriteFrame(pipe.Get(), *first, ldm::browser::kMaxInboundBytes, nullptr)) {
+        // The extension sees the disconnect and shows that LDM is not running or cannot be reached.
         return static_cast<int>(ExitCode::NoLdm);
     }
 

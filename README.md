@@ -38,6 +38,15 @@ Dependencies (libcurl, SQLite, nlohmann-json, GoogleTest) are fetched and built 
 
 Use the `windows-debug` preset for a debug build.
 
+## Browser extension
+
+When Node.js is installed, the build also writes the browser extension to `build/windows-release/extension/`, one folder per browser family. Until it is published in the browser stores, load it by hand:
+
+- **Chrome or Edge:** open `chrome://extensions` (or `edge://extensions`), turn on Developer mode, choose **Load unpacked** and pick the `chromium` folder.
+- **Firefox:** open `about:debugging#/runtime/this-firefox`, choose **Load Temporary Add-on** and pick `manifest.json` in the `firefox` folder. Firefox removes it when it restarts.
+
+LDM registers its browser helper (`ldm-host.exe`) every time it starts, so start LDM once before loading the extension.
+
 ## License
 
 GPL-3.0. See [LICENSE](LICENSE).

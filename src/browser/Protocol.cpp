@@ -105,11 +105,13 @@ std::optional<Hello> ParseHello(const nlohmann::json& object)
     auto browserVersion = Text(object, "browserVersion", kMaxVersionChars);
     auto extensionVersion = Text(object, "extensionVersion", kMaxVersionChars);
     const auto incognitoAllowed = Boolean(object, "incognitoAllowed");
+    const auto startLdm = Boolean(object, "startLdm");
     if (!browser || browser->empty() || !browserVersion || !extensionVersion || extensionVersion->empty() ||
-        !incognitoAllowed) {
+        !incognitoAllowed || !startLdm) {
         return std::nullopt;
     }
-    return Hello{std::move(*browser), std::move(*browserVersion), std::move(*extensionVersion), *incognitoAllowed};
+    return Hello{std::move(*browser), std::move(*browserVersion), std::move(*extensionVersion), *incognitoAllowed,
+                 *startLdm};
 }
 
 nlohmann::json Envelope(std::string_view id, std::string_view type)
@@ -134,6 +136,13 @@ bool IsValidEnvelope(std::string_view json)
     return version != message.end() && version->is_number_integer() && version->get<std::int64_t>() == kProtocolVersion &&
            id != message.end() && id->is_string() && IsValidId(id->get_ref<const std::string&>()) &&
            type != message.end() && type->is_string() && IsValidType(type->get_ref<const std::string&>());
+}
+
+bool HelloAsksToStartLdm(std::string_view json)
+{
+    const auto parsed = ParseMessage(json);
+    const auto* hello = parsed ? std::get_if<Hello>(&parsed->message) : nullptr;
+    return hello != nullptr && hello->startLdm;
 }
 
 std::optional<ParsedMessage> ParseMessage(std::string_view json)

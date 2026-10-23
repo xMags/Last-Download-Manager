@@ -1,5 +1,6 @@
 #pragma once
 
+#include "browser/Protocol.h"
 #include "core/Commands.h"
 #include "core/Ports.h"
 #include "core/Snapshot.h"
@@ -24,6 +25,7 @@ public:
         std::vector<model::ServerLimit> serverLimits;
         std::vector<core::SiteLoginView> siteLogins;
         bool launchOnStartup = false;
+        std::vector<browser::Hello> connectedBrowsers;  // shown on General; read only
     };
 
     struct Output {
@@ -73,6 +75,7 @@ private:
     void StoreCategory(int index);
     void LoadProxy(int enabledId, int hostId, int portId, int userId, const model::ProxyServer& server);
     bool StoreProxy(int enabledId, int hostId, int portId, int userId, int passwordId, model::ProxyServer& server);
+    void ShowConnectedBrowsers();
     void RefreshLimits();
     void RefreshLogins();
     void UpdateProxyControls();

@@ -31,12 +31,15 @@ struct HostInfo {
     std::string extensionId;
 };
 
-// The extension's first message.
+// The extension's first message on every connection.
 struct Hello {
     std::string browser;  // display name, such as "Chrome" or "Firefox"
     std::string browserVersion;
     std::string extensionVersion;
     bool incognitoAllowed = false;
+    // Whether ldm-host.exe should start LDM when it is not running. The extension asks for it only
+    // when it has work for LDM; a plain reconnect must not undo the user's Exit.
+    bool startLdm = false;
 };
 
 using Message = std::variant<HostInfo, Hello>;
@@ -49,6 +52,9 @@ struct ParsedMessage {
 // The checks ldm-host.exe applies before relaying: a JSON object of the right version with an id
 // and a well-formed type. The type's own fields are LDM's to validate.
 [[nodiscard]] bool IsValidEnvelope(std::string_view json);
+
+// For ldm-host.exe: true when `json` is a hello that asks for LDM to be started.
+[[nodiscard]] bool HelloAsksToStartLdm(std::string_view json);
 
 // Nothing when the message is malformed, of an unknown type, or has an invalid field.
 [[nodiscard]] std::optional<ParsedMessage> ParseMessage(std::string_view json);

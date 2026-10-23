@@ -1,0 +1,29 @@
+{
+  "manifest_version": 3,
+  "name": "Last Download Manager",
+  "description": "Download files with Last Download Manager",
+  "version": "0.0.0",
+  "minimum_chrome_version": "120",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAm4aQezJvU2lRpT4PLZul3MWVjUR65yuGBlukb0gNTmdCFLls3BXWCyBl3BFhhzg7Nc6mRu8w5CK40rPPg5TpHqid0vWJBxWj65IbmWUKrI0ZBcMSSbnpGoAmolrAt5igHN5+PyJ2wlz8fq4wuLvu0C+brkiS8aB9sllsZzhIJlslL4EZOTq/3YJp71IW468SXF7FZii8zhJx/BJ8WiFE56xLldT32kpTlw06d/hlBz3LO8KgfnqvYD3td5cpuu0SiI7tRIUZndZcmE7tbbDhXb8jrPgbcBuPgIL5enwuQQfQcTcPB1WrplJ+dy7nlVK/5hEfgqTFwmJVTsAbz8nCjwIDAQAB",
+  "icons": {
+    "16": "icons/ldm-16.png",
+    "48": "icons/ldm-48.png",
+    "128": "icons/ldm-128.png"
+  },
+  "action": {
+    "default_icon": {
+      "16": "icons/ldm-16.png",
+      "32": "icons/ldm-32.png"
+    },
+    "default_title": "Last Download Manager"
+  },
+  "background": {
+    "service_worker": "src/background.js",
+    "type": "module"
+  },
+  "permissions": [
+    "alarms",
+    "nativeMessaging",
+    "storage"
+  ]
+}

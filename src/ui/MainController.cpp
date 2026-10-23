@@ -656,6 +656,9 @@ void MainController::ShowOptions()
     input.serverLimits = snapshot->serverLimits;
     input.siteLogins = snapshot->siteLogins;
     input.launchOnStartup = context_.startup->IsEnabled();
+    if (context_.connectedBrowsers) {
+        input.connectedBrowsers = context_.connectedBrowsers();
+    }
     OptionsDialog dialog(*context_.theme, std::move(input), *context_.secrets, *context_.system);
     auto output = dialog.Run(context_.owner);
     if (!output) {
