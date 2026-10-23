@@ -34,7 +34,7 @@ cmake --build --preset windows-release
 ctest --preset windows-release
 ```
 
-Dependencies (libcurl, SQLite, nlohmann-json, GoogleTest) are fetched and built by vcpkg on the first configure, which takes several minutes. The program is written to `build/windows-release/src/app/ldm.exe`.
+Dependencies (libcurl, SQLite, nlohmann-json, GoogleTest) are fetched and built by vcpkg on the first configure, which takes several minutes. The program is written to `build/windows-release/src/app/ldm.exe`, with the browser integration host `ldm-host.exe` beside it.
 
 Use the `windows-debug` preset for a debug build.
 

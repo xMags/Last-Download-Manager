@@ -4,6 +4,8 @@
 #include "core/CoreThread.h"
 #include "core/LaunchRequest.h"
 #include "engine/CurlEngine.h"
+#include "platform/win/BrowserBridge.h"
+#include "platform/win/BrowserHostRegistration.h"
 #include "platform/win/InstanceChannel.h"
 #include "platform/win/SystemPorts.h"
 #include "platform/win/RunKeyStartup.h"
@@ -44,6 +46,22 @@ std::optional<std::filesystem::path> KnownFolder(REFKNOWNFOLDERID id)
     std::filesystem::path result(path);
     ::CoTaskMemFree(path);
     return result;
+}
+
+std::filesystem::path ProgramFolder()
+{
+    std::wstring path(MAX_PATH, L'\0');
+    for (;;) {
+        const DWORD length = ::GetModuleFileNameW(nullptr, path.data(), static_cast<DWORD>(path.size()));
+        if (length == 0) {
+            return {};
+        }
+        if (length < path.size()) {
+            path.resize(length);
+            return std::filesystem::path(path).parent_path();
+        }
+        path.resize(path.size() * 2);
+    }
 }
 
 void Fatal(const std::wstring& message)
@@ -180,9 +198,20 @@ int WINAPI wWinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int sho
         return 1;
     }
 
+    // Browser integration (M3 design section 3). Without it LDM still works; the extension then
+    // shows that it cannot reach LDM.
+    if (const auto programFolder = ProgramFolder(); !programFolder.empty()) {
+        (void)ldm::platform::RegisterBrowserHosts(dataFolder / L"browser", programFolder / L"ldm-host.exe");
+    }
+    // Set before the bridge starts its thread, which is the only reader.
+    ldm::ui::MainWindow* browserTarget = nullptr;
+    ldm::platform::BrowserBridge browserBridge(
+        [&browserTarget](ldm::ui::BrowserEvent event) { browserTarget->PostBrowserEvent(std::move(event)); });
+
     int exitCode = 0;
     {
-        ldm::ui::MainWindow window(ldm::ui::MainWindow::Services{&core, &bridge, &shell, &system, &secrets, &startup});
+        ldm::ui::MainWindow window(
+            ldm::ui::MainWindow::Services{&core, &bridge, &shell, &system, &secrets, &startup, &browserBridge});
         auto snapshot = bridge.TakeSnapshot();
         // --tray (Launch on startup) starts hidden, unless the tray icon is hidden too.
         const bool startHidden = launch.tray && snapshot && snapshot->settings.trayIconStyle != ldm::model::TrayIconStyle::Hidden;
@@ -197,7 +226,10 @@ int WINAPI wWinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int sho
             ldm::platform::InstanceServer server(
                 [&window](ldm::core::LaunchRequest request) { window.PostLaunchRequest(std::move(request)); });
             (void)server.Start();
+            browserTarget = &window;
+            (void)browserBridge.Start();
             exitCode = RunMessageLoop(window);
+            browserBridge.Stop();  // before the window it posts to goes away
         }
     }
 

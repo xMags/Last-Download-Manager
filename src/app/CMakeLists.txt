@@ -8,6 +8,9 @@ target_link_libraries(ldm PRIVATE
     ldm_ui
     comctl32
     ole32)
+# ldm-host.exe ships next to ldm.exe and is registered by it.
+add_dependencies(ldm ldm-host)
+
 target_include_directories(ldm PRIVATE ${PROJECT_SOURCE_DIR}/resources)
 
 # The manifest is embedded through ldm.rc, so the linker must not generate a second one.

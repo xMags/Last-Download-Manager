@@ -1,7 +1,10 @@
+find_package(nlohmann_json CONFIG REQUIRED)
+
 add_executable(ldm_unit_tests
     base/PathsTests.cpp
     base/ResultTests.cpp
     base/UtfTests.cpp
+    browser/ProtocolTests.cpp
     core/CoordinatorTests.cpp
     core/QuotaTests.cpp
     core/SegmentPlannerTests.cpp
@@ -16,10 +19,12 @@ add_executable(ldm_unit_tests
     ui/ExportAndLaunchTests.cpp
     ui/ListModelTests.cpp)
 target_link_libraries(ldm_unit_tests PRIVATE
+    ldm_browser
     ldm_engine
     ldm_platform
     ldm_storage
     ldm_ui
+    nlohmann_json::nlohmann_json
     GTest::gtest
     GTest::gtest_main)
 gtest_discover_tests(ldm_unit_tests DISCOVERY_MODE PRE_TEST)
