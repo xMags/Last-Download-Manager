@@ -5,10 +5,12 @@
 #include "ui/GlyphIcons.h"
 
 #include <commctrl.h>
+#include <uxtheme.h>
 #include <windowsx.h>
 
 #include <algorithm>
 #include <array>
+#include <string_view>
 
 namespace ldm::ui {
 
@@ -19,20 +21,52 @@ enum Image {
     kImageFolder,
     kImageUnfinished,
     kImageFinished,
+    kImageCompressed,
+    kImageDocuments,
+    kImageMusic,
+    kImagePrograms,
+    kImageVideo,
 };
 
 constexpr wchar_t kCloseGlyph = 0xE8BB;  // ChromeClose
-constexpr int kHeaderHeight96 = 28;
-constexpr int kCloseButton96 = 22;
+constexpr int kHeaderHeight96 = 22;
+constexpr int kCloseButton96 = 18;
 constexpr int kCloseGlyph96 = 10;
-constexpr int kTreeItemHeight96 = 24;
+constexpr int kTreeItemHeight96 = 17;
+constexpr int kTreeIcon96 = 14;  // the reference's tree icons sit inside short rows with room to spare
 
-constexpr std::array<Glyph, 4> kTreeGlyphs{{
-    {0xE896, RGB(0x1E, 0x88, 0xE5)},
-    {0xE8B7, RGB(0xE8, 0xA3, 0x17)},
-    {0xE823, RGB(0xF0, 0x8C, 0x00)},
-    {0xE930, RGB(0x2E, 0xA0, 0x43)},
+// In Image order. the reference gives each built-in category its own icon; LDM draws its own from the
+// Windows icon font.
+constexpr std::array<Glyph, 9> kTreeGlyphs{{
+    {0xE838, RGB(0xE8, 0xA3, 0x17)},  // FolderOpen
+    {0xE8B7, RGB(0xE8, 0xA3, 0x17)},  // Folder
+    {0xE896, RGB(0x2E, 0xA0, 0x43)},  // Download
+    {0xE930, RGB(0x1E, 0x88, 0xE5)},  // Completed
+    {0xF012, RGB(0xC9, 0x8A, 0x10)},  // ZipFolder
+    {0xE8A5, RGB(0x60, 0x7D, 0x8B)},  // Document
+    {0xEC4F, RGB(0x1E, 0x88, 0xE5)},  // MusicNote
+    {0xE737, RGB(0x45, 0x5A, 0x64)},  // Favicon (a window)
+    {0xE714, RGB(0x26, 0x8C, 0x7A)},  // Video
 }};
+
+// Built-in categories are seeded with these names; renamed or user categories get a folder.
+int CategoryImage(const model::Category& category)
+{
+    if (!category.builtin) {
+        return kImageFolder;
+    }
+    const struct {
+        std::string_view name;
+        Image image;
+    } known[] = {{"Compressed", kImageCompressed}, {"Documents", kImageDocuments}, {"Music", kImageMusic},
+                 {"Programs", kImagePrograms},     {"Video", kImageVideo}};
+    for (const auto& entry : known) {
+        if (category.name == entry.name) {
+            return entry.image;
+        }
+    }
+    return kImageFolder;
+}
 
 bool SameCategories(const std::vector<model::Category>& a, const std::vector<model::Category>& b)
 {
@@ -57,13 +91,13 @@ void CategoryPane::Create(HWND parent, Callbacks callbacks)
                                parent, nullptr, instance, nullptr);
     closeButton_ = ::CreateWindowExW(0, WC_BUTTONW, L"Hide categories", WS_CHILD | WS_VISIBLE | BS_OWNERDRAW, 0, 0, 0, 0,
                                      parent, nullptr, instance, nullptr);
-    // Root buttons stay visible (no fade), so Unfinished and Finished show that they open.
+    // the reference's tree: dotted lines and boxed expand buttons on every level, roots included.
     tree_ = ::CreateWindowExW(0, WC_TREEVIEWW, nullptr,
-                              WS_CHILD | WS_VISIBLE | WS_TABSTOP | TVS_HASBUTTONS | TVS_LINESATROOT | TVS_SHOWSELALWAYS |
-                                  TVS_FULLROWSELECT | TVS_TRACKSELECT,
+                              WS_CHILD | WS_VISIBLE | WS_TABSTOP | TVS_HASBUTTONS | TVS_HASLINES | TVS_LINESATROOT |
+                                  TVS_SHOWSELALWAYS,
                               0, 0, 0, 0, parent, nullptr, instance, nullptr);
     TreeView_SetExtendedStyle(tree_, TVS_EX_DOUBLEBUFFER, TVS_EX_DOUBLEBUFFER | TVS_EX_FADEINOUTEXPANDOS);
-    images_ = CreateGlyphImageList(kTreeGlyphs, Scale(16, DpiOf(tree_)));
+    images_ = CreateGlyphImageList(kTreeGlyphs, Scale(kTreeIcon96, DpiOf(tree_)));
     TreeView_SetImageList(tree_, images_.get(), TVSIL_NORMAL);
 }
 
@@ -108,7 +142,7 @@ void CategoryPane::Rebuild()
     for (const auto& root : roots) {
         const HTREEITEM parent = insert(TVI_ROOT, root.title, root.image, ListFilter{root.status, std::nullopt});
         for (const model::Category& category : categories_) {
-            insert(parent, base::ToUtf16(category.name), kImageFolder, ListFilter{root.status, category.id});
+            insert(parent, base::ToUtf16(category.name), CategoryImage(category), ListFilter{root.status, category.id});
         }
         if (root.status == StatusFilter::All) {
             TreeView_Expand(tree_, parent, TVE_EXPAND);
@@ -155,12 +189,16 @@ void CategoryPane::ApplyTheme(const Theme& theme)
     theme_ = &theme;
     const UINT dpi = DpiOf(tree_);
     theme.ApplyToControl(tree_);
+    if (!theme.IsDark()) {
+        // The plain tree theme draws the reference's dotted lines and boxed buttons; Explorer's hides them.
+        ::SetWindowTheme(tree_, nullptr, nullptr);
+    }
     TreeView_SetBkColor(tree_, theme.Colors().window);
     TreeView_SetTextColor(tree_, theme.Colors().text);
-    images_ = CreateGlyphImageList(kTreeGlyphs, Scale(16, dpi));
+    images_ = CreateGlyphImageList(kTreeGlyphs, Scale(kTreeIcon96, dpi));
     TreeView_SetImageList(tree_, images_.get(), TVSIL_NORMAL);
     TreeView_SetItemHeight(tree_, Scale(kTreeItemHeight96, dpi));
-    closeIcon_ = CreateGlyphIcon(Glyph{kCloseGlyph, theme.Colors().mutedText}, Scale(kCloseGlyph96, dpi));
+    closeIcon_ = CreateGlyphIcon(Glyph{kCloseGlyph, theme.Colors().text}, Scale(kCloseGlyph96, dpi));
     ::InvalidateRect(label_, nullptr, TRUE);
     ::InvalidateRect(closeButton_, nullptr, TRUE);
 }
@@ -171,8 +209,8 @@ HBRUSH CategoryPane::OnCtlColor(HWND control, HDC dc) const
         return nullptr;
     }
     ::SetTextColor(dc, theme_->Colors().text);
-    ::SetBkColor(dc, theme_->Colors().window);
-    return theme_->WindowBrush();
+    ::SetBkColor(dc, theme_->Colors().panel);
+    return theme_->PanelBrush();
 }
 
 bool CategoryPane::DrawItem(const DRAWITEMSTRUCT& draw) const
@@ -182,7 +220,7 @@ bool CategoryPane::DrawItem(const DRAWITEMSTRUCT& draw) const
     }
     const bool pressed = (draw.itemState & ODS_SELECTED) != 0;
     UniqueBrush pressedBrush(::CreateSolidBrush(theme_->Colors().divider));
-    ::FillRect(draw.hDC, &draw.rcItem, pressed ? pressedBrush.get() : theme_->WindowBrush());
+    ::FillRect(draw.hDC, &draw.rcItem, pressed ? pressedBrush.get() : theme_->PanelBrush());
     const int glyph = Scale(kCloseGlyph96, DpiOf(closeButton_));
     const int x = (draw.rcItem.left + draw.rcItem.right - glyph) / 2;
     const int y = (draw.rcItem.top + draw.rcItem.bottom - glyph) / 2;
@@ -207,10 +245,10 @@ void CategoryPane::Layout(const RECT& area)
     const UINT dpi = DpiOf(tree_);
     const int headerHeight = Scale(kHeaderHeight96, dpi);
     const int buttonSize = Scale(kCloseButton96, dpi);
-    const int margin = Scale(8, dpi);
+    const int margin = Scale(4, dpi);
     const int width = area.right - area.left;
     ::MoveWindow(label_, area.left + margin, area.top, std::max(0, width - buttonSize - 2 * margin), headerHeight, TRUE);
-    ::MoveWindow(closeButton_, area.right - buttonSize - Scale(4, dpi), area.top + (headerHeight - buttonSize) / 2, buttonSize,
+    ::MoveWindow(closeButton_, area.right - buttonSize - Scale(2, dpi), area.top + (headerHeight - buttonSize) / 2, buttonSize,
                  buttonSize, TRUE);
     ::MoveWindow(tree_, area.left, area.top + headerHeight, width, area.bottom - area.top - headerHeight, TRUE);
 }

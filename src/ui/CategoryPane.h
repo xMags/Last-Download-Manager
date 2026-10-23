@@ -40,7 +40,7 @@ public:
     bool HandleNotify(const NMHDR& header, LRESULT& result);
     bool HandleCommand(HWND control);
     [[nodiscard]] bool OwnsControl(HWND control) const;
-    // The header sits on the list background, not the panel: WM_CTLCOLORSTATIC for its label.
+    // WM_CTLCOLORSTATIC for the header label, which sits on the panel color.
     // Returns nothing for controls this pane does not own.
     [[nodiscard]] HBRUSH OnCtlColor(HWND control, HDC dc) const;
     // WM_DRAWITEM for the flat close button; false for other controls.

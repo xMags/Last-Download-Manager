@@ -78,9 +78,17 @@ private:
     void UpdateStatus();
     [[nodiscard]] RECT SplitterRect() const;
     void UpdateDropTarget(const model::Settings& settings);
-    // The list background behind the panes and the hairlines under the toolbar and at the splitter.
+    // Where the framed panes go, in client coordinates (the reference's layout: grey margins, framed panes).
+    struct PaneRects {
+        int toolbarBottom = 0;
+        bool categoriesVisible = false;
+        RECT categoryFrame{};
+        RECT splitter{};
+        RECT listFrame{};
+    };
+    [[nodiscard]] PaneRects Panes() const;
+    // The line under the toolbar and the pane frames.
     void Paint();
-    [[nodiscard]] int ContentTop() const;
     // Handles queued launch requests and drops one at a time, waiting while a modal dialog is open.
     void DrainExternalInput();
 

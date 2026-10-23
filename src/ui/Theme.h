@@ -6,8 +6,7 @@
 
 // Light and dark appearance (checklist V-08, design section 6).
 //
-// Title bars use the documented DWMWA_USE_IMMERSIVE_DARK_MODE and, on Windows 11, take the panel
-// color through DWMWA_CAPTION_COLOR so title bar, menu bar and toolbar read as one surface. Dark menus, scroll bars and common
+// Title bars use the documented DWMWA_USE_IMMERSIVE_DARK_MODE. Dark menus, scroll bars and common
 // controls need uxtheme functions that Windows exports only by ordinal; they are looked up once,
 // only on builds known to have them, and every caller falls back to the light look when a lookup
 // fails. The menu bar is painted by the window through the UAH messages handled here.
@@ -22,7 +21,8 @@ struct Palette {
     COLORREF hot;         // menu bar item under the mouse
     COLORREF accent;      // progress fill
     COLORREF accentText;
-    COLORREF divider;     // hairlines between the header, panes and list
+    COLORREF divider;     // the category pane frame and the line over the status bar
+    COLORREF listBorder;  // the frame around the download list
 };
 
 class Theme {
@@ -51,8 +51,8 @@ public:
     // WM_CTLCOLOR* for dialogs: sets the DC colors and returns the brush to paint with.
     [[nodiscard]] HBRUSH OnCtlColor(HDC dc, bool editable) const;
 
-    // Handles WM_UAHDRAWMENU, WM_UAHDRAWMENUITEM and the line under the menu bar, painting the menu
-    // bar in the panel color in both light and dark mode.
+    // Handles WM_UAHDRAWMENU, WM_UAHDRAWMENUITEM and the line under the menu bar in dark mode. The
+    // light menu bar keeps the system look.
     // Returns true when the message was fully handled and `result` is set.
     bool HandleMenuBarMessage(HWND window, UINT message, WPARAM wParam, LPARAM lParam, LRESULT& result) const;
 
