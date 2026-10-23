@@ -12,6 +12,9 @@ namespace ldm::ui {
 
 namespace {
 
+// Private to Dialog's window procedure; dialogs use no other WM_APP messages.
+constexpr UINT kBringToFrontMessage = WM_APP + 0x3F0;
+
 bool IsLink(HWND control)
 {
     wchar_t className[32] = {};
@@ -27,6 +30,23 @@ Dialog::~Dialog()
         ::SetWindowLongPtrW(window_, DWLP_USER, 0);
         ::DestroyWindow(window_);
     }
+}
+
+void Dialog::BringToFront(HWND window)
+{
+    // A dialog that opens for something outside LDM (a captured browser download, a second
+    // launch, a dropped link) must not hide behind the program the user is in. Windows allows
+    // this only when that program passed the right on; otherwise the taskbar button flashes.
+    if (::GetForegroundWindow() == window || ::SetForegroundWindow(window)) {
+        return;
+    }
+    // Refused: at least lift the dialog above other windows without taking the keyboard, so it
+    // is visible, and flash its taskbar button until the user switches to it.
+    constexpr UINT kKeepPlace = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE;
+    ::SetWindowPos(window, HWND_TOPMOST, 0, 0, 0, 0, kKeepPlace);
+    ::SetWindowPos(window, HWND_NOTOPMOST, 0, 0, 0, 0, kKeepPlace);
+    FLASHWINFO flash{sizeof(flash), window, FLASHW_ALL | FLASHW_TIMERNOFG, 0, 0};
+    ::FlashWindowEx(&flash);
 }
 
 INT_PTR Dialog::RunModal(HWND owner)
@@ -51,6 +71,11 @@ INT_PTR CALLBACK Dialog::DialogProc(HWND window, UINT message, WPARAM wParam, LP
         self->window_ = window;
         self->theme_.ApplyToTopLevel(window);
         self->theme_.ApplyToChildren(window);
+        if (self->modal_) {
+            // Posted: the dialog becomes visible only after WM_INITDIALOG, and Windows ignores
+            // a request to bring a hidden window to the front.
+            ::PostMessageW(window, kBringToFrontMessage, 0, 0);
+        }
         const bool focusDefault = self->OnInit();
         return focusDefault ? TRUE : FALSE;
     }
@@ -59,6 +84,9 @@ INT_PTR CALLBACK Dialog::DialogProc(HWND window, UINT message, WPARAM wParam, LP
         return FALSE;
     }
     switch (message) {
+    case kBringToFrontMessage:
+        BringToFront(window);
+        return TRUE;
     case WM_COMMAND:
         return self->OnCommand(LOWORD(wParam), HIWORD(wParam), reinterpret_cast<HWND>(lParam)) ? TRUE : FALSE;
     case WM_NOTIFY: {

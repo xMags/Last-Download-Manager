@@ -165,6 +165,17 @@ bool WriteNativeMessage(HANDLE output, const std::string& message)
     return WriteExact(output, header, 4) && WriteExact(output, message.data(), static_cast<DWORD>(message.size()));
 }
 
+// Windows lets only the program the user is working in bring a window to the front. That is the
+// browser, which started this host, so the host may pass the right on: LDM can then show the
+// dialog for a captured download in front of the browser instead of behind it.
+void LetLdmComeToFront(HANDLE pipe)
+{
+    ULONG ldmProcess = 0;
+    if (::GetNamedPipeServerProcessId(pipe, &ldmProcess)) {
+        ::AllowSetForegroundWindow(ldmProcess);
+    }
+}
+
 // Browser to LDM. Returns when the browser closes stdin or sends something invalid.
 ExitCode RelayFromBrowser(HANDLE input, HANDLE pipe)
 {
@@ -176,6 +187,7 @@ ExitCode RelayFromBrowser(HANDLE input, HANDLE pipe)
         if (!ldm::browser::IsValidEnvelope(*message)) {
             return ExitCode::ProtocolError;
         }
+        LetLdmComeToFront(pipe);
         if (!ldm::platform::WriteFrame(pipe, *message, ldm::browser::kMaxInboundBytes, nullptr)) {
             return ExitCode::NoLdm;
         }

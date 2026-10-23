@@ -73,14 +73,14 @@ function fakeBrowser({ stateAfterPause = 'in_progress' } = {}) {
   return { api, calls };
 }
 
-function fakeConnection({ connects = true, answer = 'accept' } = {}) {
+// Each capture goes on its own connection (oneShot); 'none' is LDM unreachable or silent.
+function fakeConnection({ answer = 'accept' } = {}) {
   const sent = [];
   return {
     sent,
     state: State.Connected,
-    connect: async ({ startLdm }) => { sent.push(['connect', startLdm]); return connects; },
-    request: async (message) => {
-      sent.push(['request', message]);
+    oneShot: async (message) => {
+      sent.push(['oneShot', message]);
       if (answer === 'none') {
         return null;
       }
@@ -106,8 +106,8 @@ test('an accepted capture cancels and erases the browser download', async () => 
   const connection = fakeConnection();
   assert.equal(await newCapture(api, connection).take(ITEM, 'x.zip'), true);
   assert.deepEqual(calls, [['ui', false], ['pause', 7], ['cancel', 7], ['erase', 7], ['ui', true]]);
-  assert.deepEqual(connection.sent[0], ['connect', true], 'LDM is started when it is not running');
-  const message = connection.sent[1][1];
+  assert.equal(connection.sent.length, 1);
+  const message = connection.sent[0][1];
   assert.equal(message.url, 'https://a.test/x.zip');
   assert.equal(message.finalUrl, 'https://cdn.test/x.zip');
   assert.equal(message.userAgent, 'TestUA');
@@ -120,14 +120,6 @@ test('a refused or unanswered capture lets the browser continue', async () => {
     assert.equal(await newCapture(api, fakeConnection({ answer })).take(ITEM, 'x.zip'), false);
     assert.deepEqual(calls, [['ui', false], ['pause', 7], ['resume', 7], ['ui', true]], answer);
   }
-});
-
-test('without LDM the browser continues', async () => {
-  const { api, calls } = fakeBrowser();
-  const connection = fakeConnection({ connects: false });
-  assert.equal(await newCapture(api, connection).take(ITEM, 'x.zip'), false);
-  assert.deepEqual(calls, [['ui', false], ['pause', 7], ['resume', 7], ['ui', true]]);
-  assert.equal(connection.sent.filter(([kind]) => kind === 'request').length, 0);
 });
 
 test('a download that already finished is left alone', async () => {
