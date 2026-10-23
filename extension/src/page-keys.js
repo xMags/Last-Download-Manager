@@ -1,8 +1,8 @@
 // Runs in every web page (checklist B-03): reports the special keys held and the links clicked to
-// the extension, and hands a link clicked with the force keys straight to LDM when the user chose
-// that web pages are forced too. A classic script, as content scripts cannot be modules, so the
-// force-key test repeats key-rules.js in a few lines. Everything it sends is checked again by the
-// background script, because page code runs beside it.
+// the extension, and hands a link clicked with the force keys to LDM instead of letting it load.
+// A classic script, as content scripts cannot be modules, so forceHeld and sendsToLdm repeat
+// key-rules.js in a few lines (extension/test/page-keys.test.mjs checks both give the same answers).
+// Everything it sends is checked again in the background, because page code runs beside it.
 (() => {
   if (globalThis.__ldmPageKeys) {
     return;
@@ -11,6 +11,7 @@
   const api = globalThis.browser ?? globalThis.chrome;
   const keys = { alt: false, shift: false, ctrl: false, insert: false, delete: false };
   let settings = null;  // the "keys" part of LDM's config
+  let enabled = true;   // the toolbar button's state
 
   const send = (message) => {
     try {
@@ -20,10 +21,16 @@
     }
   };
 
-  api.storage.local.get('config').then((stored) => { settings = stored.config?.keys ?? null; }).catch(() => {});
+  api.storage.local.get(['config', 'enabled']).then((stored) => {
+    settings = stored.config?.keys ?? null;
+    enabled = stored.enabled !== false;
+  }).catch(() => {});
   api.storage.onChanged.addListener((changes, area) => {
     if (area === 'local' && changes.config) {
       settings = changes.config.newValue?.keys ?? null;
+    }
+    if (area === 'local' && changes.enabled) {
+      enabled = changes.enabled.newValue !== false;
     }
   });
 
@@ -70,22 +77,50 @@
     return chosen.length > 0 && chosen.every((name) => pressed[name]);
   };
 
+  // Same rule as sendsForcedLinkToLdm in key-rules.js.
+  const WEB = /\.(html?|xhtml|shtml|php\d?|aspx?|jsp|cgi|pl|js|mjs|css|jpe?g|png|gif|webp|avif|bmp|ico|svg)$/i;
+  const sendsToLdm = (href) => {
+    if (settings?.skipWebContent === false) {
+      return true;
+    }
+    let path;
+    try {
+      path = new URL(href).pathname;
+    } catch {
+      return false;
+    }
+    const name = path.slice(path.lastIndexOf('/') + 1);
+    const dot = name.lastIndexOf('.');
+    return dot > 0 && dot < name.length - 1 && !WEB.test(name);
+  };
+
+  const pressedKeys = (event) => ({
+    alt: event.altKey, shift: event.shiftKey, ctrl: event.ctrlKey, insert: keys.insert, delete: keys.delete,
+  });
+
+  // Reported on the button press: the browser may start a download (Alt+click in Chrome) before
+  // the click event reaches the page.
+  addEventListener('mousedown', (event) => {
+    const href = event.button === 0 ? linkOf(event) : null;
+    if (href) {
+      send({ type: 'link-click', href, pageUrl: location.href, keys: pressedKeys(event) });
+    }
+  }, true);
+
+  // A file link clicked with the force keys goes to LDM instead of loading. Other links load as
+  // usual; a download they start is forced when it starts. If LDM cannot take the link, the page
+  // opens it after all.
   addEventListener('click', (event) => {
-    if (event.button !== 0) {
+    const href = event.button === 0 ? linkOf(event) : null;
+    if (!enabled || !href || !forceHeld(pressedKeys(event)) || !/^(https?|ftps?):/i.test(href) || !sendsToLdm(href)) {
       return;
     }
-    const href = linkOf(event);
-    if (!href) {
-      return;
-    }
-    const pressed = { alt: event.altKey, shift: event.shiftKey, ctrl: event.ctrlKey, insert: keys.insert, delete: keys.delete };
-    send({ type: 'link-click', href, pageUrl: location.href, keys: pressed });
-    // With "let the browser keep web pages" cleared, the forced link goes to LDM instead of loading.
-    if (settings && settings.skipWebContent === false && settings.forceNeedsLinkClick !== false &&
-        forceHeld(pressed) && /^(https?|ftps?):/i.test(href)) {
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      send({ type: 'force-link', href, pageUrl: location.href });
-    }
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    api.runtime.sendMessage({ type: 'force-link', href, pageUrl: location.href }).then((answer) => {
+      if (answer?.handled !== true) {
+        location.assign(href);
+      }
+    }).catch(() => location.assign(href));
   }, true);
 })();

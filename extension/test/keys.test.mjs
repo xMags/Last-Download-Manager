@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { downloadVerdict, isWebContent, keySettings, keyVerdict, NO_KEYS } from '../src/key-rules.js';
+import { downloadVerdict, isWebContent, keySettings, keyVerdict, NO_KEYS, sendsForcedLinkToLdm } from '../src/key-rules.js';
 import { cleanKeys, LinkClicks } from '../src/link-clicks.js';
 
 const defaults = keySettings({});
@@ -78,4 +78,14 @@ test('held keys expire when a page stops reporting', () => {
 test('key reports from pages keep only five booleans', () => {
   assert.deepEqual(cleanKeys({ alt: 'true', shift: true, extra: true }), keys({ shift: true }));
   assert.deepEqual(cleanKeys(null), NO_KEYS);
+});
+
+test('forced links go straight to LDM only when they are files, unless web pages are forced too', () => {
+  assert.equal(sendsForcedLinkToLdm(defaults, 'https://a.test/notes.txt'), true);
+  assert.equal(sendsForcedLinkToLdm(defaults, 'https://a.test/a.zip?x=1'), true);
+  assert.equal(sendsForcedLinkToLdm(defaults, 'https://a.test/page.html'), false);
+  assert.equal(sendsForcedLinkToLdm(defaults, 'https://a.test/download?id=3'), false, 'no extension: may be a page');
+  assert.equal(sendsForcedLinkToLdm(defaults, 'https://a.test/'), false);
+  assert.equal(sendsForcedLinkToLdm(keySettings({ keys: { skipWebContent: false } }), 'https://a.test/page.html'), true);
+  assert.ok(!isWebContent('text/plain', 'notes.txt'), 'text files are files');
 });
