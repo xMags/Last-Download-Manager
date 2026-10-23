@@ -7,6 +7,7 @@
 #include <commctrl.h>
 #include <windowsx.h>
 
+#include <algorithm>
 #include <array>
 
 namespace ldm::ui {
@@ -19,6 +20,12 @@ enum Image {
     kImageUnfinished,
     kImageFinished,
 };
+
+constexpr wchar_t kCloseGlyph = 0xE8BB;  // ChromeClose
+constexpr int kHeaderHeight96 = 28;
+constexpr int kCloseButton96 = 22;
+constexpr int kCloseGlyph96 = 10;
+constexpr int kTreeItemHeight96 = 24;
 
 constexpr std::array<Glyph, 4> kTreeGlyphs{{
     {0xE896, RGB(0x1E, 0x88, 0xE5)},
@@ -48,13 +55,14 @@ void CategoryPane::Create(HWND parent, Callbacks callbacks)
     const HINSTANCE instance = ::GetModuleHandleW(nullptr);
     label_ = ::CreateWindowExW(0, WC_STATICW, L"Categories", WS_CHILD | WS_VISIBLE | SS_LEFT | SS_CENTERIMAGE, 0, 0, 0, 0,
                                parent, nullptr, instance, nullptr);
-    closeButton_ = ::CreateWindowExW(0, WC_BUTTONW, L"✕", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | BS_FLAT, 0, 0, 0, 0,
+    closeButton_ = ::CreateWindowExW(0, WC_BUTTONW, L"Hide categories", WS_CHILD | WS_VISIBLE | BS_OWNERDRAW, 0, 0, 0, 0,
                                      parent, nullptr, instance, nullptr);
+    // Root buttons stay visible (no fade), so Unfinished and Finished show that they open.
     tree_ = ::CreateWindowExW(0, WC_TREEVIEWW, nullptr,
-                              WS_CHILD | WS_VISIBLE | WS_TABSTOP | TVS_HASBUTTONS | TVS_SHOWSELALWAYS |
+                              WS_CHILD | WS_VISIBLE | WS_TABSTOP | TVS_HASBUTTONS | TVS_LINESATROOT | TVS_SHOWSELALWAYS |
                                   TVS_FULLROWSELECT | TVS_TRACKSELECT,
                               0, 0, 0, 0, parent, nullptr, instance, nullptr);
-    TreeView_SetExtendedStyle(tree_, TVS_EX_DOUBLEBUFFER | TVS_EX_FADEINOUTEXPANDOS, TVS_EX_DOUBLEBUFFER | TVS_EX_FADEINOUTEXPANDOS);
+    TreeView_SetExtendedStyle(tree_, TVS_EX_DOUBLEBUFFER, TVS_EX_DOUBLEBUFFER | TVS_EX_FADEINOUTEXPANDOS);
     images_ = CreateGlyphImageList(kTreeGlyphs, Scale(16, DpiOf(tree_)));
     TreeView_SetImageList(tree_, images_.get(), TVSIL_NORMAL);
 }
@@ -144,12 +152,47 @@ ListFilter CategoryPane::Selected() const
 
 void CategoryPane::ApplyTheme(const Theme& theme)
 {
+    theme_ = &theme;
+    const UINT dpi = DpiOf(tree_);
     theme.ApplyToControl(tree_);
-    theme.ApplyToControl(closeButton_);
     TreeView_SetBkColor(tree_, theme.Colors().window);
     TreeView_SetTextColor(tree_, theme.Colors().text);
-    images_ = CreateGlyphImageList(kTreeGlyphs, Scale(16, DpiOf(tree_)));
+    images_ = CreateGlyphImageList(kTreeGlyphs, Scale(16, dpi));
     TreeView_SetImageList(tree_, images_.get(), TVSIL_NORMAL);
+    TreeView_SetItemHeight(tree_, Scale(kTreeItemHeight96, dpi));
+    closeIcon_ = CreateGlyphIcon(Glyph{kCloseGlyph, theme.Colors().mutedText}, Scale(kCloseGlyph96, dpi));
+    ::InvalidateRect(label_, nullptr, TRUE);
+    ::InvalidateRect(closeButton_, nullptr, TRUE);
+}
+
+HBRUSH CategoryPane::OnCtlColor(HWND control, HDC dc) const
+{
+    if (control != label_ || theme_ == nullptr) {
+        return nullptr;
+    }
+    ::SetTextColor(dc, theme_->Colors().text);
+    ::SetBkColor(dc, theme_->Colors().window);
+    return theme_->WindowBrush();
+}
+
+bool CategoryPane::DrawItem(const DRAWITEMSTRUCT& draw) const
+{
+    if (draw.hwndItem != closeButton_ || theme_ == nullptr) {
+        return false;
+    }
+    const bool pressed = (draw.itemState & ODS_SELECTED) != 0;
+    UniqueBrush pressedBrush(::CreateSolidBrush(theme_->Colors().divider));
+    ::FillRect(draw.hDC, &draw.rcItem, pressed ? pressedBrush.get() : theme_->WindowBrush());
+    const int glyph = Scale(kCloseGlyph96, DpiOf(closeButton_));
+    const int x = (draw.rcItem.left + draw.rcItem.right - glyph) / 2;
+    const int y = (draw.rcItem.top + draw.rcItem.bottom - glyph) / 2;
+    ::DrawIconEx(draw.hDC, x, y, closeIcon_.get(), glyph, glyph, 0, nullptr, DI_NORMAL);
+    if ((draw.itemState & ODS_FOCUS) != 0 && (draw.itemState & ODS_NOFOCUSRECT) == 0) {
+        RECT focus = draw.rcItem;
+        ::InflateRect(&focus, -2, -2);
+        ::DrawFocusRect(draw.hDC, &focus);
+    }
+    return true;
 }
 
 void CategoryPane::SetFont(HFONT font)
@@ -162,12 +205,12 @@ void CategoryPane::SetFont(HFONT font)
 void CategoryPane::Layout(const RECT& area)
 {
     const UINT dpi = DpiOf(tree_);
-    const int headerHeight = Scale(24, dpi);
-    const int buttonSize = Scale(20, dpi);
-    const int margin = Scale(4, dpi);
+    const int headerHeight = Scale(kHeaderHeight96, dpi);
+    const int buttonSize = Scale(kCloseButton96, dpi);
+    const int margin = Scale(8, dpi);
     const int width = area.right - area.left;
-    ::MoveWindow(label_, area.left + margin, area.top, width - buttonSize - 2 * margin, headerHeight, TRUE);
-    ::MoveWindow(closeButton_, area.right - buttonSize - margin / 2, area.top + (headerHeight - buttonSize) / 2, buttonSize,
+    ::MoveWindow(label_, area.left + margin, area.top, std::max(0, width - buttonSize - 2 * margin), headerHeight, TRUE);
+    ::MoveWindow(closeButton_, area.right - buttonSize - Scale(4, dpi), area.top + (headerHeight - buttonSize) / 2, buttonSize,
                  buttonSize, TRUE);
     ::MoveWindow(tree_, area.left, area.top + headerHeight, width, area.bottom - area.top - headerHeight, TRUE);
 }

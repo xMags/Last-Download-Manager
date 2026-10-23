@@ -19,6 +19,7 @@ namespace {
 constexpr wchar_t kClassName[] = L"LdmMainWindow";
 constexpr int kToolbarId = 100;
 constexpr int kSplitterWidth96 = 5;
+constexpr int kDividerPx = 1;  // hairlines stay one physical pixel at every DPI
 constexpr int kMinimumTreeWidth96 = 120;
 constexpr int kMinimumListWidth96 = 200;
 constexpr UINT kSaveLayoutMessage = WM_APP + 10;
@@ -333,7 +334,7 @@ RECT MainWindow::SplitterRect() const
     RECT client{};
     ::GetClientRect(window_, &client);
     const UINT dpi = DpiOf(window_);
-    const int top = toolbar_.PreferredHeight();
+    const int top = ContentTop();
     const int bottom = client.bottom - status_.PreferredHeight();
     const int x = Scale(treeWidth96_, dpi);
     return RECT{x, top, x + Scale(kSplitterWidth96, dpi), bottom};
@@ -344,6 +345,8 @@ void MainWindow::Layout()
     if (window_ == nullptr || toolbar_.Handle() == nullptr || list_.Handle() == nullptr) {
         return;
     }
+    // The gaps between children (hairlines, splitter) move with the layout.
+    ::InvalidateRect(window_, nullptr, FALSE);
     RECT client{};
     ::GetClientRect(window_, &client);
     const UINT dpi = DpiOf(window_);
@@ -351,7 +354,7 @@ void MainWindow::Layout()
     const int statusHeight = status_.PreferredHeight();
     ::MoveWindow(toolbar_.Handle(), 0, 0, client.right, toolbarHeight, TRUE);
     ::MoveWindow(status_.Handle(), 0, client.bottom - statusHeight, client.right, statusHeight, TRUE);
-    const int top = toolbarHeight;
+    const int top = ContentTop();
     const int bottom = client.bottom - statusHeight;
     if (categoriesHidden_) {
         ::MoveWindow(list_.Handle(), 0, top, client.right, bottom - top, TRUE);
@@ -362,6 +365,35 @@ void MainWindow::Layout()
     const int splitter = Scale(kSplitterWidth96, dpi);
     categories_.Layout(RECT{0, top, treeWidth, bottom});
     ::MoveWindow(list_.Handle(), treeWidth + splitter, top, client.right - treeWidth - splitter, bottom - top, TRUE);
+}
+
+int MainWindow::ContentTop() const
+{
+    return toolbar_.PreferredHeight() + kDividerPx;
+}
+
+void MainWindow::Paint()
+{
+    PAINTSTRUCT paint{};
+    const HDC dc = ::BeginPaint(window_, &paint);
+    RECT client{};
+    ::GetClientRect(window_, &client);
+    const int toolbarHeight = toolbar_.Handle() != nullptr ? toolbar_.PreferredHeight() : 0;
+    const int statusTop = client.bottom - (status_.Handle() != nullptr ? status_.PreferredHeight() : 0);
+    // Children clip themselves (WS_CLIPCHILDREN): this only reaches the gaps between them.
+    RECT content{0, toolbarHeight, client.right, statusTop};
+    ::FillRect(dc, &content, theme_->WindowBrush());
+    UniqueBrush divider(::CreateSolidBrush(theme_->Colors().divider));
+    RECT underToolbar{0, toolbarHeight, client.right, toolbarHeight + kDividerPx};
+    ::FillRect(dc, &underToolbar, divider.get());
+    if (!categoriesHidden_ && list_.Handle() != nullptr) {
+        RECT listRect{};
+        ::GetWindowRect(list_.Handle(), &listRect);
+        ::MapWindowPoints(nullptr, window_, reinterpret_cast<POINT*>(&listRect), 2);
+        RECT splitter{listRect.left - kDividerPx, toolbarHeight + kDividerPx, listRect.left, statusTop};
+        ::FillRect(dc, &splitter, divider.get());
+    }
+    ::EndPaint(window_, &paint);
 }
 
 void MainWindow::ApplySnapshot(std::shared_ptr<const core::Snapshot> snapshot)
@@ -450,6 +482,14 @@ LRESULT MainWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
     case WM_SIZE:
         Layout();
         return 0;
+    case WM_PAINT:
+        Paint();
+        return 0;
+    case WM_DRAWITEM:
+        if (categories_.DrawItem(*reinterpret_cast<const DRAWITEMSTRUCT*>(lParam))) {
+            return TRUE;
+        }
+        break;
     case WM_GETMINMAXINFO: {
         auto* info = reinterpret_cast<MINMAXINFO*>(lParam);
         const UINT dpi = window_ != nullptr ? DpiOf(window_) : USER_DEFAULT_SCREEN_DPI;
@@ -510,6 +550,9 @@ LRESULT MainWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         return 0;
     case WM_CTLCOLORSTATIC:
     case WM_CTLCOLORBTN:
+        if (const HBRUSH brush = categories_.OnCtlColor(reinterpret_cast<HWND>(lParam), reinterpret_cast<HDC>(wParam))) {
+            return reinterpret_cast<LRESULT>(brush);
+        }
         if (theme_) {
             return reinterpret_cast<LRESULT>(theme_->OnCtlColor(reinterpret_cast<HDC>(wParam), false));
         }
