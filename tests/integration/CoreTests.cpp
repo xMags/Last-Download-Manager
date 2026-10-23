@@ -1,6 +1,6 @@
 // The full core stack against the HTTP fixture: core thread, coordinator, real engine, SQLite on
 // disk and the Windows file system. Covers design section 9 items 2 and 3: correct files after
-// pause, resume and restart, and seeded random command races.
+// pause, resume, restart and a forced process kill, and seeded random command races.
 #include "FixtureServer.h"
 
 #include "base/Utf.h"
@@ -11,16 +11,22 @@
 #include "storage/SqliteStore.h"
 
 #include <gtest/gtest.h>
+#include <windows.h>
 
+#include <algorithm>
+#include <charconv>
 #include <chrono>
 #include <condition_variable>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <functional>
 #include <map>
 #include <mutex>
+#include <optional>
 #include <random>
 #include <set>
+#include <string_view>
 #include <thread>
 
 namespace {
@@ -104,10 +110,14 @@ private:
     std::vector<ldm::core::Notification> notifications_;
 };
 
+// Production keeps ldm.exe's flush and checkpoint intervals (2 seconds each); Fast shortens them so
+// tests reach durable progress sooner.
+enum class Timing { Fast, Production };
+
 // One running instance of the core: what ldm.exe builds in its composition root, minus the UI.
 class CoreStack {
 public:
-    CoreStack(const fs::path& database, const fs::path& downloads)
+    CoreStack(const fs::path& database, const fs::path& downloads, Timing timing = Timing::Fast)
     {
         auto store = ldm::storage::SqliteStore::Open(ldm::base::ToUtf8(database.wstring()));
         if (!store) {
@@ -115,7 +125,9 @@ public:
         }
         store_ = std::make_unique<ldm::storage::SqliteStore>(std::move(store).Value());
         ldm::engine::EngineOptions options;
-        options.flushInterval = 200ms;
+        if (timing == Timing::Fast) {
+            options.flushInterval = 200ms;
+        }
         engine_ = std::make_unique<ldm::engine::CurlEngine>(core_, options);
         ldm::core::CoordinatorPorts ports;
         ports.store = store_.get();
@@ -129,7 +141,9 @@ public:
         ports.proxy = &proxy_;
         ldm::core::CoordinatorConfig config;
         config.downloadsFolder = downloads;
-        config.checkpointInterval = 300ms;
+        if (timing == Timing::Fast) {
+            config.checkpointInterval = 300ms;
+        }
         coordinator_ = std::make_unique<ldm::core::Coordinator>(ports, config);
         const auto started = core_.Start(*coordinator_);
         if (!started) {
@@ -189,6 +203,84 @@ const ldm::core::DownloadView* FindView(const ldm::core::Snapshot& snapshot, Dow
         }
     }
     return nullptr;
+}
+
+class UniqueHandle {
+public:
+    explicit UniqueHandle(HANDLE handle = nullptr) noexcept : handle_(handle) {}
+    ~UniqueHandle() { Reset(); }
+    UniqueHandle(const UniqueHandle&) = delete;
+    UniqueHandle& operator=(const UniqueHandle&) = delete;
+
+    void Reset() noexcept
+    {
+        if (handle_ != nullptr && handle_ != INVALID_HANDLE_VALUE) {
+            ::CloseHandle(handle_);
+        }
+        handle_ = nullptr;
+    }
+    [[nodiscard]] HANDLE Get() const noexcept { return handle_; }
+    [[nodiscard]] HANDLE* Out() noexcept { return &handle_; }
+
+private:
+    HANDLE handle_;
+};
+
+// The forced-kill test starts a second copy of this executable that runs only the worker test
+// below, then kills it. The worker learns its folder and address from these variables and reports
+// its durable progress on stdout in lines starting with kWorkerPrefix.
+constexpr wchar_t kWorkerRootVariable[] = L"LDM_KILL_WORKER_ROOT";
+constexpr wchar_t kWorkerUrlVariable[] = L"LDM_KILL_WORKER_URL";
+constexpr std::string_view kWorkerPrefix = "ldm-kill-worker durable=";
+constexpr UINT kKilledExitCode = 0xDEAD;
+
+std::optional<std::wstring> EnvironmentValue(const wchar_t* name)
+{
+    const DWORD length = ::GetEnvironmentVariableW(name, nullptr, 0);
+    if (length == 0) {
+        return std::nullopt;
+    }
+    std::wstring value(length, L'\0');
+    value.resize(::GetEnvironmentVariableW(name, value.data(), length));
+    return value;
+}
+
+// Disabled, so it runs only when CoreTest.ForcedKillAndRestartResumes starts it in a child process.
+TEST(CoreKillWorker, DISABLED_Run)
+{
+    const auto root = EnvironmentValue(kWorkerRootVariable);
+    const auto url = EnvironmentValue(kWorkerUrlVariable);
+    if (!root || !url) {
+        GTEST_SKIP() << "runs only as the child process of CoreTest.ForcedKillAndRestartResumes";
+    }
+    // ldm.exe's own intervals, so the kill leaves what a real crash would: a checkpoint up to two
+    // seconds old and written but unflushed data in the partial file.
+    CoreStack stack(fs::path(*root) / "ldm.sqlite3", fs::path(*root) / "downloads", Timing::Production);
+    stack.Post(ldm::core::SetSpeedLimiterCommand{true, 256});  // the kill lands mid-transfer
+    const auto added = stack.observer.WaitAdd(stack.Add(ldm::base::ToUtf8(*url)));
+    ASSERT_TRUE(added && added->id);
+    const DownloadId id = *added->id;
+    std::int64_t reported = -1;
+    const auto deadline = std::chrono::steady_clock::now() + 120s;
+    while (std::chrono::steady_clock::now() < deadline) {
+        (void)stack.observer.WaitSnapshot(
+            [id, reported](const auto& snapshot) {
+                const auto* view = FindView(snapshot, id);
+                return view && view->download.DownloadedBytes() != reported;
+            },
+            1s);
+        const auto snapshot = stack.observer.Latest();
+        const auto* view = snapshot ? FindView(*snapshot, id) : nullptr;
+        if (view == nullptr || view->download.DownloadedBytes() == reported) {
+            continue;
+        }
+        ASSERT_NE(view->download.status, DownloadStatus::Completed) << "finished before the kill";
+        reported = view->download.DownloadedBytes();
+        std::printf("%.*s%lld\n", static_cast<int>(kWorkerPrefix.size()), kWorkerPrefix.data(),
+                    static_cast<long long>(reported));
+        std::fflush(stdout);
+    }
+    FAIL() << "the worker was not killed";
 }
 
 class CoreTest : public ::testing::Test {
@@ -351,6 +443,112 @@ TEST_F(CoreTest, AbruptExitKeepsOnlyDurableProgress)
             60s));
     }
     EXPECT_TRUE(HoldsPayload(root_ / "downloads" / "Programs" / "range.bin"));
+}
+
+// Design section 9 item 2 and checklist ENG-09: the process doing the work is killed with
+// TerminateProcess, so none of its shutdown code runs, then the core restarts on the same database
+// and folder, resumes, and must produce the exact payload.
+TEST_F(CoreTest, ForcedKillAndRestartResumes)
+{
+    std::wstring self(MAX_PATH, L'\0');
+    self.resize(::GetModuleFileNameW(nullptr, self.data(), static_cast<DWORD>(self.size())));
+    ASSERT_FALSE(self.empty());
+
+    SECURITY_ATTRIBUTES inherit{sizeof(inherit), nullptr, TRUE};
+    UniqueHandle stdoutRead;
+    UniqueHandle stdoutWrite;
+    ASSERT_TRUE(::CreatePipe(stdoutRead.Out(), stdoutWrite.Out(), &inherit, 0));
+    ::SetHandleInformation(stdoutRead.Get(), HANDLE_FLAG_INHERIT, 0);
+
+    // The job kills the worker if this test fails before it does.
+    UniqueHandle job(::CreateJobObjectW(nullptr, nullptr));
+    ASSERT_NE(job.Get(), nullptr);
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
+    limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+    ASSERT_TRUE(::SetInformationJobObject(job.Get(), JobObjectExtendedLimitInformation, &limits, sizeof(limits)));
+
+    std::wstring commandLine =
+        L"\"" + self + L"\" --gtest_filter=CoreKillWorker.DISABLED_Run --gtest_also_run_disabled_tests";
+    STARTUPINFOW startup{};
+    startup.cb = sizeof(startup);
+    startup.dwFlags = STARTF_USESTDHANDLES;
+    startup.hStdInput = ::GetStdHandle(STD_INPUT_HANDLE);
+    startup.hStdOutput = stdoutWrite.Get();
+    startup.hStdError = ::GetStdHandle(STD_ERROR_HANDLE);
+    PROCESS_INFORMATION started{};
+    ::SetEnvironmentVariableW(kWorkerRootVariable, root_.c_str());
+    ::SetEnvironmentVariableW(kWorkerUrlVariable, ldm::base::ToUtf16(server_->Url("/range.bin")).c_str());
+    const BOOL created = ::CreateProcessW(nullptr, commandLine.data(), nullptr, nullptr, TRUE,
+                                          CREATE_NO_WINDOW | CREATE_SUSPENDED, nullptr, nullptr, &startup, &started);
+    const DWORD createError = ::GetLastError();
+    ::SetEnvironmentVariableW(kWorkerRootVariable, nullptr);
+    ::SetEnvironmentVariableW(kWorkerUrlVariable, nullptr);
+    ASSERT_TRUE(created) << "could not start the worker, error " << createError;
+    UniqueHandle worker(started.hProcess);
+    UniqueHandle workerThread(started.hThread);
+    ASSERT_TRUE(::AssignProcessToJobObject(job.Get(), worker.Get()));
+    ::ResumeThread(workerThread.Get());
+    stdoutWrite.Reset();  // only the worker holds the write end now, so its exit ends the pipe
+
+    // Kill once at least 1 MiB is durable, so the restart has real progress to resume from.
+    std::string output;
+    std::int64_t durable = 0;
+    const auto deadline = std::chrono::steady_clock::now() + 60s;
+    while (durable < 1024 * 1024 && std::chrono::steady_clock::now() < deadline) {
+        DWORD available = 0;
+        if (!::PeekNamedPipe(stdoutRead.Get(), nullptr, 0, nullptr, &available, nullptr)) {
+            break;  // the worker exited on its own
+        }
+        if (available == 0) {
+            std::this_thread::sleep_for(20ms);
+            continue;
+        }
+        char chunk[4096];
+        DWORD read = 0;
+        if (!::ReadFile(stdoutRead.Get(), chunk, std::min<DWORD>(available, sizeof(chunk)), &read, nullptr)) {
+            break;
+        }
+        output.append(chunk, read);
+        for (size_t at = output.find(kWorkerPrefix); at != std::string::npos; at = output.find(kWorkerPrefix, at + 1)) {
+            const char* begin = output.data() + at + kWorkerPrefix.size();
+            std::int64_t value = 0;
+            if (std::from_chars(begin, output.data() + output.size(), value).ec == std::errc()) {
+                durable = std::max(durable, value);
+            }
+        }
+    }
+    ASSERT_GE(durable, 1024 * 1024) << "worker output:\n" << output;
+    ASSERT_TRUE(::TerminateProcess(worker.Get(), kKilledExitCode));
+    ASSERT_EQ(::WaitForSingleObject(worker.Get(), 10000), WAIT_OBJECT_0);
+    DWORD exitCode = 0;
+    ASSERT_TRUE(::GetExitCodeProcess(worker.Get(), &exitCode));
+    ASSERT_EQ(exitCode, kKilledExitCode) << "the worker ended on its own:\n" << output;
+    EXPECT_FALSE(PartialFiles().empty());
+
+    auto stack = Launch();
+    const auto restored = stack->observer.Latest();
+    ASSERT_TRUE(restored);
+    ASSERT_EQ(restored->downloads.size(), 1u);
+    const auto& download = restored->downloads.front()->download;
+    const DownloadId id = download.id;
+    EXPECT_EQ(download.status, DownloadStatus::Paused);
+    EXPECT_GT(download.DownloadedBytes(), 0);
+    EXPECT_LT(download.DownloadedBytes(), server_->Size());
+    stack->Post(ldm::core::SetSpeedLimiterCommand{false, std::nullopt});  // the worker turned it on
+    stack->Post(ldm::core::ResumeCommand{{id}});
+    ASSERT_TRUE(stack->observer.WaitSnapshot(
+        [id](const auto& s) {
+            const auto* v = FindView(s, id);
+            return v && v->download.status == DownloadStatus::Completed;
+        },
+        60s));
+    const auto finished = stack->observer.Latest();
+    const auto* view = FindView(*finished, id);
+    ASSERT_NE(view, nullptr);
+    EXPECT_TRUE(HoldsPayload(fs::path(ldm::base::ToUtf16(view->download.saveDir)) /
+                             ldm::base::ToUtf16(view->download.fileName)));
+    EXPECT_TRUE(PartialFiles().empty());
+    EXPECT_TRUE(stack->observer.Errors().empty());
 }
 
 // Seeded random stop, resume, delete and redownload commands during transfers. Whatever the
