@@ -480,8 +480,10 @@ bool Transfer::AcceptFirstResponse(Connection& connection, Segment& segment)
     finalUrl_ = EffectiveUrl(easy, request_.url);
     const std::optional<std::string> contentType = http_ ? headers.contentType : std::nullopt;
     if (IsUnexpectedHtml(finalUrl_, contentType, request_.knownContentType)) {
+        // IsUnexpectedHtml returns true only with a type; the detail names it, since the reason
+        // already says what happened.
         connection.failure = MakeFailure(FailureReason::HtmlInsteadOfFile, FailureClass::Fatal,
-                                         "the server sent a web page instead of the file");
+                                         "Content-Type " + contentType->substr(0, 100));
         return false;
     }
 
