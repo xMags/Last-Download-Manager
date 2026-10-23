@@ -241,6 +241,8 @@ void AddFlow::AddWithInfoDialog(InfoDialogInput input)
         command.loginPassword = password;
         command.mode = core::AddMode::Speculative;
         command.duplicatePolicy = duplicatePolicy;
+        command.saveDir = input.saveDir;  // a folder or name the dialog does not let the user change
+        command.fileName = input.fileName;
         ApplyBrowserRequest(input.browser, command);
         pendingAdds_[token] = PendingAdd{token};
         Post(std::move(command));

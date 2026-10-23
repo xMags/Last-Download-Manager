@@ -79,6 +79,7 @@ private:
         bool finalizing = false;        // a Finalize for download.epoch has not answered
         bool userNamed = false;         // the user chose the name; server names do not replace it
         bool userChoseCategory = false;
+        bool userChoseFolder = false;   // the save folder was given; a server name does not move it
         bool deleteWhenStopped = false;
         bool deleteFilesWhenStopped = false;
         bool restartWhenStopped = false;

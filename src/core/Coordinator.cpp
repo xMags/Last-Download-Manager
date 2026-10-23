@@ -452,6 +452,7 @@ void Coordinator::Add(const AddDownloadCommand& command)
     entry.download = std::move(download);
     entry.userNamed = command.fileName.has_value() || overwriteName.has_value();
     entry.userChoseCategory = command.categoryId.has_value();
+    entry.userChoseFolder = command.saveDir.has_value();
     entry.replaceFinalFile = replaceFinal;
     entry.lastCheckpoint = ports_.clock->Steady();
     const model::DownloadId id = entry.download.id;
@@ -1024,7 +1025,9 @@ void Coordinator::OnResponseInfo(Entry& entry, const ResponseInfo& info)
                 if (const auto url = ParseUrl(d.url)) {
                     const model::CategoryId category = CategoryFor(name, *url);
                     d.categoryId = category;
-                    d.saveDir = FolderFor(category);
+                    if (!entry.userChoseFolder) {
+                        d.saveDir = FolderFor(category);
+                    }
                 }
             }
             if (auto unique = UniqueFileName(PathFromUtf8(d.saveDir), name, d.id)) {

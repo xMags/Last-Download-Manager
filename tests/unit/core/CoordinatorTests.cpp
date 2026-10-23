@@ -619,6 +619,24 @@ TEST_F(CoordinatorTest, SpeculativeAddFollowsServerNameUntilConfirmed)
     EXPECT_FALSE(View(id).awaitingConfirmation);
 }
 
+TEST_F(CoordinatorTest, SpeculativeAddKeepsAGivenFolderWhenTheServerNamesTheFile)
+{
+    const fs::path folder = kRoot / L"Chosen";
+    const DownloadId id = *Add("http://x.test/download?id=1", AddMode::Speculative, [&](AddDownloadCommand& c) {
+                              c.saveDir = ldm::base::ToUtf8(folder.wstring());
+                          }).id;
+    ASSERT_EQ(engine_.starts.size(), 1u);
+    EXPECT_EQ(engine_.starts.back().partialPath.parent_path(), folder);
+
+    ResponseInfo info;
+    info.finalUrl = "http://x.test/download?id=1";
+    info.totalSize = 10;
+    info.fileName = "movie.mkv";
+    Send(id, 1, info);
+    EXPECT_EQ(View(id).download.fileName, "movie.mkv");
+    EXPECT_EQ(ldm::base::ToUtf16(View(id).download.saveDir), folder.wstring());
+}
+
 TEST_F(CoordinatorTest, UnconfirmedSpeculativeAddIsRemovedAfterACrash)
 {
     const DownloadId id = *Add("http://x.test/a.iso", AddMode::Speculative).id;
