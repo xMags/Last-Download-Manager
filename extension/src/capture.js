@@ -134,11 +134,15 @@ export class DownloadCapture {
     return isAcceptedCapture(await this.connection.oneShot(message, ANSWER_TIMEOUT_MS), message.id);
   }
 
-  /** @private Pauses the download; false when it is no longer running. */
+  /**
+   * @private Pauses the download; false when it is no longer running. Chrome reports a paused
+   * download as 'in_progress', Firefox as 'interrupted' with `paused` set (a failed one is
+   * 'interrupted' without it).
+   */
   async pause(id) {
     await this.api.downloads.pause(id).catch(() => {});
     const [current] = await this.api.downloads.search({ id });
-    return current?.state === 'in_progress';
+    return current?.state === 'in_progress' || current?.paused === true;
   }
 
   /** @private */
