@@ -27,8 +27,9 @@ export function classifyDisconnect(errorText) {
 export class LdmConnection {
   /**
    * @param {object} api the extension API object
-   * @param {{onConfig: function, onState: function, helloInfo: function(): Promise<object>}} hooks
-   *   helloInfo supplies the browser fields of the hello.
+   * @param {{onConfig: function, onState: function, helloInfo: function(): Promise<object>,
+   *          onMessage?: function(object)}} hooks
+   *   helloInfo supplies the browser fields of the hello; onMessage gets what LDM sends unasked.
    */
   constructor(api, hooks) {
     this.api = api;
@@ -215,7 +216,9 @@ export class LdmConnection {
         if (answer) {
           this.pending.delete(message.id);
           answer(message);
+          return;
         }
+        this.hooks.onMessage?.(message);
       });
       port.onDisconnect.addListener((disconnected) => {
         // Chrome reports through runtime.lastError, Firefox through port.error.

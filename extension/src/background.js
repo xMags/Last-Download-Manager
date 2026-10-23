@@ -39,6 +39,14 @@ const connection = new LdmConnection(api, {
       updateMenu();
     }
   },
+  onMessage: (message) => {
+    // Refresh download address (checklist ENG-08): LDM asks to open the page a download came from.
+    if (message?.type === 'open-page' && isDownloadAddress(message.url) && /^https?:/i.test(message.url)) {
+      api.tabs.create({ url: message.url, active: true })
+        .then((tab) => api.windows?.update(tab.windowId, { focused: true }))
+        .catch((error) => console.warn('LDM: could not open the page', error));
+    }
+  },
   onState: (state) => {
     render();
     if (state === State.Connected || state === State.Connecting) {
@@ -99,11 +107,10 @@ async function onMenuClick(info, tab) {
     case MenuId.Link:
     case MenuId.Page: {
       const href = clickedAddress(info);
-      if (tab?.incognito) {
-        tell(tab, LinksMessage.Private);
-      } else if (!isDownloadAddress(href)) {
+      if (!isDownloadAddress(href)) {
         tell(tab, 'Last Download Manager cannot download this address: it is only valid inside this page.');
-      } else if (!(await capture.sendLink(href, isDownloadAddress(info.pageUrl) ? info.pageUrl : undefined, { chosen: true }))) {
+      } else if (!(await capture.sendLink(href, isDownloadAddress(info.pageUrl) ? info.pageUrl : undefined,
+        { chosen: true, tab }))) {
         tell(tab, LinksMessage.NoContact);
       }
       break;
@@ -198,7 +205,7 @@ function onPageMessage(message, sender, reply) {
         reply({ handled: false });
         return false;
       }
-      capture.sendLink(message.href, isDownloadAddress(pageUrl) ? pageUrl : undefined)
+      capture.sendLink(message.href, isDownloadAddress(pageUrl) ? pageUrl : undefined, { tab: sender.tab })
         .then((accepted) => reply({ handled: accepted }))
         .catch(() => reply({ handled: false }));
       return true;
