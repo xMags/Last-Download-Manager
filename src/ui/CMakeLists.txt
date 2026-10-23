@@ -1,3 +1,5 @@
+find_package(nlohmann_json CONFIG REQUIRED)
+
 add_library(ldm_ui STATIC
     AddFlow.cpp
     AddFlow.h
@@ -7,6 +9,8 @@ add_library(ldm_ui STATIC
     CategoryPane.h
     Clipboard.cpp
     Clipboard.h
+    ClipboardMonitor.cpp
+    ClipboardMonitor.h
     CommandState.cpp
     CommandState.h
     Dialog.cpp
@@ -15,6 +19,10 @@ add_library(ldm_ui STATIC
     Dpi.h
     DownloadListView.cpp
     DownloadListView.h
+    DropTargetWindow.cpp
+    DropTargetWindow.h
+    ExportFormat.cpp
+    ExportFormat.h
     FileDialogs.cpp
     FileDialogs.h
     Format.cpp
@@ -24,6 +32,8 @@ add_library(ldm_ui STATIC
     Handles.h
     History.cpp
     History.h
+    ImportExportFlow.cpp
+    ImportExportFlow.h
     ListModel.cpp
     ListModel.h
     MainController.cpp
@@ -70,6 +80,6 @@ add_library(ldm_ui STATIC
     dialogs/PropertiesDialog.h)
 target_link_libraries(ldm_ui
     PUBLIC ldm_core
-    PRIVATE comctl32 uxtheme dwmapi shell32 comdlg32)
+    PRIVATE nlohmann_json::nlohmann_json comctl32 uxtheme dwmapi shell32 comdlg32 ole32 shcore)
 target_include_directories(ldm_ui PRIVATE ${PROJECT_SOURCE_DIR}/resources)
 target_compile_definitions(ldm_ui PRIVATE "LDM_VERSION_WIDE=L\"${PROJECT_VERSION}\"")

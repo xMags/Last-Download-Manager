@@ -2,7 +2,9 @@
 #include "base/Utf.h"
 #include "core/Coordinator.h"
 #include "core/CoreThread.h"
+#include "core/LaunchRequest.h"
 #include "engine/CurlEngine.h"
+#include "platform/win/InstanceChannel.h"
 #include "platform/win/SystemPorts.h"
 #include "platform/win/RunKeyStartup.h"
 #include "platform/win/WinHttpProxyResolver.h"
@@ -17,6 +19,7 @@
 #include <windows.h>
 #include <commctrl.h>
 #include <objbase.h>
+#include <shellapi.h>
 #include <shlobj.h>
 
 #include <chrono>
@@ -24,6 +27,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -64,6 +68,21 @@ private:
     bool ok_;
 };
 
+std::vector<std::wstring> CommandLineArguments()
+{
+    int count = 0;
+    LPWSTR* raw = ::CommandLineToArgvW(::GetCommandLineW(), &count);
+    if (raw == nullptr) {
+        return {};
+    }
+    std::vector<std::wstring> arguments;
+    for (int i = 1; i < count; ++i) {  // skip the program name
+        arguments.emplace_back(raw[i]);
+    }
+    ::LocalFree(raw);
+    return arguments;
+}
+
 int RunMessageLoop(ldm::ui::MainWindow& window)
 {
     MSG message{};
@@ -82,6 +101,29 @@ int RunMessageLoop(ldm::ui::MainWindow& window)
 int WINAPI wWinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int showCommand)
 {
     ::SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32);
+
+    // Design section 7: arguments are validated before anything else happens, then a second
+    // launch hands them to the running instance and exits.
+    const ldm::core::CommandLineParse parse = ldm::core::ParseCommandLine(CommandLineArguments());
+    if (parse.error) {
+        Fatal(ldm::base::ToUtf16(*parse.error) + L"\n\n" + ldm::core::CommandLineHelp());
+        return 2;
+    }
+    const ldm::core::LaunchRequest& launch = parse.request;
+    if (launch.help) {
+        ::MessageBoxW(nullptr, ldm::core::CommandLineHelp().c_str(), kAppTitle, MB_OK | MB_ICONINFORMATION);
+        return 0;
+    }
+    const auto instanceLock = ldm::platform::InstanceLock::TryAcquire();
+    if (!instanceLock) {
+        ldm::platform::AllowRunningInstanceToActivate();
+        if (!ldm::platform::ForwardToRunningInstance(launch)) {
+            Fatal(L"Last Download Manager is already running but did not respond.");
+            return 1;
+        }
+        return 0;
+    }
+
     OleScope ole;
     INITCOMMONCONTROLSEX controls{sizeof(controls), ICC_WIN95_CLASSES | ICC_STANDARD_CLASSES | ICC_TAB_CLASSES |
                                                         ICC_PROGRESS_CLASS | ICC_UPDOWN_CLASS | ICC_LINK_CLASS};
@@ -141,9 +183,20 @@ int WINAPI wWinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int sho
     int exitCode = 0;
     {
         ldm::ui::MainWindow window(ldm::ui::MainWindow::Services{&core, &bridge, &shell, &system, &secrets, &startup});
-        if (!window.Create(bridge.TakeSnapshot(), showCommand)) {
+        auto snapshot = bridge.TakeSnapshot();
+        // --tray (Launch on startup) starts hidden, unless the tray icon is hidden too.
+        const bool startHidden = launch.tray && snapshot && snapshot->settings.trayIconStyle != ldm::model::TrayIconStyle::Hidden;
+        if (!window.Create(std::move(snapshot), startHidden ? SW_HIDE : showCommand)) {
             Fatal(L"The main window could not be created.");
         } else {
+            if (launch.url) {
+                window.PostLaunchRequest(launch);
+            }
+            // Declared after the window, so it stops before the window goes away. Without the pipe,
+            // LDM still works; later launches then report that it did not respond.
+            ldm::platform::InstanceServer server(
+                [&window](ldm::core::LaunchRequest request) { window.PostLaunchRequest(std::move(request)); });
+            (void)server.Start();
             exitCode = RunMessageLoop(window);
         }
     }

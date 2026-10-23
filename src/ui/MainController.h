@@ -1,10 +1,13 @@
 #pragma once
 
 #include "core/Commands.h"
+#include "core/LaunchRequest.h"
 #include "core/Ports.h"
 #include "core/Snapshot.h"
 #include "ui/AddFlow.h"
+#include "ui/ClipboardMonitor.h"
 #include "ui/DownloadListView.h"
+#include "ui/ImportExportFlow.h"
 #include "ui/ListModel.h"
 #include "ui/ShellActions.h"
 #include "ui/StartupRegistration.h"
@@ -18,6 +21,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <string>
 #include <vector>
 
 namespace ldm::ui {
@@ -64,6 +68,13 @@ public:
     void ShowCategoryMenu(std::optional<model::CategoryId> category, POINT screen);
     void ShowTrayMenu(POINT screen);
 
+    // A command line or a second launch (checklist A-10, W-05).
+    void OnLaunchRequest(const core::LaunchRequest& request);
+    // WM_CLIPBOARDUPDATE (checklist A-09).
+    void OnClipboardChanged();
+    // Addresses dropped on the drop target (checklist W-06).
+    void OnDroppedUrls(std::vector<std::string> urls);
+
     [[nodiscard]] AddFlow& Adds() noexcept { return adds_; }
 
 private:
@@ -91,6 +102,8 @@ private:
     Context context_;
     TransferWindows transfers_;
     AddFlow adds_;
+    ImportExportFlow importExport_;
+    ClipboardMonitor clipboard_;
     std::unique_ptr<FindDialog> find_;
     FindOptions findOptions_;
     std::optional<model::CategoryId> categoryMenuTarget_;

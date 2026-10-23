@@ -8,6 +8,8 @@ add_library(ldm_core STATIC
     FailureText.h
     FileNames.cpp
     FileNames.h
+    LaunchRequest.cpp
+    LaunchRequest.h
     Matching.cpp
     Matching.h
     Ports.h

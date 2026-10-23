@@ -13,6 +13,10 @@ namespace ldm::core {
 // Case-insensitive (ASCII) match where '*' stands for any sequence, including an empty one.
 [[nodiscard]] bool WildcardMatch(std::string_view pattern, std::string_view text);
 
+// True when `extension` (without the dot) is in a space-separated list such as Options > File
+// types (checklist O-02). Case-insensitive; entries may use '*' wildcards, such as "R0*".
+[[nodiscard]] bool MatchesExtensionList(std::string_view list, std::string_view extension);
+
 // Category for a new download (checklist W-02, W-03): a category whose site list matches the host
 // wins; otherwise one whose extension list contains the file's extension. Nothing when neither
 // matches; the caller then uses General.

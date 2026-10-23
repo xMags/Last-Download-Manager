@@ -47,7 +47,8 @@ MainController::MainController(Context context)
                                           context_.theme, context_.snapshot, context_.exit}),
       adds_(AddFlow::Context{context_.owner, context_.commands, context_.theme, context_.snapshot,
                              [this](model::DownloadId id) { transfers_.OpenProgress(id); },
-                             [this](model::DownloadId id) { context_.list->SelectOnly(id); }})
+                             [this](model::DownloadId id) { context_.list->SelectOnly(id); }}),
+      importExport_(ImportExportFlow::Context{context_.owner, &adds_, context_.snapshot, [this] { return Selection(); }})
 {
 }
 
@@ -104,6 +105,21 @@ bool MainController::OnCommand(int id)
         return true;
     case ID_TASKS_ADD_BATCH_CLIPBOARD:
         adds_.AddFromClipboard();
+        return true;
+    case ID_TASKS_DROP_TARGET:
+        ModifySettings([](model::Settings& s) { s.showDropTarget = !s.showDropTarget; });
+        return true;
+    case ID_TASKS_EXPORT_LDM:
+        importExport_.ExportLdmFile();
+        return true;
+    case ID_TASKS_EXPORT_TEXT:
+        importExport_.ExportTextFile();
+        return true;
+    case ID_TASKS_IMPORT_LDM:
+        importExport_.ImportLdmFile();
+        return true;
+    case ID_TASKS_IMPORT_TEXT:
+        importExport_.ImportTextFile();
         return true;
     case ID_TASKS_EXIT:
         context_.exit();
@@ -274,6 +290,45 @@ bool MainController::OnCommand(int id)
         return true;
     }
     return false;
+}
+
+void MainController::OnLaunchRequest(const core::LaunchRequest& request)
+{
+    // startQueue waits for queues (M4); a launch without an address just shows LDM.
+    if (!request.url) {
+        if (!request.tray) {
+            context_.restore();
+        }
+        return;
+    }
+    adds_.AddAddress(ExternalAdd{*request.url, request.saveDir, request.fileName, request.silent, request.queueOnly});
+}
+
+void MainController::OnClipboardChanged()
+{
+    // A disabled owner means a modal dialog is open: never stack an offer on top of it.
+    if (!::IsWindowEnabled(context_.owner)) {
+        return;
+    }
+    const auto snapshot = Snapshot();
+    if (!snapshot) {
+        return;
+    }
+    if (auto url = clipboard_.AddressToOffer(context_.owner, snapshot->settings)) {
+        adds_.AddUrl(std::move(*url));
+    }
+}
+
+void MainController::OnDroppedUrls(std::vector<std::string> urls)
+{
+    if (urls.empty()) {
+        return;
+    }
+    if (urls.size() == 1) {
+        adds_.AddAddress(ExternalAdd{std::move(urls.front())});
+        return;
+    }
+    adds_.AddList(std::move(urls), L"Add dropped addresses");
 }
 
 void MainController::SetSort(SortKey key)
