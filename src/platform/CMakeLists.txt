@@ -11,6 +11,8 @@ add_library(ldm_platform STATIC
     win/BrowserBridge.h
     win/BrowserHostRegistration.cpp
     win/BrowserHostRegistration.h
+    win/ChildProcess.cpp
+    win/ChildProcess.h
     win/InstanceChannel.cpp
     win/InstanceChannel.h
     win/RunKeyStartup.cpp
