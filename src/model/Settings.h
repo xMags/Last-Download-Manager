@@ -130,6 +130,7 @@ struct Settings {
     std::string capturedExtensions = DefaultCapturedExtensions();
     std::string captureSiteExceptions = DefaultCaptureSiteExceptions();
     std::string captureAddressExceptions;  // one address pattern per line, '*' wildcards
+    bool offerCaptureExceptions = true;    // after two cancelled captures from one site (B-06)
     CaptureKeys captureKeys;               // Options > General > Keys
     BrowserMenu chromiumMenu;              // Options > General > Context menu: Chrome and Edge
     BrowserMenu firefoxMenu;               // ... and Firefox

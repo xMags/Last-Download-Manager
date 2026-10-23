@@ -83,6 +83,7 @@ private:
         bool deleteWhenStopped = false;
         bool deleteFilesWhenStopped = false;
         bool restartWhenStopped = false;
+        bool resumeWhenStopped = false;  // a new address arrived while the old run was stopping
         bool replaceFinalFile = false;  // an existing final file may be replaced at finalize
         bool holdFinalize = false;      // completed while the info dialog was still open
         int finalizeAttempts = 0;
@@ -124,6 +125,10 @@ private:
     void ReplaceSiteLogins(const std::vector<SiteLoginInput>& logins);
     void ReplaceServerLimits(std::vector<model::ServerLimit> limits);
     void DecideQuota(bool keepDownloading);
+    void WaitForAddress(model::DownloadId id);
+    void ReplaceAddress(const ReplaceAddressCommand& command);
+    // Ends Refresh download address for `id`, if it is the download that waits.
+    void StopWaitingForAddress(model::DownloadId id);
 
     // Engine event handlers.
     void OnResponseInfo(Entry& entry, const ResponseInfo& info);
@@ -188,6 +193,10 @@ private:
     QuotaPeriod quota_;
     bool quotaQuestionOpen_ = false;  // QuotaReached was sent and not answered yet
     std::optional<std::chrono::steady_clock::time_point> quotaIgnoredUntil_;
+
+    // Refresh download address: the one download waiting for a new address, and since when.
+    std::optional<model::DownloadId> waitingForAddress_;
+    std::chrono::steady_clock::time_point waitingSince_{};
 
     bool snapshotDirty_ = true;
     std::uint64_t snapshotVersion_ = 0;

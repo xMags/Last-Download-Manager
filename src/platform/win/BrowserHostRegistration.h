@@ -11,4 +11,9 @@ namespace ldm::platform {
 // failed; browsers whose registration succeeded still work.
 bool RegisterBrowserHosts(const std::filesystem::path& manifestFolder, const std::filesystem::path& hostExecutable);
 
+// True when LDM runs elevated ("Run as administrator"). Browsers run without elevation, and
+// Windows does not let their ldm-host.exe reach an elevated LDM, so capture stops working
+// (checklist B-10).
+[[nodiscard]] bool IsProcessElevated();
+
 }  // namespace ldm::platform

@@ -184,3 +184,30 @@ TEST(AddressExceptions, PatternsAreTrimmedAndMustBeOneWord)
 }
 
 }  // namespace
+
+TEST(BrowserSessions, OpenPageGoesToTheNewestLastingConnection)
+{
+    RecordingLink link;
+    ldm::ui::BrowserSessions sessions(link, "5.0.0", {});
+    const ldm::model::Settings settings;
+    EXPECT_FALSE(sessions.OpenPage("https://a.test/page")) << "no browser connected";
+
+    ldm::browser::Hello lasting = SampleHello();
+    lasting.startLdm = false;
+    ldm::browser::Hello single = SampleHello();
+    single.startLdm = true;
+    sessions.OnEvent(Event(1, ldm::browser::HostInfo{}), settings);
+    sessions.OnEvent(Event(1, lasting), settings);
+    sessions.OnEvent(Event(2, ldm::browser::HostInfo{}), settings);
+    sessions.OnEvent(Event(2, single), settings);
+    link.sent.clear();
+
+    EXPECT_FALSE(sessions.OpenPage("ftp://a.test/page")) << "only web pages";
+    EXPECT_FALSE(sessions.OpenPage("javascript:alert(1)"));
+    ASSERT_TRUE(sessions.OpenPage("https://a.test/page"));
+    ASSERT_EQ(link.sent.size(), 1u);
+    EXPECT_EQ(link.sent[0].first, 1u) << "a single request's connection closes soon";
+    const auto message = nlohmann::json::parse(link.sent[0].second);
+    EXPECT_EQ(message["type"], "open-page");
+    EXPECT_EQ(message["url"], "https://a.test/page");
+}

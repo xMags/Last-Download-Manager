@@ -77,6 +77,35 @@ private:
     std::optional<BrowserMenus> result_;
 };
 
+// Offered after two captured downloads from one site were cancelled (checklist B-06, the reference's dialog
+// 302): add the site or an address pattern to the capture exceptions.
+class ExceptionOfferDialog final : public Dialog {
+public:
+    enum class Kind {
+        Site,
+        Address,
+    };
+
+    struct Choice {
+        std::optional<Kind> kind;  // nothing: Cancel
+        std::wstring value;        // the site or the address pattern, as edited
+        bool dontAskAgain = false;  // also after Cancel
+    };
+
+    ExceptionOfferDialog(const Theme& theme, std::wstring site, std::wstring address, Kind preselected);
+    [[nodiscard]] Choice Run(HWND owner);
+
+private:
+    bool OnInit() override;
+    bool OnCommand(int id, int code, HWND control) override;
+    void UpdateFields();
+
+    std::wstring site_;
+    std::wstring address_;
+    Kind preselected_;
+    Choice choice_;
+};
+
 // A typed address pattern made acceptable for the list: trimmed; nothing when it is empty or
 // holds spaces or control characters (patterns are matched against whole addresses).
 [[nodiscard]] std::optional<std::wstring> CleanAddressPattern(const std::wstring& text);

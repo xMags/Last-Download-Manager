@@ -7,6 +7,7 @@
 #include "model/Ids.h"
 #include "model/Settings.h"
 
+#include <chrono>
 #include <cstdint>
 #include <functional>
 #include <optional>
@@ -52,6 +53,9 @@ struct AddDownloadCommand {
     std::optional<std::string> userAgent;
     std::vector<model::Cookie> cookies;
     std::optional<PostData> post;
+    // The type the browser received (a capture), so a web page in the file's place is recognised
+    // (checklist ENG-15). Ignored when it is itself a web page type.
+    std::optional<std::string> contentType;
     AddMode mode = AddMode::StartNow;
     // Set after the user answered the duplicate prompt; otherwise Options > Downloads applies.
     std::optional<model::DuplicatePolicy> duplicatePolicy;
@@ -151,12 +155,33 @@ struct QuotaDecisionCommand {
     bool keepDownloading = false;  // true: ignore the quota until the current period ends
 };
 
+// How long a download waits for a new address (checklist ENG-08).
+inline constexpr std::chrono::minutes kAddressWaitLimit{10};
+
+// Refresh download address (checklist ENG-08): the download stops and waits for the browser to
+// hand over a new address for the same file. One download waits at a time; a newer request takes
+// over, and waiting ends after kAddressWaitLimit, on Resume, or when the download is deleted.
+struct WaitForAddressCommand {
+    model::DownloadId id;
+};
+// The new address for the waiting download, with what the browser sent along; the download
+// resumes from it, with the usual checks that the file did not change. Ignored when that
+// download no longer waits.
+struct ReplaceAddressCommand {
+    model::DownloadId id;
+    std::string url;
+    std::optional<std::string> referer;
+    std::optional<std::string> userAgent;
+    std::vector<model::Cookie> cookies;
+    std::optional<PostData> post;
+};
+
 using Command = std::variant<AddDownloadCommand, ConfirmDownloadCommand, ResumeCommand, StopCommand, StopAllCommand,
                              DeleteCommand, DeleteCompletedCommand, RedownloadCommand, SetDownloadSpeedLimitCommand,
                              SetSpeedLimiterCommand, UpdateDownloadCommand, MoveDownloadCommand, SaveCategoryCommand,
                              DeleteCategoryCommand, ReassignCategoryCommand, UpdateSettingsCommand,
                              ModifySettingsCommand, ReplaceSiteLoginsCommand, ReplaceServerLimitsCommand,
-                             QuotaDecisionCommand>;
+                             QuotaDecisionCommand, WaitForAddressCommand, ReplaceAddressCommand>;
 
 // Where front ends send commands. Thread-safe; returns at once.
 class CommandSink {

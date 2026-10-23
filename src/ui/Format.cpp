@@ -96,6 +96,9 @@ std::optional<double> ProgressFraction(const core::DownloadView& view)
 std::wstring FormatStatus(const core::DownloadView& view)
 {
     using model::DownloadStatus;
+    if (view.waitingForAddress && view.download.status != DownloadStatus::Stopping) {
+        return L"Waiting for new address";
+    }
     switch (view.download.status) {
     case DownloadStatus::Queued:
         return L"Queued";

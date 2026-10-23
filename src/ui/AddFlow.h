@@ -14,6 +14,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -28,6 +29,7 @@ struct BrowserRequest {
     std::string userAgent;
     std::vector<model::Cookie> cookies;
     std::optional<core::PostData> post;  // the form submission the download answered
+    std::optional<std::string> mimeType;  // the type the browser received
 };
 
 // One address that arrives from outside the Add URL dialog: the command line, a second launch,
@@ -63,6 +65,9 @@ public:
         std::function<void(model::DownloadId)> select;
         // The Download All Links dialog of this request closed (BrowserSessions::LinksDone).
         std::function<void(BrowserConnectionId, const std::string&)> linksDone;
+        // A download captured from the browser was added; its Download File Info dialog was cancelled.
+        std::function<void(model::DownloadId)> capturedAdded;
+        std::function<void(const std::string&)> captureCancelled;
     };
 
     explicit AddFlow(Context context);
@@ -117,8 +122,9 @@ private:
     void AddMany(const std::vector<std::string>& urls, bool start, std::optional<std::string> user,
                  std::optional<std::string> password);
     void Post(core::Command command);
-    // Copies the browser's referrer, User-Agent and cookies into an add command.
-    static void ApplyBrowserRequest(const std::optional<BrowserRequest>& browser, core::AddDownloadCommand& command);
+    // Copies the browser's referrer, User-Agent, cookies and type into an add command, and
+    // remembers the command as a capture.
+    void ApplyBrowserRequest(const std::optional<BrowserRequest>& browser, core::AddDownloadCommand& command);
     void ModifySettings(std::function<void(model::Settings&)> modify);
     void ShowError(const std::wstring& message) const;
 
@@ -127,6 +133,7 @@ private:
     std::map<std::uint64_t, PendingAdd> pendingAdds_;
     std::vector<std::uint64_t> progressOnAdd_;  // adds whose progress window opens once their id is known
     std::optional<std::string> categoryToSelect_;  // a category added from the info dialog
+    std::set<std::uint64_t> captureTokens_;  // adds of browser captures not answered yet
 
     // Link details that arrived for a queued Links request before its dialog opened.
     struct EarlyLinkInfo {

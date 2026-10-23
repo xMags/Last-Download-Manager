@@ -133,6 +133,8 @@ void AddFlow::ApplyBrowserRequest(const std::optional<BrowserRequest>& browser, 
     command.userAgent = browser->userAgent;
     command.cookies = browser->cookies;
     command.post = browser->post;
+    command.contentType = browser->mimeType;
+    captureTokens_.insert(command.token);
 }
 
 void AddFlow::AddImported(const std::vector<ImportedEntry>& entries)
@@ -265,6 +267,9 @@ void AddFlow::AddWithInfoDialog(InfoDialogInput input)
     pendingAdds_[token].dialog = &dialog;
     const DownloadInfoDialog::Choice choice = dialog.Run(context_.owner);
     categoryToSelect_.reset();
+    if (choice.action == DownloadInfoDialog::Action::Cancel && input.browser && context_.captureCancelled) {
+        context_.captureCancelled(url);
+    }
 
     if (choice.action != DownloadInfoDialog::Action::Cancel) {
         const std::string folder = choice.saveDir;
@@ -531,6 +536,9 @@ void AddFlow::OnSnapshot(const core::Snapshot& snapshot)
 
 void AddFlow::OnAddResult(const core::AddResult& result)
 {
+    if (captureTokens_.erase(result.token) > 0 && result.id && !result.error && context_.capturedAdded) {
+        context_.capturedAdded(*result.id);
+    }
     const auto pending = pendingAdds_.find(result.token);
     if (result.error) {
         if (pending != pendingAdds_.end() && pending->second.dialog != nullptr) {

@@ -9,7 +9,9 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <iterator>
+#include <string_view>
 #include <type_traits>
 #include <utility>
 
@@ -52,6 +54,21 @@ std::string PathToUtf8(const std::filesystem::path& path)
 bool CanStart(DownloadStatus status)
 {
     return status == DownloadStatus::Queued || status == DownloadStatus::Paused || status == DownloadStatus::Failed;
+}
+
+// A type a browser reports for a file it downloads. Web page types are left out, so a page the
+// browser itself downloaded never makes LDM refuse a page.
+bool IsFileContentType(std::string_view type)
+{
+    if (type.empty() || type.size() > 256 ||
+        std::any_of(type.begin(), type.end(), [](char c) { return static_cast<unsigned char>(c) < 0x20 || c == 0x7F; })) {
+        return false;
+    }
+    std::string lower(type.substr(0, type.find(';')));
+    std::transform(lower.begin(), lower.end(), lower.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    lower.erase(std::remove(lower.begin(), lower.end(), ' '), lower.end());
+    return !lower.empty() && lower != "text/html" && lower != "application/xhtml+xml";
 }
 
 std::int64_t ProgressEnd(const model::Download& download)
@@ -266,6 +283,10 @@ void Coordinator::Handle(Command command)
                 ReplaceServerLimits(std::move(typed.limits));
             } else if constexpr (std::is_same_v<T, QuotaDecisionCommand>) {
                 DecideQuota(typed.keepDownloading);
+            } else if constexpr (std::is_same_v<T, WaitForAddressCommand>) {
+                WaitForAddress(typed.id);
+            } else if constexpr (std::is_same_v<T, ReplaceAddressCommand>) {
+                ReplaceAddress(typed);
             } else {
                 static_assert(sizeof(T) == 0, "unhandled command");
             }
@@ -377,6 +398,9 @@ void Coordinator::Add(const AddDownloadCommand& command)
     download.saveDir = saveDir;
     download.categoryId = categoryId;
     download.description = command.description;
+    if (command.contentType && IsFileContentType(*command.contentType)) {
+        download.contentType = command.contentType;
+    }
     download.status = DownloadStatus::Queued;
     download.createdAtMs = ports_.clock->NowUnixMs();
     download.sortOrder = nextSortOrder_++;
@@ -494,6 +518,7 @@ void Coordinator::Confirm(const ConfirmDownloadCommand& command)
 void Coordinator::Resume(const std::vector<model::DownloadId>& ids)
 {
     for (const model::DownloadId id : ids) {
+        StopWaitingForAddress(id);  // resumed by hand: the old address is tried again
         Entry* entry = Find(id);
         if (entry != nullptr && !entry->running && !entry->finalizing && CanStart(entry->download.status)) {
             Start(*entry);
@@ -667,6 +692,96 @@ void Coordinator::Update(const UpdateDownloadCommand& command)
     }
     Save(*entry);
     MarkChanged(*entry);
+}
+
+void Coordinator::WaitForAddress(model::DownloadId id)
+{
+    Entry* entry = Find(id);
+    if (entry == nullptr || entry->deleteWhenStopped || entry->finalizing ||
+        entry->download.status == DownloadStatus::Completed) {
+        return;
+    }
+    if (waitingForAddress_ && *waitingForAddress_ != id) {
+        StopWaitingForAddress(*waitingForAddress_);  // one at a time: the newer request takes over
+    }
+    waitingForAddress_ = id;
+    waitingSince_ = ports_.clock->Steady();
+    entry->resumeWhenStopped = false;
+    if (entry->quotaHeld) {
+        entry->quotaHeld = false;
+        entry->download.lastResult.reset();
+        Save(*entry);
+    }
+    if (entry->running) {
+        RequestStop(*entry);
+    }
+    MarkChanged(*entry);
+}
+
+void Coordinator::ReplaceAddress(const ReplaceAddressCommand& command)
+{
+    Entry* entry = Find(command.id);
+    if (entry == nullptr || waitingForAddress_ != command.id || entry->deleteWhenStopped || entry->finalizing) {
+        return;
+    }
+    if (!ParseUrl(command.url)) {
+        ReportError("The new address is not a valid http, https or ftp address.");
+        return;
+    }
+    std::vector<std::uint8_t> cookieSecret;
+    std::vector<model::Cookie> cookies;
+    std::copy_if(command.cookies.begin(), command.cookies.end(), std::back_inserter(cookies), model::IsValidCookie);
+    if (!cookies.empty()) {
+        auto secret = ports_.secrets->Protect(model::CookiesToText(cookies));
+        if (!secret) {
+            ReportError("The browser cookies could not be protected: " + secret.GetError().message);
+            return;
+        }
+        cookieSecret = std::move(secret).Value();
+    }
+    std::vector<std::uint8_t> postSecret;
+    if (command.post) {
+        auto secret = ports_.secrets->Protect(command.post->body);
+        if (!secret) {
+            ReportError("The form data could not be protected: " + secret.GetError().message);
+            return;
+        }
+        postSecret = std::move(secret).Value();
+    }
+
+    model::Download& d = entry->download;
+    d.url = command.url;
+    d.finalUrl.reset();
+    if (command.referer) {
+        d.referer = command.referer;
+    }
+    if (command.userAgent) {
+        d.userAgent = command.userAgent;
+    }
+    d.cookieSecret = std::move(cookieSecret);
+    d.postSecret = std::move(postSecret);
+    d.postContentType = command.post ? std::optional<std::string>(command.post->contentType) : std::nullopt;
+    // The size and validators stay: the next run checks with them that the file is the same one.
+    d.lastResult.reset();
+    waitingForAddress_.reset();
+    Save(*entry);
+    MarkChanged(*entry);
+    if (entry->running) {
+        entry->resumeWhenStopped = true;
+    } else if (CanStart(d.status)) {
+        Start(*entry);
+    }
+}
+
+void Coordinator::StopWaitingForAddress(model::DownloadId id)
+{
+    if (waitingForAddress_ != id) {
+        return;
+    }
+    waitingForAddress_.reset();
+    if (Entry* entry = Find(id)) {
+        MarkChanged(*entry);
+    }
 }
 
 void Coordinator::Move(const MoveDownloadCommand& command)
@@ -971,9 +1086,20 @@ void Coordinator::OnFinished(Entry& entry, const TransferFinished& finished)
         UpdatePowerRequest();
         return;
     }
+    if (entry.resumeWhenStopped && finished.outcome != TransferOutcome::Completed) {
+        // The old run ended after a new address arrived: continue from the new one.
+        entry.resumeWhenStopped = false;
+        d.status = DownloadStatus::Paused;
+        Save(entry);
+        Start(entry);
+        UpdatePowerRequest();
+        return;
+    }
+    entry.resumeWhenStopped = false;
 
     switch (finished.outcome) {
     case TransferOutcome::Completed:
+        StopWaitingForAddress(d.id);
         if (entry.awaitingConfirmation) {
             entry.holdFinalize = true;  // the user may still rename it in the open info dialog
             d.status = DownloadStatus::Finalizing;
@@ -1243,6 +1369,9 @@ void Coordinator::RemoveEntry(model::DownloadId id, bool deleteFinalFile)
     if (entry == nullptr) {
         return;
     }
+    if (waitingForAddress_ == id) {
+        waitingForAddress_.reset();
+    }
     const model::Download& d = entry->download;
     if (d.partialPath) {
         if (base::Status removed = ports_.fileSystem->Remove(PathFromUtf8(*d.partialPath)); !removed) {
@@ -1417,6 +1546,9 @@ void Coordinator::Tick()
         }
     }
     EnforceQuota();
+    if (waitingForAddress_ && now - waitingSince_ >= kAddressWaitLimit) {
+        StopWaitingForAddress(*waitingForAddress_);
+    }
     if (snapshotDirty_ && now - lastSnapshot_ >= config_.snapshotInterval) {
         PublishSnapshot();
     }
@@ -1440,6 +1572,9 @@ std::chrono::steady_clock::time_point Coordinator::NextDeadline() const
     }
     if (quotaIgnoredUntil_) {
         deadline = std::min(deadline, *quotaIgnoredUntil_);
+    }
+    if (waitingForAddress_) {
+        deadline = std::min(deadline, waitingSince_ + kAddressWaitLimit);
     }
     return deadline;
 }
@@ -1566,6 +1701,7 @@ void Coordinator::PublishSnapshot()
             view->connections = entry->connections;
             view->retrying = entry->retrying;
             view->waitingForQuota = entry->quotaHeld;
+            view->waitingForAddress = waitingForAddress_ == entry->download.id;
             if (entry->bytesPerSecond > 0 && entry->download.totalSize) {
                 view->secondsLeft = std::max<std::int64_t>(*entry->download.totalSize - view->receivedBytes, 0) /
                                     entry->bytesPerSecond;

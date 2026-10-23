@@ -163,6 +163,63 @@ bool AddExceptionDialog::OnCommand(int id, int code, HWND control)
     return true;
 }
 
+ExceptionOfferDialog::ExceptionOfferDialog(const Theme& theme, std::wstring site, std::wstring address, Kind preselected)
+    : Dialog(IDD_CAPTURE_EXCEPTION_OFFER, theme), site_(std::move(site)), address_(std::move(address)),
+      preselected_(preselected)
+{
+}
+
+ExceptionOfferDialog::Choice ExceptionOfferDialog::Run(HWND owner)
+{
+    RunModal(owner);
+    return choice_;
+}
+
+bool ExceptionOfferDialog::OnInit()
+{
+    SetText(IDC_OFFER_TEXT, L"You cancelled two downloads from " + site_ +
+                                L" that LDM took from the browser. To let the browser keep such downloads, add an "
+                                L"exception:");
+    SetText(IDC_OFFER_SITE_EDIT, site_);
+    SetText(IDC_OFFER_ADDRESS_EDIT, address_);
+    SetChecked(preselected_ == Kind::Site ? IDC_OFFER_SITE : IDC_OFFER_ADDRESS, true);
+    UpdateFields();
+    return true;
+}
+
+void ExceptionOfferDialog::UpdateFields()
+{
+    Enable(IDC_OFFER_SITE_EDIT, Checked(IDC_OFFER_SITE));
+    Enable(IDC_OFFER_ADDRESS_EDIT, Checked(IDC_OFFER_ADDRESS));
+}
+
+bool ExceptionOfferDialog::OnCommand(int id, int code, HWND control)
+{
+    if (id == IDC_OFFER_SITE || id == IDC_OFFER_ADDRESS) {
+        UpdateFields();
+        return true;
+    }
+    if (id == IDCANCEL) {
+        choice_.dontAskAgain = Checked(IDC_OFFER_DONT_ASK);
+        return Dialog::OnCommand(id, code, control);
+    }
+    if (id != IDOK) {
+        return Dialog::OnCommand(id, code, control);
+    }
+    const Kind kind = Checked(IDC_OFFER_SITE) ? Kind::Site : Kind::Address;
+    auto value = CleanAddressPattern(Text(kind == Kind::Site ? IDC_OFFER_SITE_EDIT : IDC_OFFER_ADDRESS_EDIT));
+    if (!value) {
+        Warn(kind == Kind::Site ? L"Enter a site name without spaces, such as files.example.com."
+                                : L"Enter an address without spaces, such as https://example.com/files/*.");
+        return true;
+    }
+    choice_.kind = kind;
+    choice_.value = std::move(*value);
+    choice_.dontAskAgain = Checked(IDC_OFFER_DONT_ASK);
+    Close(IDOK);
+    return true;
+}
+
 CaptureKeysDialog::CaptureKeysDialog(const Theme& theme, model::CaptureKeys keys)
     : Dialog(IDD_CAPTURE_KEYS, theme), keys_(keys)
 {

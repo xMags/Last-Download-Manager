@@ -8,6 +8,8 @@ add_library(ldm_ui STATIC
     BrowserLink.h
     BrowserSessions.cpp
     BrowserSessions.h
+    CaptureFollowUp.cpp
+    CaptureFollowUp.h
     CategoryPane.cpp
     CategoryPane.h
     Clipboard.cpp
