@@ -120,7 +120,9 @@ export function toLdmCookie(cookie) {
  * The capture message for a browser download.
  * @param {{url: string, finalUrl?: string, referrer?: string, fileName?: string, fileSize?: number,
  *          mimeType?: string, userAgent: string, cookies: object[],
- *          post?: {contentType: string, body: string}}} download post body is base64
+ *          post?: {contentType: string, body: string}, chosen?: boolean}} download post body is
+ *   base64; chosen: the user picked LDM (right-click menu or force keys), so LDM does not count a
+ *   cancel of it as a sign that the capture rules are wrong
  */
 export function makeCapture(download) {
   const optionalAddress = (value) => (isDownloadAddress(value) ? value : undefined);
@@ -153,6 +155,7 @@ export function makeCapture(download) {
     post: download.post && optionalText(download.post.contentType, 256)
       ? { contentType: download.post.contentType, body: download.post.body }
       : undefined,
+    chosen: download.chosen === true ? true : undefined,
   };
 }
 

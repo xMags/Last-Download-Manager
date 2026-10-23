@@ -333,7 +333,7 @@ void MainController::OnBrowserCapture(browser::Capture capture)
         post = core::PostData{std::move(capture.post->contentType), std::move(capture.post->body)};
     }
     add.browser = BrowserRequest{std::move(capture.referrer), std::move(capture.userAgent), std::move(capture.cookies),
-                                 std::move(post), std::move(capture.mimeType)};
+                                 std::move(post), std::move(capture.mimeType), capture.chosen};
     adds_.AddAddress(add);
 }
 

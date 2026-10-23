@@ -30,6 +30,7 @@ struct BrowserRequest {
     std::vector<model::Cookie> cookies;
     std::optional<core::PostData> post;  // the form submission the download answered
     std::optional<std::string> mimeType;  // the type the browser received
+    bool chosen = false;  // the user picked LDM for it, so cancelling it says nothing about the capture rules
 };
 
 // One address that arrives from outside the Add URL dialog: the command line, a second launch,

@@ -70,6 +70,7 @@ struct Capture {
     std::string userAgent;
     std::vector<model::Cookie> cookies;  // what the browser would send to url and finalUrl
     std::optional<PostBody> post;        // set when the download answered a form submission
+    bool chosen = false;  // the user picked LDM (right-click menu or force keys); not taken automatically
 };
 
 // Where a link of a page was found, as the reference tells them apart.

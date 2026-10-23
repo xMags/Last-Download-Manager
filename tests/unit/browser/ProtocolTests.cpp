@@ -117,6 +117,15 @@ TEST(BrowserProtocol, CaptureNeedsOnlyAddressUserAgentAndCookies)
     const auto& capture = std::get<ldm::browser::Capture>(parsed->message);
     EXPECT_FALSE(capture.finalUrl);
     EXPECT_FALSE(capture.fileSize);
+    EXPECT_FALSE(capture.chosen) << "taken automatically unless the extension says otherwise";
+}
+
+TEST(BrowserProtocol, CaptureSaysWhenTheUserPickedLdm)
+{
+    const auto parsed = ldm::browser::ParseMessage(CaptureJson(R"("url":"https://a.test/x","chosen":true,"cookies":[])"));
+    ASSERT_TRUE(parsed);
+    EXPECT_TRUE(std::get<ldm::browser::Capture>(parsed->message).chosen);
+    EXPECT_FALSE(ldm::browser::ParseMessage(CaptureJson(R"("url":"https://a.test/x","chosen":"yes","cookies":[])")));
 }
 
 TEST(BrowserProtocol, RejectsInvalidCaptures)
