@@ -16,6 +16,8 @@
 //   /flaky.bin           first request answers 503
 //   /page.bin            a web page (text/html) where a file is expected
 //   /empty.bin           a zero-length file
+//   /large.bin           ranges; --large-size bytes (default 2 GiB) of the same pattern, generated
+//                        on the fly, for stress tests
 //   /control/log         JSON: request log and the highest number of concurrent responses
 //   /control/bump        changes the content of /versioned.bin
 //   /control/reset       clears the log and per-route counters
@@ -31,6 +33,22 @@ import { createFtpFixture } from './ftp-reference-fixture.mjs';
 const USER = 'ldm';
 const PASSWORD = 'secret';
 const REALM = 'ldm-fixture';
+
+// Looks like a Buffer to serveBody and stream, but holds one repeating block: byte i is i % 251 for
+// any length, without allocating it.
+function patternBody(length, chunkSize) {
+  const block = payload(251 * (Math.ceil(chunkSize / 251) + 1));
+  return {
+    length,
+    subarray(start, end) {
+      const from = start % 251;
+      if (end - start <= block.length - from) return block.subarray(from, from + end - start);
+      const out = Buffer.alloc(end - start);
+      for (let i = 0; i < out.length; ++i) out[i] = (start + i) % 251;
+      return out;
+    },
+  };
+}
 
 function payload(size, salt = 0) {
   const data = Buffer.alloc(size);
@@ -49,12 +67,16 @@ function parseDigest(header) {
   return fields;
 }
 
-export function createReferenceFixture({ size = 16 * 1024 * 1024, delayMs = 40, chunkSize = 32 * 1024, log = () => {} } = {}) {
+export function createReferenceFixture({
+  size = 16 * 1024 * 1024, delayMs = 40, chunkSize = 32 * 1024, largeSize = 2 * 1024 * 1024 * 1024, log = () => {},
+} = {}) {
   if (!Number.isSafeInteger(size) || size < 1 || size > 64 * 1024 * 1024) {
     throw new RangeError('Fixture size must be between 1 byte and 64 MiB');
   }
   if (!Number.isFinite(delayMs) || delayMs < 0) throw new RangeError('Invalid delay');
   if (!Number.isSafeInteger(chunkSize) || chunkSize < 1) throw new RangeError('Invalid chunk size');
+  if (!Number.isSafeInteger(largeSize) || largeSize < 1) throw new RangeError('Invalid large size');
+  const large = patternBody(largeSize, chunkSize);
   const data = payload(size);
   const digest = sha256(data);
   const compressed = { gzip: gzipSync(data), br: brotliCompressSync(data) };
@@ -190,6 +212,9 @@ export function createReferenceFixture({ size = 16 * 1024 * 1024, delayMs = 40, 
       case '/range.bin':
         serveBody(request, response, id, data, { etag: strong, lastModified: modified, name: 'range.bin' });
         return;
+      case '/large.bin':
+        serveBody(request, response, id, large, { etag: '"large"', lastModified: modified, name: 'large.bin' });
+        return;
       case '/no-range.bin':
         serveBody(request, response, id, data, { ranges: false, etag: strong, lastModified: modified, name: 'no-range.bin' });
         return;
@@ -290,6 +315,7 @@ function parseArguments(argv) {
     if (name === '--size') { options.size = Number(value); ++i; }
     else if (name === '--delay') { options.delayMs = Number(value); ++i; }
     else if (name === '--chunk') { options.chunkSize = Number(value); ++i; }
+    else if (name === '--large-size') { options.largeSize = Number(value); ++i; }
     else if (name === '--quiet') { options.quiet = true; }
     else throw new Error(`Unknown argument: ${name}`);
   }
