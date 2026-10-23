@@ -85,6 +85,8 @@ struct ParsedMessage {
 struct Config {
     std::string appVersion;
     std::vector<std::string> capturedExtensions;  // lower-case patterns without dots; '*' matches anything
+    std::vector<std::string> siteExceptions;      // host or host/path patterns, '*' wildcards
+    std::vector<std::string> addressExceptions;   // whole-address patterns, '*' wildcards
 };
 
 [[nodiscard]] std::string EncodeConfig(const Config& config, std::string_view replyTo);

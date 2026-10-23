@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 
 import { DownloadCapture } from '../src/capture.js';
-import { matchesExtensionList, nameFromUrl, shouldCapture } from '../src/capture-rules.js';
+import { matchesAddressList, matchesExtensionList, matchesSiteList, nameFromUrl, shouldCapture } from '../src/capture-rules.js';
 import { State } from '../src/connection.js';
 import { isAcceptedCapture, makeCapture, toLdmCookie } from '../src/protocol.js';
 
@@ -16,11 +16,35 @@ test('extension rules match the shared cases LDM is tested with', () => {
 });
 
 test('only addresses LDM can download are captured', () => {
-  assert.equal(shouldCapture({ url: 'https://a.test/x.zip', fileName: '' }, ['zip']), true);
-  assert.equal(shouldCapture({ url: 'blob:https://a.test/123', fileName: 'x.zip' }, ['zip']), false);
-  assert.equal(shouldCapture({ url: 'data:application/zip;base64,AA', fileName: 'x.zip' }, ['zip']), false);
-  assert.equal(shouldCapture({ url: 'https://a.test/get?id=1', fileName: 'x.zip' }, ['zip']), true,
+  const zip = { capturedExtensions: ['zip'] };
+  assert.equal(shouldCapture({ url: 'https://a.test/x.zip', fileName: '' }, zip), true);
+  assert.equal(shouldCapture({ url: 'blob:https://a.test/123', fileName: 'x.zip' }, zip), false);
+  assert.equal(shouldCapture({ url: 'data:application/zip;base64,AA', fileName: 'x.zip' }, zip), false);
+  assert.equal(shouldCapture({ url: 'https://a.test/get?id=1', fileName: 'x.zip' }, zip), true,
     'the browser-chosen name wins over the address');
+});
+
+test('site exceptions match hosts with wildcards, or host and path when they hold a slash', () => {
+  assert.ok(matchesSiteList(['*.update.microsoft.com'], 'https://dl.update.microsoft.com/x.cab'));
+  assert.ok(!matchesSiteList(['*.update.microsoft.com'], 'https://update.microsoft.com.evil.test/x.cab'));
+  assert.ok(matchesSiteList(['files.test'], 'https://FILES.test/a.zip'));
+  assert.ok(!matchesSiteList(['files.test'], 'https://cdn.files.test/a.zip'), 'a plain name is that host only');
+  assert.ok(matchesSiteList(['files.test/private/*'], 'https://files.test/private/a.zip'));
+  assert.ok(!matchesSiteList(['files.test/private/*'], 'https://files.test/public/a.zip'));
+  assert.ok(!matchesSiteList(['x.test'], 'not a url'));
+});
+
+test('address exceptions match the whole address', () => {
+  assert.ok(matchesAddressList(['https://a.test/get?id=*'], 'https://a.test/get?id=7'));
+  assert.ok(!matchesAddressList(['https://a.test/get?id=*'], 'https://a.test/other'));
+  assert.ok(matchesAddressList(['*.iso'], 'https://mirror.test/linux.ISO'));
+});
+
+test('an exception on the link or on where it led keeps the download in the browser', () => {
+  const rules = { capturedExtensions: ['zip'], siteExceptions: ['cdn.test'], addressExceptions: ['https://a.test/keep/*'] };
+  assert.equal(shouldCapture({ url: 'https://a.test/x.zip', fileName: 'x.zip' }, rules), true);
+  assert.equal(shouldCapture({ url: 'https://a.test/x.zip', finalUrl: 'https://cdn.test/x.zip', fileName: 'x.zip' }, rules), false);
+  assert.equal(shouldCapture({ url: 'https://a.test/keep/x.zip', fileName: 'x.zip' }, rules), false);
 });
 
 test('names come from the address path, decoded', () => {
@@ -93,7 +117,7 @@ function newCapture(api, connection, { enabled = true } = {}) {
   return new DownloadCapture(api, connection, {
     ready: Promise.resolve(),
     isEnabled: () => enabled,
-    patterns: () => ['zip'],
+    rules: () => ({ capturedExtensions: ['zip'], siteExceptions: [], addressExceptions: [] }),
     userAgent: 'TestUA',
     canHideDownloadUi: true,
   });

@@ -37,7 +37,7 @@ private:
     std::string appVersion_;
     std::function<void(browser::Capture)> onCapture_;
     std::map<BrowserConnectionId, Session> sessions_;
-    // The settings MakeConfig reads, as last pushed; extend together with MakeConfig.
+    // The settings MakeConfig reads (ConfigInputs), as last pushed.
     std::optional<std::string> configInputs_;
 };
 

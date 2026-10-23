@@ -41,10 +41,23 @@ export function makeHello(info) {
   };
 }
 
+const MAX_PATTERNS = 2000;
+const MAX_PATTERN = 2048;
+
+/** The valid patterns of an optional list: strings without spaces or control characters. */
+function patternList(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.filter((entry) => typeof entry === 'string' && entry.length > 0 && entry.length <= MAX_PATTERN &&
+    !/[\u0000-\u0020\u007f]/.test(entry)).slice(0, MAX_PATTERNS);
+}
+
 /**
  * The capture rules from a config message, or null when the message is not a valid config.
  * Invalid list entries are dropped rather than failing the whole config.
- * @returns {{appVersion: string, capturedExtensions: string[]} | null}
+ * @returns {{appVersion: string, capturedExtensions: string[], siteExceptions: string[],
+ *            addressExceptions: string[]} | null}
  */
 export function parseConfig(message) {
   if (message === null || typeof message !== 'object' || message.v !== PROTOCOL_VERSION ||
@@ -56,6 +69,8 @@ export function parseConfig(message) {
     appVersion: cleanText(message.appVersion, MAX_VERSION),
     capturedExtensions: message.capturedExtensions.filter(
       (entry) => typeof entry === 'string' && EXTENSION_PATTERN.test(entry)),
+    siteExceptions: patternList(message.siteExceptions),
+    addressExceptions: patternList(message.addressExceptions),
   };
 }
 

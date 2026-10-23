@@ -44,7 +44,7 @@ public:
     static void ApplyEditedFields(const model::Settings& edited, model::Settings& current);
 
 private:
-    static constexpr int kPageCount = 7;
+    static constexpr int kPageCount = 8;
 
     bool OnInit() override;
     bool OnCommand(int id, int code, HWND control) override;
@@ -76,6 +76,7 @@ private:
     void LoadProxy(int enabledId, int hostId, int portId, int userId, const model::ProxyServer& server);
     bool StoreProxy(int enabledId, int hostId, int portId, int userId, int passwordId, model::ProxyServer& server);
     void ShowConnectedBrowsers();
+    void ShowAddressExceptionCount();
     void RefreshLimits();
     void RefreshLogins();
     void UpdateProxyControls();
@@ -83,6 +84,7 @@ private:
     void UpdateQuotaControls();
 
     Input input_;
+    std::vector<std::wstring> addressExceptions_;  // edited in their own dialog
     HHOOK pageKeyHook_ = nullptr;
     core::SecretProtector& secrets_;
     SystemActions& system_;

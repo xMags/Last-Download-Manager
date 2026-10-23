@@ -72,11 +72,30 @@ export function baseName(path) {
 }
 
 /**
- * Whether to take a browser download over.
- * @param {{url: string, fileName: string}} download fileName may be empty
- * @param {string[]} patterns captured extensions from LDM's config
+ * True when the address is on a site of the list. A pattern with a '/' is matched against the host
+ * and path, any other against the host alone, as LDM matches category sites.
  */
-export function shouldCapture({ url, fileName }, patterns) {
+export function matchesSiteList(sites, url) {
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  return sites.some((site) => wildcardMatch(site, site.includes('/') ? parsed.hostname + parsed.pathname : parsed.hostname));
+}
+
+/** True when the whole address matches one of the patterns. */
+export function matchesAddressList(addresses, url) {
+  return addresses.some((pattern) => wildcardMatch(pattern, url));
+}
+
+/**
+ * Whether to take a browser download over (checklist B-02).
+ * @param {{url: string, finalUrl?: string, fileName: string}} download fileName may be empty
+ * @param {{capturedExtensions: string[], siteExceptions?: string[], addressExceptions?: string[]}} rules
+ */
+export function shouldCapture({ url, finalUrl, fileName }, rules) {
   let scheme;
   try {
     scheme = new URL(url).protocol;
@@ -86,5 +105,11 @@ export function shouldCapture({ url, fileName }, patterns) {
   if (!SCHEMES.includes(scheme)) {
     return false;  // blob:, data: and file: downloads only exist inside the browser
   }
-  return matchesExtensionList(patterns, fileName || nameFromUrl(url));
+  // An exception on either the link or where it led keeps the download in the browser.
+  const addresses = finalUrl && finalUrl !== url ? [url, finalUrl] : [url];
+  if (addresses.some((address) => matchesSiteList(rules.siteExceptions ?? [], address) ||
+                                 matchesAddressList(rules.addressExceptions ?? [], address))) {
+    return false;
+  }
+  return matchesExtensionList(rules.capturedExtensions, fileName || nameFromUrl(finalUrl || url));
 }

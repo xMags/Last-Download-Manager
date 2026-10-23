@@ -67,6 +67,8 @@ add_library(ldm_ui STATIC
     dialogs/AddUrlDialog.h
     dialogs/BatchDialog.cpp
     dialogs/BatchDialog.h
+    dialogs/CaptureDialogs.cpp
+    dialogs/CaptureDialogs.h
     dialogs/CategoryDialog.cpp
     dialogs/CategoryDialog.h
     dialogs/CompleteDialog.cpp

@@ -5,6 +5,7 @@
 #include <cctype>
 #include <sstream>
 #include <utility>
+#include <vector>
 
 namespace ldm::ui {
 
@@ -12,6 +13,24 @@ namespace {
 
 // Pushed configs are not answers to a request.
 constexpr char kPushId[] = "push";
+
+// Every setting MakeConfig reads, joined, to notice when the extensions need a new config.
+std::string ConfigInputs(const model::Settings& settings)
+{
+    constexpr char kSeparator = '\x1f';
+    return settings.capturedExtensions + kSeparator + settings.captureSiteExceptions + kSeparator +
+           settings.captureAddressExceptions;
+}
+
+std::vector<std::string> Words(const std::string& text)
+{
+    std::vector<std::string> words;
+    std::istringstream stream(text);
+    for (std::string word; stream >> word;) {
+        words.push_back(std::move(word));
+    }
+    return words;
+}
 
 }  // namespace
 
@@ -55,12 +74,13 @@ void BrowserSessions::OnEvent(BrowserEvent event, const model::Settings& setting
 void BrowserSessions::OnSettingsChanged(const model::Settings& settings)
 {
     // Snapshots arrive up to 10 times a second; settings rarely change.
-    if (configInputs_ == settings.capturedExtensions) {
+    std::string inputs = ConfigInputs(settings);
+    if (configInputs_ == inputs) {
         return;
     }
     // The first call only records the starting point; nobody has a stale copy yet.
     const bool first = !configInputs_.has_value();
-    configInputs_ = settings.capturedExtensions;
+    configInputs_ = std::move(inputs);
     if (first) {
         return;
     }
@@ -76,13 +96,15 @@ browser::Config BrowserSessions::MakeConfig(const model::Settings& settings) con
 {
     browser::Config config;
     config.appVersion = appVersion_;
-    std::istringstream words(settings.capturedExtensions);
-    for (std::string word; words >> word;) {
+    for (std::string word : Words(settings.capturedExtensions)) {
         for (char& c : word) {
             c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
         }
         config.capturedExtensions.push_back(std::move(word));
     }
+    config.siteExceptions = Words(settings.captureSiteExceptions);
+    // Address patterns hold no spaces, so whitespace separates them as well as line breaks do.
+    config.addressExceptions = Words(settings.captureAddressExceptions);
     return config;
 }
 

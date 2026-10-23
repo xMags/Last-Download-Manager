@@ -16,7 +16,8 @@ const RECONNECT_ALARM = 'ldm-reconnect';
 const RECONNECT_MINUTES = 0.5;
 
 let enabled = true;
-let patterns = [];  // captured extensions from LDM's Options, kept while LDM is not running
+// Capture rules from LDM's Options, kept while LDM is not running.
+let rules = { capturedExtensions: [], siteExceptions: [], addressExceptions: [] };
 
 const connection = new LdmConnection(api, {
   helloInfo: async () => ({
@@ -25,7 +26,7 @@ const connection = new LdmConnection(api, {
     incognitoAllowed: await api.extension.isAllowedIncognitoAccess(),
   }),
   onConfig: (config) => {
-    patterns = config.capturedExtensions;
+    rules = config;
     api.storage.local.set({ config });
   },
   onState: (state) => {
@@ -40,13 +41,13 @@ const connection = new LdmConnection(api, {
 
 const settingsLoaded = api.storage.local.get(['enabled', 'config']).then((stored) => {
   enabled = stored.enabled !== false;
-  patterns = stored.config?.capturedExtensions ?? [];
+  rules = { ...rules, ...(stored.config ?? {}) };
 });
 
 const capture = new DownloadCapture(api, connection, {
   ready: settingsLoaded,
   isEnabled: () => enabled,
-  patterns: () => patterns,
+  rules: () => rules,
   userAgent: navigator.userAgent,
   canHideDownloadUi: typeof api.downloads.setUiOptions === 'function',
 });

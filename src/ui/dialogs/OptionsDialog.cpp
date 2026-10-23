@@ -3,14 +3,18 @@
 #include "base/Utf.h"
 #include "resource.h"
 #include "ui/FileDialogs.h"
+#include "ui/dialogs/CaptureDialogs.h"
 
 #include <commctrl.h>
 #include <uxtheme.h>
 #include <windowsx.h>
 
 #include <algorithm>
+#include <array>
 #include <cwchar>
 #include <filesystem>
+#include <sstream>
+#include <vector>
 
 namespace ldm::ui {
 
@@ -25,8 +29,9 @@ struct PageInfo {
 // one modal Options dialog exists at a time, on the UI thread.
 thread_local OptionsDialog* pageKeyTarget = nullptr;
 
-constexpr std::array<PageInfo, 7> kPages{{
+constexpr std::array<PageInfo, 8> kPages{{
     {IDD_OPTIONS_GENERAL, L"General"},
+    {IDD_OPTIONS_FILETYPES, L"File types"},
     {IDD_OPTIONS_SAVE, L"Save to"},
     {IDD_OPTIONS_DOWNLOADS, L"Downloads"},
     {IDD_OPTIONS_CONNECTION, L"Connection"},
@@ -53,6 +58,44 @@ constexpr std::array<std::pair<model::SpeedProfile, const wchar_t*>, 3> kProfile
     {model::SpeedProfile::Medium, L"Medium speed (DSL)"},
     {model::SpeedProfile::High, L"High speed (cable, fiber, LAN)"},
 }};
+
+constexpr int kFileTypesPage = 1;
+constexpr int kSavePage = 2;
+
+// A file type as Options > File types accepts it: letters, digits and a few symbols, with '*' as a
+// wildcard and an optional leading dot (the extension ignores anything else).
+bool IsFileTypePattern(const std::wstring& word)
+{
+    const size_t start = !word.empty() && word.front() == L'.' ? 1 : 0;
+    return word.size() > start && word.size() - start <= 32 &&
+           std::all_of(word.begin() + static_cast<std::ptrdiff_t>(start), word.end(), [](wchar_t c) {
+               return (c >= L'a' && c <= L'z') || (c >= L'A' && c <= L'Z') || (c >= L'0' && c <= L'9') || c == L'*' ||
+                      c == L'?' || c == L'_' || c == L'+' || c == L'~' || c == L'-';
+           });
+}
+
+// Space-separated words of a multi-line edit, joined by single spaces.
+std::vector<std::wstring> SplitWords(const std::wstring& text)
+{
+    std::vector<std::wstring> words;
+    std::wistringstream stream(text);
+    for (std::wstring word; stream >> word;) {
+        words.push_back(std::move(word));
+    }
+    return words;
+}
+
+std::wstring JoinWords(const std::vector<std::wstring>& words, const wchar_t* separator)
+{
+    std::wstring text;
+    for (const std::wstring& word : words) {
+        if (!text.empty()) {
+            text += separator;
+        }
+        text += word;
+    }
+    return text;
+}
 
 int ConnectionsForProfile(model::SpeedProfile profile)
 {
@@ -302,6 +345,11 @@ void OptionsDialog::Load()
     Check(IDC_OPT_STARTUP, input_.launchOnStartup);
     Check(IDC_OPT_CLIPBOARD, s.monitorClipboard);
 
+    Put(IDC_OPT_TYPES, base::ToUtf16(s.capturedExtensions));
+    Put(IDC_OPT_SITES, base::ToUtf16(s.captureSiteExceptions));
+    addressExceptions_ = SplitWords(base::ToUtf16(s.captureAddressExceptions));
+    ShowAddressExceptionCount();
+
     if (!categories_.empty()) {
         ComboBox_SetCurSel(Control(IDC_OPT_CATEGORY), 0);
         LoadCategory(0);
@@ -495,9 +543,31 @@ void OptionsDialog::UpdateQuotaControls()
     }
 }
 
+void OptionsDialog::ShowAddressExceptionCount()
+{
+    const size_t count = addressExceptions_.size();
+    Put(IDC_OPT_ADDRESSES_COUNT, count == 0   ? L"(none)"
+                                 : count == 1 ? L"(1 address)"
+                                              : L"(" + std::to_wstring(count) + L" addresses)");
+}
+
 void OptionsDialog::OnPageCommand(int id, int code)
 {
     switch (id) {
+    case IDC_OPT_TYPES_DEFAULT:
+        Put(IDC_OPT_TYPES, base::ToUtf16(model::DefaultCapturedExtensions()));
+        break;
+    case IDC_OPT_SITES_DEFAULT:
+        Put(IDC_OPT_SITES, base::ToUtf16(model::DefaultCaptureSiteExceptions()));
+        break;
+    case IDC_OPT_ADDRESSES: {
+        AddressExceptionsDialog dialog(CurrentTheme(), addressExceptions_);
+        if (auto edited = dialog.Run(Handle())) {
+            addressExceptions_ = std::move(*edited);
+            ShowAddressExceptionCount();
+        }
+        break;
+    }
     case IDC_OPT_CATEGORY:
         if (code == CBN_SELCHANGE) {
             StoreCategory(currentCategory_);
@@ -643,12 +713,25 @@ bool OptionsDialog::Store()
     model::Settings s = input_.settings;
     s.monitorClipboard = IsChecked(IDC_OPT_CLIPBOARD);
 
+    const std::vector<std::wstring> types = SplitWords(Get(IDC_OPT_TYPES));
+    for (const std::wstring& type : types) {
+        if (!IsFileTypePattern(type)) {
+            Warn(L"\"" + type + L"\" is not a file type. Use letters and digits, such as ZIP, with * as a wildcard.");
+            ShowPage(kFileTypesPage);
+            TabCtrl_SetCurSel(Item(IDC_OPT_TAB), kFileTypesPage);
+            return false;
+        }
+    }
+    s.capturedExtensions = base::ToUtf8(JoinWords(types, L" "));
+    s.captureSiteExceptions = base::ToUtf8(JoinWords(SplitWords(Get(IDC_OPT_SITES)), L" "));
+    s.captureAddressExceptions = base::ToUtf8(JoinWords(addressExceptions_, L"\n"));
+
     StoreCategory(currentCategory_);
     for (const model::Category& category : categories_) {
         if (!std::filesystem::path(base::ToUtf16(category.folder)).is_absolute()) {
             Warn(L"The folder of category \"" + base::ToUtf16(category.name) + L"\" must be a full path.");
-            ShowPage(1);
-            TabCtrl_SetCurSel(Item(IDC_OPT_TAB), 1);
+            ShowPage(kSavePage);
+            TabCtrl_SetCurSel(Item(IDC_OPT_TAB), kSavePage);
             return false;
         }
     }
@@ -762,6 +845,9 @@ bool OptionsDialog::Store()
 void OptionsDialog::ApplyEditedFields(const model::Settings& edited, model::Settings& current)
 {
     current.monitorClipboard = edited.monitorClipboard;
+    current.capturedExtensions = edited.capturedExtensions;
+    current.captureSiteExceptions = edited.captureSiteExceptions;
+    current.captureAddressExceptions = edited.captureAddressExceptions;
     current.temporaryDirectory = edited.temporaryDirectory;
     current.setFileDateFromServer = edited.setFileDateFromServer;
     current.showStartDialog = edited.showStartDialog;

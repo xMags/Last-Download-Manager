@@ -84,6 +84,8 @@ struct SoundEvent {
 
 // Extensions captured automatically (checklist O-02 default list), space separated.
 [[nodiscard]] std::string DefaultCapturedExtensions();
+// Sites whose downloads the browser keeps (checklist O-02), space separated, '*' wildcards.
+[[nodiscard]] std::string DefaultCaptureSiteExceptions();
 
 // Every user setting, with its default. Keys, ranges and fallbacks live in Settings.cpp only.
 struct Settings {
@@ -91,8 +93,10 @@ struct Settings {
     bool launchOnStartup = false;
     bool monitorClipboard = true;
 
-    // Options > File types (browser parts arrive in M3)
+    // Options > File types (checklist O-02, B-02)
     std::string capturedExtensions = DefaultCapturedExtensions();
+    std::string captureSiteExceptions = DefaultCaptureSiteExceptions();
+    std::string captureAddressExceptions;  // one address pattern per line, '*' wildcards
 
     // Options > Save to
     std::string temporaryDirectory;  // empty = keep partial files next to the destination
