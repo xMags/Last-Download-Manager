@@ -211,7 +211,8 @@ int WINAPI wWinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int sho
     int exitCode = 0;
     {
         ldm::ui::MainWindow window(
-            ldm::ui::MainWindow::Services{&core, &bridge, &shell, &system, &secrets, &startup, &browserBridge});
+            ldm::ui::MainWindow::Services{&core, &bridge, &shell, &system, &secrets, &startup, &browserBridge,
+                                          ldm::platform::IsProcessElevated()});
         auto snapshot = bridge.TakeSnapshot();
         // --tray (Launch on startup) starts hidden, unless the tray icon is hidden too.
         const bool startHidden = launch.tray && snapshot && snapshot->settings.trayIconStyle != ldm::model::TrayIconStyle::Hidden;

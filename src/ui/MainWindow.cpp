@@ -124,6 +124,9 @@ bool MainWindow::Create(std::shared_ptr<const core::Snapshot> snapshot, int show
 
     window_ = ::CreateWindowExW(0, kClassName, WindowTitle().c_str(), WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN, CW_USEDEFAULT,
                                 CW_USEDEFAULT, 1000, 640, nullptr, nullptr, windowClass.hInstance, this);
+    if (window_ != nullptr && services_.elevated && services_.browser != nullptr) {
+        QueueExternalInput(ElevationNotice{});
+    }
     return window_ != nullptr;
 }
 
@@ -204,6 +207,9 @@ void MainWindow::OnCreate()
         if (browserSessions_) {
             browserSessions_->LinksDone(connection, requestId);
         }
+    };
+    context.openPage = [this](const std::string& url) {
+        return browserSessions_ && browserSessions_->OpenPage(url);
     };
     controller_ = std::make_unique<MainController>(std::move(context));
 
@@ -371,6 +377,8 @@ void MainWindow::DrainExternalInput()
             controller_->OnBrowserCapture(std::move(*capture));
         } else if (auto* links = std::get_if<BrowserSessions::LinksRequest>(&*next)) {
             controller_->OnBrowserLinks(std::move(*links));
+        } else if (std::holds_alternative<ElevationNotice>(*next)) {
+            controller_->WarnElevated();
         } else {
             controller_->OnDroppedUrls(std::move(std::get<std::vector<std::string>>(*next)));
         }

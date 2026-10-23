@@ -44,6 +44,9 @@ public:
     void OnSettingsChanged(const model::Settings& settings);
     // The Download All Links dialog for this request closed.
     void LinksDone(BrowserConnectionId connection, const std::string& requestId);
+    // Opens `url` (http or https) in a tab of the browser that connected last; false when no
+    // browser is connected.
+    [[nodiscard]] bool OpenPage(const std::string& url);
 
     [[nodiscard]] const std::map<BrowserConnectionId, Session>& Sessions() const noexcept { return sessions_; }
 

@@ -46,9 +46,13 @@ MainController::MainController(Context context)
     : context_(std::move(context)),
       transfers_(TransferWindows::Context{context_.owner, context_.commands, context_.shell, context_.system,
                                           context_.theme, context_.snapshot, context_.exit}),
+      captures_(CaptureFollowUp::Context{context_.owner, context_.commands, context_.theme, context_.snapshot,
+                                         context_.openPage}),
       adds_(AddFlow::Context{context_.owner, context_.commands, context_.theme, context_.snapshot,
                              [this](model::DownloadId id) { transfers_.OpenProgress(id); },
-                             [this](model::DownloadId id) { context_.list->SelectOnly(id); }, context_.linksDone}),
+                             [this](model::DownloadId id) { context_.list->SelectOnly(id); }, context_.linksDone,
+                             [this](model::DownloadId id) { captures_.OnCapturedAdded(id); },
+                             [this](const std::string& url) { captures_.OnCaptureCancelled(url); }}),
       importExport_(ImportExportFlow::Context{context_.owner, context_.theme, &adds_, context_.snapshot, [this] { return Selection(); }})
 {
 }
@@ -155,6 +159,11 @@ bool MainController::OnCommand(int id)
         return true;
     case ID_FILE_REMOVE:
         RemoveSelected();
+        return true;
+    case ID_ROW_REFRESH_ADDRESS:
+        if (const auto* view = SingleSelection()) {
+            captures_.RefreshAddress(view->download.id);
+        }
         return true;
     case ID_FILE_REDOWNLOAD:
         if (const auto* view = SingleSelection()) {
@@ -313,6 +322,9 @@ void MainController::OnLaunchRequest(const core::LaunchRequest& request)
 
 void MainController::OnBrowserCapture(browser::Capture capture)
 {
+    if (captures_.OfferAsNewAddress(capture)) {
+        return;  // continues the download that waited for a new address
+    }
     ExternalAdd add;
     add.url = std::move(capture.url);
     add.fileName = std::move(capture.fileName);
@@ -321,8 +333,19 @@ void MainController::OnBrowserCapture(browser::Capture capture)
         post = core::PostData{std::move(capture.post->contentType), std::move(capture.post->body)};
     }
     add.browser = BrowserRequest{std::move(capture.referrer), std::move(capture.userAgent), std::move(capture.cookies),
-                                 std::move(post)};
+                                 std::move(post), std::move(capture.mimeType)};
     adds_.AddAddress(add);
+}
+
+void MainController::WarnElevated()
+{
+    (void)ShowMessage(context_.owner, *context_.theme,
+                      MessageRequest{L"LDM is running as administrator, so your browsers cannot hand downloads to it.\n\n"
+                                     L"Browsers run with normal rights, and Windows does not let them reach a program "
+                                     L"that runs as administrator. Exit LDM and start it again normally. If its "
+                                     L"shortcut or its Compatibility settings say \"Run as administrator\", turn that "
+                                     L"off.",
+                                     MessageKind::Warning});
 }
 
 void MainController::OnBrowserLinks(BrowserSessions::LinksRequest request)
@@ -430,6 +453,7 @@ void MainController::OnNotifications(std::vector<core::Notification> notificatio
             transfers_.OnCompleted(*completed);
         } else if (const auto* failed = std::get_if<core::DownloadFailed>(&notification)) {
             transfers_.OnFailed(*failed);
+            captures_.OnFailed(*failed);
             if (failed->failure.reason == core::FailureReason::AuthRequired) {
                 AskForLogin(*failed);
             }
@@ -782,7 +806,7 @@ void MainController::ShowRowMenu(POINT screen)
     AppendItem(menu.get(), ID_FILE_DOWNLOAD_NOW, L"&Resume download", state.resume);
     AppendItem(menu.get(), ID_FILE_STOP, L"&Stop download", state.stop);
     AppendSeparator(menu.get());
-    AppendItem(menu.get(), ID_ROW_REFRESH_ADDRESS, L"Refresh download &address", false);
+    AppendItem(menu.get(), ID_ROW_REFRESH_ADDRESS, L"Refresh download &address", state.refreshAddress);
     AppendSeparator(menu.get());
     AppendItem(menu.get(), ID_FILE_REMOVE, L"Re&move\tDel", state.remove);
     AppendSeparator(menu.get());

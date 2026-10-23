@@ -800,3 +800,85 @@ TEST_F(CoordinatorTest, NamesStayUniqueAcrossDownloads)
 }
 
 }  // namespace
+
+TEST_F(CoordinatorTest, BrowserContentTypeMakesAWebPageInsteadOfTheFileAFailure)
+{
+    Add("https://files.test/get?id=1", AddMode::StartNow, [](AddDownloadCommand& c) { c.contentType = "application/zip"; });
+    EXPECT_EQ(engine_.starts.back().knownContentType, "application/zip");
+    Add("https://files.test/get?id=2", AddMode::StartNow, [](AddDownloadCommand& c) { c.contentType = "Text/HTML; charset=utf-8"; });
+    EXPECT_FALSE(engine_.starts.back().knownContentType) << "a page the browser downloaded is not held against a page";
+    Add("https://files.test/get?id=3", AddMode::StartNow, [](AddDownloadCommand& c) { c.contentType = "a\r\nb"; });
+    EXPECT_FALSE(engine_.starts.back().knownContentType);
+}
+
+TEST_F(CoordinatorTest, WaitingForANewAddressStopsAndTheNewAddressResumes)
+{
+    const DownloadId id = *Add("https://files.test/old?token=1").id;
+    coordinator_->Handle(ldm::core::WaitForAddressCommand{id});
+    ASSERT_EQ(engine_.stops.size(), 1u) << "a running download stops while it waits";
+    EXPECT_TRUE(View(id).waitingForAddress);
+    Finish(id, 1, TransferOutcome::Stopped, {{0, 100, 40}}, std::nullopt, 100);
+    files_.Put(kRoot / L"old.ldmpart", 100);
+    EXPECT_TRUE(View(id).waitingForAddress);
+    EXPECT_EQ(View(id).download.status, DownloadStatus::Paused);
+
+    const ldm::model::Cookie cookie{"files.test", true, "/", true, 0, "sid", "new"};
+    ldm::core::ReplaceAddressCommand replace;
+    replace.id = id;
+    replace.url = "https://files.test/new?token=2";
+    replace.referer = "https://files.test/page";
+    replace.userAgent = "BrowserUA/2.0";
+    replace.cookies = {cookie};
+    coordinator_->Handle(replace);
+    ASSERT_EQ(engine_.starts.size(), 2u);
+    const auto& resumed = engine_.starts.back();
+    EXPECT_EQ(resumed.url, "https://files.test/new?token=2");
+    EXPECT_EQ(resumed.userAgent, "BrowserUA/2.0");
+    EXPECT_EQ(resumed.cookieLines, std::vector<std::string>{"files.test\tFALSE\t/\tTRUE\t0\tsid\tnew"});
+    EXPECT_EQ(resumed.knownSize, 100) << "the old size still guards against a different file";
+    EXPECT_EQ(resumed.segments.size(), 1u) << "progress is kept";
+    EXPECT_FALSE(View(id).waitingForAddress);
+
+    coordinator_->Handle(replace);
+    EXPECT_EQ(engine_.starts.size(), 2u) << "a download that no longer waits ignores another address";
+}
+
+TEST_F(CoordinatorTest, AddressArrivingWhileTheOldRunStopsResumesAfterIt)
+{
+    const DownloadId id = *Add("https://files.test/a.zip").id;
+    coordinator_->Handle(ldm::core::WaitForAddressCommand{id});
+    ldm::core::ReplaceAddressCommand replace;
+    replace.id = id;
+    replace.url = "https://files.test/b.zip";
+    coordinator_->Handle(replace);
+    EXPECT_EQ(engine_.starts.size(), 1u) << "the old run has not ended yet";
+    Finish(id, 1, TransferOutcome::Stopped, {{0, 10, 5}}, std::nullopt, 10);
+    ASSERT_EQ(engine_.starts.size(), 2u);
+    EXPECT_EQ(engine_.starts.back().url, "https://files.test/b.zip");
+}
+
+TEST_F(CoordinatorTest, OnlyOneDownloadWaitsAndWaitingEnds)
+{
+    const DownloadId first = *Add("https://files.test/1.zip", AddMode::Later).id;
+    const DownloadId second = *Add("https://files.test/2.zip", AddMode::Later).id;
+    coordinator_->Handle(ldm::core::WaitForAddressCommand{first});
+    coordinator_->Handle(ldm::core::WaitForAddressCommand{second});
+    EXPECT_FALSE(View(first).waitingForAddress) << "the newer request takes over";
+    EXPECT_TRUE(View(second).waitingForAddress);
+
+    coordinator_->Handle(ldm::core::ResumeCommand{{second}});
+    EXPECT_FALSE(View(second).waitingForAddress) << "resuming by hand ends waiting";
+
+    coordinator_->Handle(ldm::core::WaitForAddressCommand{first});
+    clock_.Advance(ldm::core::kAddressWaitLimit);
+    coordinator_->Tick();
+    EXPECT_FALSE(View(first).waitingForAddress) << "waiting expires";
+
+    coordinator_->Handle(ldm::core::WaitForAddressCommand{first});
+    coordinator_->Handle(ldm::core::DeleteCommand{{first}, false});
+    ldm::core::ReplaceAddressCommand replace;
+    replace.id = first;
+    replace.url = "https://files.test/1b.zip";
+    coordinator_->Handle(replace);  // must not touch a deleted download
+    EXPECT_FALSE(InSnapshot(first));
+}

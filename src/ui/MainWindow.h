@@ -44,6 +44,7 @@ public:
         core::SecretProtector* secrets = nullptr;
         StartupRegistration* startup = nullptr;
         BrowserLink* browser = nullptr;  // optional: no browser integration without it
+        bool elevated = false;  // LDM runs as administrator, which browsers cannot reach (checklist B-10)
     };
 
     explicit MainWindow(const Services& services);
@@ -103,8 +104,10 @@ private:
     void DrainBrowserEvents();
 
     // Input that arrives from outside the window and may open dialogs.
+    // The warning that browsers cannot reach an elevated LDM, shown once the window is up.
+    struct ElevationNotice {};
     using ExternalInput = std::variant<core::LaunchRequest, std::vector<std::string>, browser::Capture,
-                                       BrowserSessions::LinksRequest>;
+                                       BrowserSessions::LinksRequest, ElevationNotice>;
     void QueueExternalInput(ExternalInput input);
 
     Services services_;

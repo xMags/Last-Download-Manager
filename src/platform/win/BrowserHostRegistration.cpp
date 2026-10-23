@@ -93,6 +93,19 @@ bool PointKeyAt(const std::wstring& subKey, const std::wstring& manifest)
 
 }  // namespace
 
+bool IsProcessElevated()
+{
+    HANDLE token = nullptr;
+    if (!::OpenProcessToken(::GetCurrentProcess(), TOKEN_QUERY, &token)) {
+        return false;
+    }
+    TOKEN_ELEVATION elevation{};
+    DWORD size = 0;
+    const BOOL ok = ::GetTokenInformation(token, TokenElevation, &elevation, sizeof(elevation), &size);
+    ::CloseHandle(token);
+    return ok != FALSE && elevation.TokenIsElevated != 0;
+}
+
 bool RegisterBrowserHosts(const std::filesystem::path& manifestFolder, const std::filesystem::path& hostExecutable)
 {
     std::error_code error;

@@ -12,6 +12,7 @@ struct CommandState {
     bool stop = false;        // at least one selected download is running
     bool remove = false;      // something is selected
     bool redownload = false;  // exactly one, not being deleted
+    bool refreshAddress = false;  // exactly one, not complete, finishing or being deleted
     bool open = false;        // exactly one, completed
     bool openFolder = false;  // exactly one
     bool moveRename = false;  // exactly one, not running

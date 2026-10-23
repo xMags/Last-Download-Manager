@@ -258,6 +258,7 @@ void VisitSettings(Visitor& v, SettingsType& s)
     v.Bool("browser.keys.force.delete", s.captureKeys.forceDelete);
     v.Bool("browser.keys.forceNeedsLinkClick", s.captureKeys.forceNeedsLinkClick);
     v.Bool("browser.keys.skipWebContent", s.captureKeys.skipWebContent);
+    v.Bool("browser.offerExceptions", s.offerCaptureExceptions);
     v.Bool("browser.menu.chromium.downloadLink", s.chromiumMenu.downloadLink);
     v.Bool("browser.menu.chromium.downloadAll", s.chromiumMenu.downloadAll);
     v.Bool("browser.menu.firefox.downloadLink", s.firefoxMenu.downloadLink);

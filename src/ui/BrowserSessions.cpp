@@ -98,6 +98,34 @@ void BrowserSessions::OnEvent(BrowserEvent event, const model::Settings& setting
     }
 }
 
+bool BrowserSessions::OpenPage(const std::string& url)
+{
+    const auto parsed = core::ParseUrl(url);
+    if (!parsed || (parsed->scheme != "http" && parsed->scheme != "https")) {
+        return false;
+    }
+    // A browser's lasting connection asks LDM not to start; the short ones of single requests ask
+    // it to and close soon, so a message sent there could be lost.
+    // Connection ids grow, so the last match is the newest.
+    std::optional<BrowserConnectionId> lasting;
+    std::optional<BrowserConnectionId> any;
+    for (const auto& [connection, session] : sessions_) {
+        if (!session.hello) {
+            continue;
+        }
+        any = connection;
+        if (!session.hello->startLdm) {
+            lasting = connection;
+        }
+    }
+    const std::optional<BrowserConnectionId> target = lasting ? lasting : any;
+    if (!target) {
+        return false;
+    }
+    link_.Send(*target, browser::EncodeOpenPage(url));
+    return true;
+}
+
 void BrowserSessions::LinksDone(BrowserConnectionId connection, const std::string& requestId)
 {
     if (sessions_.contains(connection)) {

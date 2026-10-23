@@ -349,6 +349,7 @@ void OptionsDialog::Load()
     browserMenus_ = BrowserMenus{s.chromiumMenu, s.firefoxMenu};
     Put(IDC_OPT_TYPES, base::ToUtf16(s.capturedExtensions));
     Put(IDC_OPT_SITES, base::ToUtf16(s.captureSiteExceptions));
+    Check(IDC_OPT_OFFER_EXCEPTIONS, s.offerCaptureExceptions);
     addressExceptions_ = SplitWords(base::ToUtf16(s.captureAddressExceptions));
     ShowAddressExceptionCount();
 
@@ -495,10 +496,15 @@ void OptionsDialog::ShowConnectedBrowsers()
         std::wstring incognito = hello.incognitoAllowed ? L"Allowed" : L"Not allowed";
         ListView_SetItemText(list, row, 2, incognito.data());
     }
+    const bool privateBlocked = std::any_of(browsers.begin(), browsers.end(),
+                                            [](const browser::Hello& hello) { return !hello.incognitoAllowed; });
     Put(IDC_OPT_BROWSERS_HINT,
         browsers.empty()
             ? L"No browser is connected. Add the Last Download Manager extension to Chrome, Edge or Firefox; it "
               L"connects by itself while LDM runs."
+        : privateBlocked
+            ? L"For private windows, open the browser's extensions page, choose Details for Last Download Manager and "
+              L"allow it in Incognito (Chrome), InPrivate (Edge) or Private Windows (Firefox)."
             : L"Click the LDM button in a browser's toolbar to turn capturing on or off for that browser.");
 }
 
@@ -741,6 +747,7 @@ bool OptionsDialog::Store()
     s.capturedExtensions = base::ToUtf8(JoinWords(types, L" "));
     s.captureSiteExceptions = base::ToUtf8(JoinWords(SplitWords(Get(IDC_OPT_SITES)), L" "));
     s.captureAddressExceptions = base::ToUtf8(JoinWords(addressExceptions_, L"\n"));
+    s.offerCaptureExceptions = IsChecked(IDC_OPT_OFFER_EXCEPTIONS);
     s.captureKeys = captureKeys_;
     s.chromiumMenu = browserMenus_.chromium;
     s.firefoxMenu = browserMenus_.firefox;
@@ -867,6 +874,7 @@ void OptionsDialog::ApplyEditedFields(const model::Settings& edited, model::Sett
     current.capturedExtensions = edited.capturedExtensions;
     current.captureSiteExceptions = edited.captureSiteExceptions;
     current.captureAddressExceptions = edited.captureAddressExceptions;
+    current.offerCaptureExceptions = edited.offerCaptureExceptions;
     current.captureKeys = edited.captureKeys;
     current.chromiumMenu = edited.chromiumMenu;
     current.firefoxMenu = edited.firefoxMenu;

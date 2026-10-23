@@ -28,6 +28,7 @@ struct DownloadView {
     std::vector<ConnectionView> connections;
     std::optional<TransferFailure> retrying;  // set while the engine retries after a failure
     bool waitingForQuota = false;  // paused by the download quota; starts again by itself
+    bool waitingForAddress = false;  // Refresh download address: waits for the browser (ENG-08)
 };
 
 // A stored site login without its password.

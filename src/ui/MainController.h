@@ -7,6 +7,7 @@
 #include "core/Snapshot.h"
 #include "ui/AddFlow.h"
 #include "ui/BrowserSessions.h"
+#include "ui/CaptureFollowUp.h"
 #include "ui/ClipboardMonitor.h"
 #include "ui/DownloadListView.h"
 #include "ui/ImportExportFlow.h"
@@ -55,6 +56,8 @@ public:
         std::function<std::vector<browser::Hello>()> connectedBrowsers;
         // The Download All Links dialog of a browser request closed.
         std::function<void(BrowserConnectionId, const std::string&)> linksDone;
+        // Opens a page in a connected browser (Refresh download address); false without one.
+        std::function<bool(const std::string&)> openPage;
     };
 
     explicit MainController(Context context);
@@ -84,6 +87,8 @@ public:
     void OnClipboardChanged();
     // Addresses dropped on the drop target (checklist W-06).
     void OnDroppedUrls(std::vector<std::string> urls);
+    // LDM runs as administrator, so browsers cannot hand it downloads (checklist B-10).
+    void WarnElevated();
 
     [[nodiscard]] AddFlow& Adds() noexcept { return adds_; }
 
@@ -115,6 +120,7 @@ private:
 
     Context context_;
     TransferWindows transfers_;
+    CaptureFollowUp captures_;
     AddFlow adds_;
     ImportExportFlow importExport_;
     ClipboardMonitor clipboard_;

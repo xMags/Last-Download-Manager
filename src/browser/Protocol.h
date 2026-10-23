@@ -162,4 +162,8 @@ struct Config {
 // The Download All Links dialog closed: the extension stops checking the links and disconnects.
 [[nodiscard]] std::string EncodeLinksDone(std::string_view replyTo);
 
+// Refresh download address (checklist ENG-08): asks the browser to open the page a download came
+// from, so the user can start it again there. `url` is http or https.
+[[nodiscard]] std::string EncodeOpenPage(std::string_view url);
+
 }  // namespace ldm::browser

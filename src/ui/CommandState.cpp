@@ -33,6 +33,7 @@ CommandState ComputeCommandState(std::span<const core::DownloadView* const> sele
     if (only != nullptr) {
         const DownloadStatus status = only->download.status;
         state.redownload = status != DownloadStatus::Deleting && status != DownloadStatus::Finalizing;
+        state.refreshAddress = state.redownload && status != DownloadStatus::Completed;
         state.open = status == DownloadStatus::Completed;
         state.openFolder = true;
         state.moveRename = status == DownloadStatus::Completed || Startable(*only);

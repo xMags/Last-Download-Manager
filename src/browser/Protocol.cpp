@@ -529,6 +529,13 @@ std::string EncodeLinksDone(std::string_view replyTo)
     return Envelope(replyTo, "links-done").dump();
 }
 
+std::string EncodeOpenPage(std::string_view url)
+{
+    nlohmann::json message = Envelope("open-page", "open-page");
+    message["url"] = url;
+    return message.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
+}
+
 std::optional<std::string> DecodeBase64(std::string_view text)
 {
     if (text.size() % 4 != 0) {

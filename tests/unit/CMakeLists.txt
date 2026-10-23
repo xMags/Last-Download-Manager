@@ -18,6 +18,7 @@ add_executable(ldm_unit_tests
     storage/SqliteStoreTests.cpp
     ui/BatchAndHistoryTests.cpp
     ui/BrowserSessionsTests.cpp
+    ui/CaptureFollowUpTests.cpp
     ui/ExportAndLaunchTests.cpp
     ui/ListModelTests.cpp
     ui/PageLinksTests.cpp)
