@@ -45,6 +45,25 @@ TEST(BrowserSessions, HelloIsAnsweredWithTheCaptureRules)
     EXPECT_EQ(config["capturedExtensions"], nlohmann::json({"zip", ".exe", "r0*"}));
     EXPECT_EQ(config["siteExceptions"], nlohmann::json({"*.a.test", "b.test/x/*"}));
     EXPECT_EQ(config["addressExceptions"], nlohmann::json({"https://c.test/*", "https://d.test/get?id=*"}));
+    EXPECT_EQ(config["keys"]["prevent"]["alt"], true);
+    EXPECT_EQ(config["keys"]["force"]["insert"], true);
+    EXPECT_EQ(config["keys"]["forceNeedsLinkClick"], true);
+    EXPECT_EQ(config["keys"]["skipWebContent"], true);
+}
+
+TEST(BrowserSessions, ChangedKeysArePushed)
+{
+    RecordingLink link;
+    ldm::ui::BrowserSessions sessions(link, "5.0.0", {});
+    ldm::model::Settings settings;
+    sessions.OnSettingsChanged(settings);
+    sessions.OnEvent(Event(1, ldm::browser::HostInfo{}), settings);
+    sessions.OnEvent(Event(1, SampleHello()), settings);
+    link.sent.clear();
+    settings.captureKeys.forceNeedsLinkClick = false;
+    sessions.OnSettingsChanged(settings);
+    ASSERT_EQ(link.sent.size(), 1u);
+    EXPECT_EQ(nlohmann::json::parse(link.sent[0].second)["keys"]["forceNeedsLinkClick"], false);
 }
 
 TEST(BrowserSessions, ChangedRulesArePushedToConnectedBrowsersOnly)

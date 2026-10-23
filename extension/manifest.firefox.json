@@ -36,5 +36,17 @@
   ],
   "host_permissions": [
     "<all_urls>"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "src/page-keys.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": true
+    }
   ]
 }

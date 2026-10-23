@@ -87,6 +87,30 @@ struct SoundEvent {
 // Sites whose downloads the browser keeps (checklist O-02), space separated, '*' wildcards.
 [[nodiscard]] std::string DefaultCaptureSiteExceptions();
 
+// Keys that change what happens to a link clicked in the browser (checklist B-03). A set counts as
+// held when every key checked in it is down.
+struct CaptureKeys {
+    bool preventEnabled = true;  // keep a link in the browser
+    bool preventAlt = true;
+    bool preventShift = false;
+    bool preventCtrl = false;
+
+    bool forceEnabled = true;  // give a link to LDM whatever its type or exceptions
+    bool forceAlt = false;
+    bool forceShift = false;
+    bool forceCtrl = false;
+    bool forceInsert = true;
+    bool forceDelete = false;
+    // Force only a download that follows a click on a link; off: any download that starts while the
+    // keys are held, for pages that start the download after a delay.
+    bool forceNeedsLinkClick = true;
+    // While forcing, let the browser keep web pages, pictures and scripts; off: the clicked link goes
+    // to LDM even when it is a page.
+    bool skipWebContent = true;
+
+    auto operator<=>(const CaptureKeys&) const = default;
+};
+
 // Every user setting, with its default. Keys, ranges and fallbacks live in Settings.cpp only.
 struct Settings {
     // Options > General
@@ -97,6 +121,7 @@ struct Settings {
     std::string capturedExtensions = DefaultCapturedExtensions();
     std::string captureSiteExceptions = DefaultCaptureSiteExceptions();
     std::string captureAddressExceptions;  // one address pattern per line, '*' wildcards
+    CaptureKeys captureKeys;               // Options > General > Keys
 
     // Options > Save to
     std::string temporaryDirectory;  // empty = keep partial files next to the destination

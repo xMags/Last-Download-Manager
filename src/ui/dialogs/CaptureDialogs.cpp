@@ -163,4 +163,90 @@ bool AddExceptionDialog::OnCommand(int id, int code, HWND control)
     return true;
 }
 
+CaptureKeysDialog::CaptureKeysDialog(const Theme& theme, model::CaptureKeys keys)
+    : Dialog(IDD_CAPTURE_KEYS, theme), keys_(keys)
+{
+}
+
+std::optional<model::CaptureKeys> CaptureKeysDialog::Run(HWND owner)
+{
+    RunModal(owner);
+    return result_;
+}
+
+bool CaptureKeysDialog::OnInit()
+{
+    SetChecked(IDC_KEYS_PREVENT, keys_.preventEnabled);
+    SetChecked(IDC_KEYS_PREVENT_ALT, keys_.preventAlt);
+    SetChecked(IDC_KEYS_PREVENT_SHIFT, keys_.preventShift);
+    SetChecked(IDC_KEYS_PREVENT_CTRL, keys_.preventCtrl);
+    SetChecked(IDC_KEYS_FORCE, keys_.forceEnabled);
+    SetChecked(IDC_KEYS_FORCE_ALT, keys_.forceAlt);
+    SetChecked(IDC_KEYS_FORCE_SHIFT, keys_.forceShift);
+    SetChecked(IDC_KEYS_FORCE_CTRL, keys_.forceCtrl);
+    SetChecked(IDC_KEYS_FORCE_INSERT, keys_.forceInsert);
+    SetChecked(IDC_KEYS_FORCE_DELETE, keys_.forceDelete);
+    SetChecked(IDC_KEYS_LINK_CLICK, keys_.forceNeedsLinkClick);
+    SetChecked(IDC_KEYS_SKIP_WEB, keys_.skipWebContent);
+    UpdateControls();
+    return true;
+}
+
+void CaptureKeysDialog::UpdateControls()
+{
+    const bool prevent = Checked(IDC_KEYS_PREVENT);
+    for (const int id : {IDC_KEYS_PREVENT_ALT, IDC_KEYS_PREVENT_SHIFT, IDC_KEYS_PREVENT_CTRL}) {
+        Enable(id, prevent);
+    }
+    const bool force = Checked(IDC_KEYS_FORCE);
+    for (const int id : {IDC_KEYS_FORCE_ALT, IDC_KEYS_FORCE_SHIFT, IDC_KEYS_FORCE_CTRL, IDC_KEYS_FORCE_INSERT,
+                         IDC_KEYS_FORCE_DELETE, IDC_KEYS_LINK_CLICK, IDC_KEYS_SKIP_WEB}) {
+        Enable(id, force);
+    }
+}
+
+bool CaptureKeysDialog::OnCommand(int id, int code, HWND control)
+{
+    if (id == IDC_KEYS_PREVENT || id == IDC_KEYS_FORCE) {
+        UpdateControls();
+        return true;
+    }
+    if (id != IDOK) {
+        return Dialog::OnCommand(id, code, control);
+    }
+    model::CaptureKeys keys;
+    keys.preventEnabled = Checked(IDC_KEYS_PREVENT);
+    keys.preventAlt = Checked(IDC_KEYS_PREVENT_ALT);
+    keys.preventShift = Checked(IDC_KEYS_PREVENT_SHIFT);
+    keys.preventCtrl = Checked(IDC_KEYS_PREVENT_CTRL);
+    keys.forceEnabled = Checked(IDC_KEYS_FORCE);
+    keys.forceAlt = Checked(IDC_KEYS_FORCE_ALT);
+    keys.forceShift = Checked(IDC_KEYS_FORCE_SHIFT);
+    keys.forceCtrl = Checked(IDC_KEYS_FORCE_CTRL);
+    keys.forceInsert = Checked(IDC_KEYS_FORCE_INSERT);
+    keys.forceDelete = Checked(IDC_KEYS_FORCE_DELETE);
+    keys.forceNeedsLinkClick = Checked(IDC_KEYS_LINK_CLICK);
+    keys.skipWebContent = Checked(IDC_KEYS_SKIP_WEB);
+    // A turned-on set with no key would act on every click.
+    if (keys.preventEnabled && !keys.preventAlt && !keys.preventShift && !keys.preventCtrl) {
+        Warn(L"Choose at least one key that keeps a link in the browser, or clear that option.");
+        return true;
+    }
+    if (keys.forceEnabled && !keys.forceAlt && !keys.forceShift && !keys.forceCtrl && !keys.forceInsert &&
+        !keys.forceDelete) {
+        Warn(L"Choose at least one key that gives a link to LDM, or clear that option.");
+        return true;
+    }
+    const bool same = keys.preventEnabled && keys.forceEnabled && keys.preventAlt == keys.forceAlt &&
+                      keys.preventShift == keys.forceShift && keys.preventCtrl == keys.forceCtrl && !keys.forceInsert &&
+                      !keys.forceDelete;
+    if (same) {
+        Warn(L"The keys that keep a link in the browser and the keys that give it to LDM must differ.");
+        return true;
+    }
+    result_ = keys;
+    Close(IDOK);
+    return true;
+}
+
 }  // namespace ldm::ui

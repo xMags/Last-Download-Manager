@@ -1,3 +1,5 @@
+import { keySettings } from './key-rules.js';
+
 // Messages between this extension and LDM (M3 design section 4). LDM validates everything it
 // receives; this side validates what LDM sends, so a broken or foreign host cannot feed the
 // extension nonsense.
@@ -71,6 +73,7 @@ export function parseConfig(message) {
       (entry) => typeof entry === 'string' && EXTENSION_PATTERN.test(entry)),
     siteExceptions: patternList(message.siteExceptions),
     addressExceptions: patternList(message.addressExceptions),
+    keys: keySettings(message),
   };
 }
 

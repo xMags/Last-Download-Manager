@@ -90,6 +90,15 @@ export function matchesAddressList(addresses, url) {
   return addresses.some((pattern) => wildcardMatch(pattern, url));
 }
 
+/** True for an address of a scheme LDM downloads. */
+export function isCapturableAddress(url) {
+  try {
+    return SCHEMES.includes(new URL(url).protocol);
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Whether to take a browser download over (checklist B-02).
  * @param {{url: string, finalUrl?: string, fileName: string}} download fileName may be empty

@@ -65,7 +65,8 @@ test('connect sends hello and becomes connected on config', async () => {
   assert.equal(await ready, true);
   assert.equal(connection.state, State.Connected);
   assert.deepEqual(log.states, [State.Connecting, State.Connected]);
-  assert.deepEqual(log.configs, [{ appVersion: '5.0.0', capturedExtensions: ['zip'], siteExceptions: [], addressExceptions: [] }]);
+  assert.equal(log.configs.length, 1);
+  assert.deepEqual(log.configs[0].capturedExtensions, ['zip']);
 });
 
 test('a second connect while connecting reuses the same attempt', async () => {

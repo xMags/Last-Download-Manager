@@ -40,7 +40,8 @@ test('config is parsed and bad patterns are dropped', () => {
     v: 1, id: 'push', type: 'config', appVersion: '5.0.0',
     capturedExtensions: ['zip', 'r0*', 'BAD', 'a b', 7, '', 'x'.repeat(33)],
   });
-  assert.deepEqual(config, { appVersion: '5.0.0', capturedExtensions: ['zip', 'r0*'], siteExceptions: [], addressExceptions: [] });
+  assert.deepEqual(config, { appVersion: '5.0.0', capturedExtensions: ['zip', 'r0*'], siteExceptions: [], addressExceptions: [],
+    keys: { prevent: { enabled: true, alt: true, shift: false, ctrl: false }, force: { enabled: true, alt: false, shift: false, ctrl: false, insert: true, delete: false }, forceNeedsLinkClick: true, skipWebContent: true } });
 });
 
 test('anything that is not a config is refused', () => {

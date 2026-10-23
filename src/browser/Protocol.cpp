@@ -323,6 +323,15 @@ std::string EncodeConfig(const Config& config, std::string_view replyTo)
     message["capturedExtensions"] = config.capturedExtensions;
     message["siteExceptions"] = config.siteExceptions;
     message["addressExceptions"] = config.addressExceptions;
+    const model::CaptureKeys& keys = config.keys;
+    message["keys"] = {
+        {"prevent", {{"enabled", keys.preventEnabled}, {"alt", keys.preventAlt}, {"shift", keys.preventShift},
+                     {"ctrl", keys.preventCtrl}}},
+        {"force", {{"enabled", keys.forceEnabled}, {"alt", keys.forceAlt}, {"shift", keys.forceShift},
+                   {"ctrl", keys.forceCtrl}, {"insert", keys.forceInsert}, {"delete", keys.forceDelete}}},
+        {"forceNeedsLinkClick", keys.forceNeedsLinkClick},
+        {"skipWebContent", keys.skipWebContent},
+    };
     return message.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
 }
 

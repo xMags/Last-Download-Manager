@@ -1,6 +1,7 @@
 #pragma once
 
 #include "model/Cookie.h"
+#include "model/Settings.h"
 
 #include <cstdint>
 #include <optional>
@@ -87,6 +88,7 @@ struct Config {
     std::vector<std::string> capturedExtensions;  // lower-case patterns without dots; '*' matches anything
     std::vector<std::string> siteExceptions;      // host or host/path patterns, '*' wildcards
     std::vector<std::string> addressExceptions;   // whole-address patterns, '*' wildcards
+    model::CaptureKeys keys;
 };
 
 [[nodiscard]] std::string EncodeConfig(const Config& config, std::string_view replyTo);

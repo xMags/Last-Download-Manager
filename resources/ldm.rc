@@ -494,6 +494,8 @@ BEGIN
     LTEXT "Browsers connected to Last Download Manager now:", -1, 14, 55, 272, 8
     CONTROL "", IDC_OPT_BROWSERS, "SysListView32", LVS_REPORT | LVS_NOSORTHEADER | LVS_SINGLESEL | WS_BORDER | WS_TABSTOP, 14, 66, 272, 56
     LTEXT "", IDC_OPT_BROWSERS_HINT, 14, 127, 272, 27
+    PUSHBUTTON "&Keys...", IDC_OPT_KEYS, 7, 167, 60, 14, WS_TABSTOP
+    LTEXT "Keys that keep a clicked link in the browser or give it to LDM", -1, 72, 170, 221, 8
 END
 
 IDD_OPTIONS_FILETYPES DIALOGEX 0, 0, 300, 200
@@ -535,6 +537,32 @@ BEGIN
     EDITTEXT IDC_EXC_ADDRESS, 45, 7, 255, 14, ES_AUTOHSCROLL | WS_TABSTOP
     DEFPUSHBUTTON "OK", IDOK, 196, 25, 50, 14
     PUSHBUTTON "Cancel", IDCANCEL, 250, 25, 50, 14
+END
+
+IDD_CAPTURE_KEYS DIALOGEX 0, 0, 318, 222
+STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Keys for browser links"
+FONT 9, "Segoe UI", 400, 0, 0x1
+BEGIN
+    AUTOCHECKBOX "Hold these keys while clicking a link to &keep it in the browser:", IDC_KEYS_PREVENT, 7, 7, 304, 10, WS_TABSTOP
+    AUTOCHECKBOX "Alt", IDC_KEYS_PREVENT_ALT, 19, 21, 34, 10, WS_TABSTOP
+    AUTOCHECKBOX "Shift", IDC_KEYS_PREVENT_SHIFT, 57, 21, 35, 10, WS_TABSTOP
+    AUTOCHECKBOX "Ctrl", IDC_KEYS_PREVENT_CTRL, 96, 21, 35, 10, WS_TABSTOP
+    CONTROL "", -1, "Static", SS_ETCHEDHORZ, 7, 37, 304, 1
+    AUTOCHECKBOX "Hold these keys while clicking a link to &give it to Last Download Manager:", IDC_KEYS_FORCE, 7, 45, 304, 10, WS_TABSTOP
+    AUTOCHECKBOX "Alt", IDC_KEYS_FORCE_ALT, 19, 59, 34, 10, WS_TABSTOP
+    AUTOCHECKBOX "Shift", IDC_KEYS_FORCE_SHIFT, 57, 59, 35, 10, WS_TABSTOP
+    AUTOCHECKBOX "Ctrl", IDC_KEYS_FORCE_CTRL, 96, 59, 35, 10, WS_TABSTOP
+    AUTOCHECKBOX "Ins", IDC_KEYS_FORCE_INSERT, 135, 59, 35, 10, WS_TABSTOP
+    AUTOCHECKBOX "Del", IDC_KEYS_FORCE_DELETE, 174, 59, 35, 10, WS_TABSTOP
+    LTEXT "Some pages start the download a few seconds after the click. For those, clear the next option: then holding the keys while the download starts is enough.", -1, 19, 76, 292, 18
+    AUTOCHECKBOX "Give a download to LDM only when the keys were held while &clicking its link", IDC_KEYS_LINK_CLICK, 19, 98, 292, 10, WS_TABSTOP
+    AUTOCHECKBOX "While the keys are held, let the browser keep &web pages, pictures and scripts", IDC_KEYS_SKIP_WEB, 19, 112, 292, 10, WS_TABSTOP
+    LTEXT "With this option cleared, a link clicked with the keys goes to LDM even when it leads to a web page.", -1, 31, 125, 280, 18
+    LTEXT "The keys work on web pages only, not on the browser's own pages such as its settings or its PDF viewer.", -1, 7, 160, 304, 18
+    CONTROL "", -1, "Static", SS_ETCHEDHORZ, 7, 192, 304, 1
+    DEFPUSHBUTTON "OK", IDOK, 205, 200, 50, 14
+    PUSHBUTTON "Cancel", IDCANCEL, 261, 200, 50, 14
 END
 
 IDD_OPTIONS_SAVE DIALOGEX 0, 0, 300, 200

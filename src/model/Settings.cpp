@@ -246,6 +246,18 @@ void VisitSettings(Visitor& v, SettingsType& s)
     v.String("fileTypes.captured", s.capturedExtensions);
     v.String("fileTypes.siteExceptions", s.captureSiteExceptions);
     v.String("fileTypes.addressExceptions", s.captureAddressExceptions);
+    v.Bool("browser.keys.prevent.enabled", s.captureKeys.preventEnabled);
+    v.Bool("browser.keys.prevent.alt", s.captureKeys.preventAlt);
+    v.Bool("browser.keys.prevent.shift", s.captureKeys.preventShift);
+    v.Bool("browser.keys.prevent.ctrl", s.captureKeys.preventCtrl);
+    v.Bool("browser.keys.force.enabled", s.captureKeys.forceEnabled);
+    v.Bool("browser.keys.force.alt", s.captureKeys.forceAlt);
+    v.Bool("browser.keys.force.shift", s.captureKeys.forceShift);
+    v.Bool("browser.keys.force.ctrl", s.captureKeys.forceCtrl);
+    v.Bool("browser.keys.force.insert", s.captureKeys.forceInsert);
+    v.Bool("browser.keys.force.delete", s.captureKeys.forceDelete);
+    v.Bool("browser.keys.forceNeedsLinkClick", s.captureKeys.forceNeedsLinkClick);
+    v.Bool("browser.keys.skipWebContent", s.captureKeys.skipWebContent);
 
     v.String("saveTo.temporaryDirectory", s.temporaryDirectory);
     v.Bool("saveTo.setFileDateFromServer", s.setFileDateFromServer);
