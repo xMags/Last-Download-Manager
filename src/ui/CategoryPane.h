@@ -40,6 +40,11 @@ public:
     bool HandleNotify(const NMHDR& header, LRESULT& result);
     bool HandleCommand(HWND control);
     [[nodiscard]] bool OwnsControl(HWND control) const;
+    // The header sits on the list background, not the panel: WM_CTLCOLORSTATIC for its label.
+    // Returns nothing for controls this pane does not own.
+    [[nodiscard]] HBRUSH OnCtlColor(HWND control, HDC dc) const;
+    // WM_DRAWITEM for the flat close button; false for other controls.
+    bool DrawItem(const DRAWITEMSTRUCT& draw) const;
 
 private:
     void Rebuild();
@@ -50,6 +55,8 @@ private:
     HWND closeButton_ = nullptr;
     HWND tree_ = nullptr;
     UniqueImageList images_;
+    UniqueIcon closeIcon_;
+    const Theme* theme_ = nullptr;
     std::vector<model::Category> categories_;
     std::vector<ListFilter> nodes_;  // a tree item's lParam is its index here
     bool rebuilding_ = false;

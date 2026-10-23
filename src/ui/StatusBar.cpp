@@ -97,7 +97,7 @@ void StatusBar::Paint()
 
     RECT line = client;
     line.bottom = line.top + 1;
-    UniqueBrush border(::CreateSolidBrush(colors.border));
+    UniqueBrush border(::CreateSolidBrush(colors.divider));
     ::FillRect(dc, &line, border.get());
 
     const UINT dpi = DpiOf(window_);

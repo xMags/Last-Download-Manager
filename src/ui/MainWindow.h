@@ -78,6 +78,9 @@ private:
     void UpdateStatus();
     [[nodiscard]] RECT SplitterRect() const;
     void UpdateDropTarget(const model::Settings& settings);
+    // The list background behind the panes and the hairlines under the toolbar and at the splitter.
+    void Paint();
+    [[nodiscard]] int ContentTop() const;
     // Handles queued launch requests and drops one at a time, waiting while a modal dialog is open.
     void DrainExternalInput();
 

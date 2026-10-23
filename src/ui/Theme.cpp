@@ -179,11 +179,12 @@ void Theme::BuildPalette()
 {
     if (dark_) {
         palette_ = Palette{RGB(0x20, 0x20, 0x20), RGB(0x2B, 0x2B, 0x2B), RGB(0xF0, 0xF0, 0xF0), RGB(0xA0, 0xA0, 0xA0),
-                           RGB(0x40, 0x40, 0x40), RGB(0x41, 0x41, 0x41), RGB(0x3C, 0x9C, 0xE8), RGB(0xFF, 0xFF, 0xFF)};
+                           RGB(0x40, 0x40, 0x40), RGB(0x41, 0x41, 0x41), RGB(0x3C, 0x9C, 0xE8), RGB(0xFF, 0xFF, 0xFF),
+                           RGB(0x3A, 0x3A, 0x3A)};
     } else {
         palette_ = Palette{::GetSysColor(COLOR_WINDOW),    ::GetSysColor(COLOR_BTNFACE), ::GetSysColor(COLOR_WINDOWTEXT),
-                           ::GetSysColor(COLOR_GRAYTEXT),  ::GetSysColor(COLOR_3DSHADOW), ::GetSysColor(COLOR_HIGHLIGHT),
-                           RGB(0x2D, 0x7D, 0xD2), RGB(0xFF, 0xFF, 0xFF)};
+                           ::GetSysColor(COLOR_GRAYTEXT),  ::GetSysColor(COLOR_3DSHADOW), RGB(0xE0, 0xE0, 0xE0),
+                           RGB(0x2D, 0x7D, 0xD2), RGB(0xFF, 0xFF, 0xFF), RGB(0xE0, 0xE0, 0xE0)};
     }
     windowBrush_.reset(::CreateSolidBrush(palette_.window));
     panelBrush_.reset(::CreateSolidBrush(palette_.panel));
@@ -194,6 +195,9 @@ void Theme::ApplyToTopLevel(HWND window) const
 {
     const BOOL dark = dark_ ? TRUE : FALSE;
     ::DwmSetWindowAttribute(window, DWMWA_USE_IMMERSIVE_DARK_MODE, &dark, sizeof(dark));
+    // Windows 11 only; earlier builds reject the attribute and keep their own caption color.
+    const COLORREF caption = HighContrast() ? DWMWA_COLOR_DEFAULT : palette_.panel;
+    ::DwmSetWindowAttribute(window, DWMWA_CAPTION_COLOR, &caption, sizeof(caption));
     if (Api().Available()) {
         Api().allowDarkModeForWindow(window, dark_);
     }
@@ -243,8 +247,8 @@ HBRUSH Theme::OnCtlColor(HDC dc, bool editable) const
 
 bool Theme::HandleMenuBarMessage(HWND window, UINT message, WPARAM wParam, LPARAM lParam, LRESULT& result) const
 {
-    if (!dark_) {
-        return false;
+    if (HighContrast()) {
+        return false;  // high contrast keeps the system's own menu bar colors
     }
     switch (message) {
     case kUahDrawMenu: {
