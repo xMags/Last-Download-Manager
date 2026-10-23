@@ -1,5 +1,6 @@
 #pragma once
 
+#include "browser/Protocol.h"
 #include "core/Commands.h"
 #include "core/LaunchRequest.h"
 #include "core/Ports.h"
@@ -49,6 +50,8 @@ public:
         std::function<void()> restore;
         std::function<ListFilter()> currentFilter;
         std::function<void(const std::vector<ColumnState>&)> columnsChanged;
+        // Extensions connected right now, for Options > General; empty without browser integration.
+        std::function<std::vector<browser::Hello>()> connectedBrowsers;
     };
 
     explicit MainController(Context context);

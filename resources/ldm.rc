@@ -490,7 +490,10 @@ FONT 9, "Segoe UI", 400, 0, 0x1
 BEGIN
     AUTOCHECKBOX "&Launch Last Download Manager when Windows starts", IDC_OPT_STARTUP, 7, 7, 286, 10, WS_TABSTOP
     AUTOCHECKBOX "&Watch the clipboard and offer to download copied addresses", IDC_OPT_CLIPBOARD, 7, 23, 286, 10, WS_TABSTOP
-    LTEXT "Browser integration arrives with the Last Download Manager browser extensions.", -1, 7, 45, 286, 18
+    GROUPBOX "Browser integration", -1, 7, 42, 286, 118
+    LTEXT "Browsers connected to Last Download Manager now:", -1, 14, 55, 272, 8
+    CONTROL "", IDC_OPT_BROWSERS, "SysListView32", LVS_REPORT | LVS_NOSORTHEADER | LVS_SINGLESEL | WS_BORDER | WS_TABSTOP, 14, 66, 272, 56
+    LTEXT "", IDC_OPT_BROWSERS_HINT, 14, 127, 272, 27
 END
 
 IDD_OPTIONS_SAVE DIALOGEX 0, 0, 300, 200

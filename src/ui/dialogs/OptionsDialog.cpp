@@ -162,7 +162,8 @@ bool OptionsDialog::OnInit()
     }
     const HWND limits = Control(IDC_OPT_LIMITS);
     const HWND logins = Control(IDC_OPT_LOGINS);
-    for (const HWND list : {limits, logins}) {
+    const HWND browsers = Control(IDC_OPT_BROWSERS);
+    for (const HWND list : {limits, logins, browsers}) {
         ListView_SetExtendedListViewStyle(list, LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER);
         if (CurrentTheme().IsDark()) {
             ListView_SetBkColor(list, CurrentTheme().Colors().window);
@@ -174,6 +175,10 @@ bool OptionsDialog::OnInit()
     AddColumn(limits, 1, L"Connections", 80);
     AddColumn(logins, 0, L"Server", 300);
     AddColumn(logins, 1, L"Login", 140);
+    AddColumn(browsers, 0, L"Browser", 170);
+    AddColumn(browsers, 1, L"Extension", 90);
+    AddColumn(browsers, 2, L"Private windows", 130);
+    ShowConnectedBrowsers();
     ::SendMessageW(Control(IDC_OPT_CONNECTIONS_SPIN), UDM_SETRANGE32, 1, 32);
     for (const auto& [policy, text] : kDuplicateChoices) {
         ComboBox_AddString(Control(IDC_OPT_DUPLICATE), text);
@@ -425,6 +430,26 @@ bool OptionsDialog::StoreProxy(int enabledId, int hostId, int portId, int userId
         server.secret = std::move(secret).Value();
     }
     return true;
+}
+
+void OptionsDialog::ShowConnectedBrowsers()
+{
+    const HWND list = Control(IDC_OPT_BROWSERS);
+    const auto& browsers = input_.connectedBrowsers;
+    for (size_t i = 0; i < browsers.size(); ++i) {
+        const browser::Hello& hello = browsers[i];
+        const std::wstring name = base::ToUtf16(hello.browser) +
+                                  (hello.browserVersion.empty() ? L"" : L" " + base::ToUtf16(hello.browserVersion));
+        const int row = static_cast<int>(i);
+        SetRow(list, row, name, base::ToUtf16(hello.extensionVersion));
+        std::wstring incognito = hello.incognitoAllowed ? L"Allowed" : L"Not allowed";
+        ListView_SetItemText(list, row, 2, incognito.data());
+    }
+    Put(IDC_OPT_BROWSERS_HINT,
+        browsers.empty()
+            ? L"No browser is connected. Add the Last Download Manager extension to Chrome, Edge or Firefox; it "
+              L"connects by itself while LDM runs."
+            : L"Click the LDM button in a browser's toolbar to turn capturing on or off for that browser.");
 }
 
 void OptionsDialog::RefreshLimits()

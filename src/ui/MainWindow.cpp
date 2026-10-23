@@ -168,6 +168,17 @@ void MainWindow::OnCreate()
     context.exit = [this] { Exit(); };
     context.restore = [this] { Restore(); };
     context.currentFilter = [this] { return categories_.Selected(); };
+    context.connectedBrowsers = [this] {
+        std::vector<browser::Hello> browsers;
+        if (browserSessions_) {
+            for (const auto& [connection, session] : browserSessions_->Sessions()) {
+                if (session.hello) {
+                    browsers.push_back(*session.hello);
+                }
+            }
+        }
+        return browsers;
+    };
     controller_ = std::make_unique<MainController>(std::move(context));
 
     list_.SetColumns(ParseColumns(settings.columnLayout));

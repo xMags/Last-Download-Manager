@@ -28,8 +28,14 @@ constexpr std::chrono::seconds kWait{10};
 enum class HostExit : DWORD {
     Done = 0,
     NotStartedByBrowser = 2,
+    NoLdm = 3,
     ProtocolError = 4,
 };
+
+// What the extension sends first on every connection. Never asks to start LDM here: that would
+// start the real ldm.exe next to the host.
+constexpr char kHello[] =
+    R"({"v":1,"id":"h1","type":"hello","browser":"Chrome","browserVersion":"141.0","extensionVersion":"1.0.0","incognitoAllowed":true,"startLdm":false})";
 
 std::wstring ChromiumOrigin()
 {
@@ -207,10 +213,9 @@ protected:
 TEST_F(BrowserHostTest, HelloIsAnsweredWithConfigAndDisconnectIsReported)
 {
     StartHost(ChromiumOrigin() + L" --parent-window=0");
+    SendToHost(kHello);
     const auto connection = ExpectHostInfo();
     ASSERT_NE(connection, 0u);
-
-    SendToHost(R"({"v":1,"id":"h1","type":"hello","browser":"Chrome","browserVersion":"141.0","extensionVersion":"1.0.0","incognitoAllowed":true})");
     const auto hello = events_.Pop();
     ASSERT_TRUE(hello && hello->message);
     EXPECT_EQ(hello->connection, connection);
@@ -237,7 +242,9 @@ TEST_F(BrowserHostTest, HelloIsAnsweredWithConfigAndDisconnectIsReported)
 TEST_F(BrowserHostTest, HostRefusesMalformedMessagesFromTheBrowser)
 {
     StartHost(ChromiumOrigin());
+    SendToHost(kHello);
     const auto connection = ExpectHostInfo();
+    ASSERT_TRUE(events_.Pop());  // the hello
     SendToHost(R"({"v":2,"id":"x","type":"hello"})");
     EXPECT_EQ(WaitForHostExit(), static_cast<DWORD>(HostExit::ProtocolError));
     const auto closed = events_.Pop();
@@ -249,7 +256,9 @@ TEST_F(BrowserHostTest, HostRefusesMalformedMessagesFromTheBrowser)
 TEST_F(BrowserHostTest, BridgeClosesConnectionsThatSendUnknownTypes)
 {
     StartHost(ChromiumOrigin());
+    SendToHost(kHello);
     const auto connection = ExpectHostInfo();
+    ASSERT_TRUE(events_.Pop());  // the hello
     // A valid envelope the host relays, but LDM does not know the type.
     SendToHost(R"({"v":1,"id":"x","type":"format-disk"})");
     const auto closed = events_.Pop();
@@ -267,16 +276,35 @@ TEST_F(BrowserHostTest, HostStartedWithoutABrowserOriginExits)
     EXPECT_EQ(WaitForHostExit(), static_cast<DWORD>(HostExit::NotStartedByBrowser));
 }
 
+TEST_F(BrowserHostTest, MalformedFirstMessageNeverReachesLdm)
+{
+    StartHost(ChromiumOrigin());
+    SendToHost("not json");
+    EXPECT_EQ(WaitForHostExit(), static_cast<DWORD>(HostExit::ProtocolError));
+}
+
+TEST_F(BrowserHostTest, HostDoesNotStartLdmUnlessAsked)
+{
+    bridge_.reset();  // nothing listens on the pipe now
+    StartHost(ChromiumOrigin());
+    SendToHost(kHello);
+    EXPECT_EQ(WaitForHostExit(), static_cast<DWORD>(HostExit::NoLdm));
+}
+
 TEST_F(BrowserHostTest, ConnectionsAreNumberedAndKeptApart)
 {
     StartHost(ChromiumOrigin());
+    SendToHost(kHello);
     const auto first = ExpectHostInfo();
+    ASSERT_TRUE(events_.Pop());  // the hello
     toHost_.Reset();
     ASSERT_TRUE(WaitForHostExit().has_value());
     ASSERT_TRUE(events_.Pop());  // closed
 
     StartHost(ChromiumOrigin());
+    SendToHost(kHello);
     const auto second = ExpectHostInfo();
+    ASSERT_TRUE(events_.Pop());  // the hello
     EXPECT_GT(second, first);
     // A late answer for the closed connection must not reach the new one.
     bridge_->Send(first, ldm::browser::EncodeConfig({"5.0.0", {}}, "stale"));

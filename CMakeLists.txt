@@ -43,9 +43,13 @@ if(LDM_ENABLE_ANALYZE)
     target_compile_options(ldm_build_settings INTERFACE /analyze /analyze:external-)
 endif()
 
-add_subdirectory(src)
-
 if(LDM_BUILD_TESTS)
     enable_testing()
+endif()
+
+add_subdirectory(src)
+add_subdirectory(extension)
+
+if(LDM_BUILD_TESTS)
     add_subdirectory(tests)
 endif()

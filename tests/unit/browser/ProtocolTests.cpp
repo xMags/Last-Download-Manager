@@ -15,7 +15,7 @@ constexpr char kChromeId[] = "jdkneeflbkgkkinfcpfamlckpoknbnln";
 
 std::string HelloJson(const std::string& extra = {})
 {
-    return R"({"v":1,"id":"7","type":"hello","browser":"Chrome","browserVersion":"141.0","extensionVersion":"1.0.0","incognitoAllowed":false)" +
+    return R"({"v":1,"id":"7","type":"hello","browser":"Chrome","browserVersion":"141.0","extensionVersion":"1.0.0","incognitoAllowed":false,"startLdm":false)" +
            extra + "}";
 }
 
@@ -59,14 +59,26 @@ TEST(BrowserProtocol, RejectsInvalidHello)
 {
     EXPECT_FALSE(ldm::browser::ParseMessage(R"({"v":1,"id":"7","type":"hello"})"));
     EXPECT_FALSE(ldm::browser::ParseMessage(
-        R"({"v":1,"id":"7","type":"hello","browser":"","browserVersion":"1","extensionVersion":"1","incognitoAllowed":true})"));
+        R"({"v":1,"id":"7","type":"hello","browser":"","browserVersion":"1","extensionVersion":"1","incognitoAllowed":true,"startLdm":false})"));
     EXPECT_FALSE(ldm::browser::ParseMessage(
-        R"({"v":1,"id":"7","type":"hello","browser":"Chrome","browserVersion":"1","extensionVersion":"1","incognitoAllowed":"yes"})"));
+        R"({"v":1,"id":"7","type":"hello","browser":"Chrome","browserVersion":"1","extensionVersion":"1","incognitoAllowed":"yes","startLdm":false})"));
     EXPECT_FALSE(ldm::browser::ParseMessage(R"({"v":1,"id":"7","type":"hello","browser":")" + std::string(65, 'x') +
-                                            R"(","browserVersion":"1","extensionVersion":"1","incognitoAllowed":true})"));
+                                            R"(","browserVersion":"1","extensionVersion":"1","incognitoAllowed":true,"startLdm":false})"));
     // Control characters in display text could forge lines in LDM's UI.
     EXPECT_FALSE(ldm::browser::ParseMessage(
-        R"({"v":1,"id":"7","type":"hello","browser":"Chrome\n","browserVersion":"1","extensionVersion":"1","incognitoAllowed":true})"));
+        R"({"v":1,"id":"7","type":"hello","browser":"Chrome\n","browserVersion":"1","extensionVersion":"1","incognitoAllowed":true,"startLdm":false})"));
+}
+
+TEST(BrowserProtocol, HelloSaysWhetherToStartLdm)
+{
+    EXPECT_FALSE(ldm::browser::HelloAsksToStartLdm(HelloJson()));
+    const std::string asking =
+        R"({"v":1,"id":"7","type":"hello","browser":"Chrome","browserVersion":"1","extensionVersion":"1","incognitoAllowed":false,"startLdm":true})";
+    EXPECT_TRUE(ldm::browser::HelloAsksToStartLdm(asking));
+    EXPECT_TRUE(std::get<ldm::browser::Hello>(ldm::browser::ParseMessage(asking)->message).startLdm);
+    EXPECT_FALSE(ldm::browser::HelloAsksToStartLdm(R"({"v":1,"id":"7","type":"hello","startLdm":true})"));
+    EXPECT_FALSE(ldm::browser::ParseMessage(
+        R"({"v":1,"id":"7","type":"hello","browser":"Chrome","browserVersion":"1","extensionVersion":"1","incognitoAllowed":false})"));
 }
 
 TEST(BrowserProtocol, RejectsUnknownTypes)
