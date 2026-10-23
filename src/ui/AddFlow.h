@@ -1,8 +1,10 @@
 #pragma once
 
+#include "browser/Protocol.h"
 #include "core/Commands.h"
 #include "core/Snapshot.h"
 #include "model/Cookie.h"
+#include "ui/BrowserLink.h"
 #include "ui/Theme.h"
 
 #include <windows.h>
@@ -17,6 +19,7 @@
 
 namespace ldm::ui {
 
+class AllLinksDialog;
 class DownloadInfoDialog;
 
 // What the browser sent along with a captured download.
@@ -58,6 +61,8 @@ public:
         std::function<std::shared_ptr<const core::Snapshot>()> snapshot;
         std::function<void(model::DownloadId)> openProgress;
         std::function<void(model::DownloadId)> select;
+        // The Download All Links dialog of this request closed (BrowserSessions::LinksDone).
+        std::function<void(BrowserConnectionId, const std::string&)> linksDone;
     };
 
     explicit AddFlow(Context context);
@@ -73,6 +78,15 @@ public:
     void AddFromClipboard();
     // Lets the user pick from `urls`, then adds the checked ones.
     void AddList(std::vector<std::string> urls, const std::wstring& title);
+
+    // A page's links from the browser's right-click menu (checklist B-05): the Download All Links
+    // dialog, then the checked links are added without starting.
+    void AddPageLinks(browser::Links links, BrowserConnectionId connection, const std::string& requestId);
+    // Call when a Links request is queued, so what the browser reports about its links before the
+    // dialog opens is kept for it.
+    void ExpectLinks(BrowserConnectionId connection);
+    void OnLinkInfo(BrowserConnectionId connection, browser::LinkInfo info);
+    void OnBrowserClosed(BrowserConnectionId connection);
 
     void OnSnapshot(const core::Snapshot& snapshot);
     void OnAddResult(const core::AddResult& result);
@@ -113,6 +127,16 @@ private:
     std::map<std::uint64_t, PendingAdd> pendingAdds_;
     std::vector<std::uint64_t> progressOnAdd_;  // adds whose progress window opens once their id is known
     std::optional<std::string> categoryToSelect_;  // a category added from the info dialog
+
+    // Link details that arrived for a queued Links request before its dialog opened.
+    struct EarlyLinkInfo {
+        std::vector<browser::LinkDetails> items;
+        bool closed = false;  // the browser's connection ended meanwhile
+    };
+    std::map<BrowserConnectionId, EarlyLinkInfo> earlyLinkInfo_;
+    // The open Download All Links dialog and the connection that feeds it.
+    BrowserConnectionId linksConnection_ = 0;
+    AllLinksDialog* linksDialog_ = nullptr;
 };
 
 }  // namespace ldm::ui

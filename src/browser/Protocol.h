@@ -23,6 +23,11 @@ inline constexpr std::uint32_t kMaxInboundBytes = 4 * 1024 * 1024;
 inline constexpr std::uint32_t kMaxOutboundBytes = 1024 * 1024;
 // A form body handed over with a capture, after base64 decoding.
 inline constexpr size_t kMaxPostBytes = 1024 * 1024;
+// Links of one page handed over at once, and the cookies that come with them.
+inline constexpr size_t kMaxPageLinks = 5000;
+inline constexpr size_t kMaxPageLinkCookies = 1000;
+// Bytes of UTF-8 in one link text.
+inline constexpr size_t kMaxLinkText = 1024;
 
 enum class BrowserFamily {
     Chromium,  // Chrome and Edge: same extension, same host manifest format
@@ -67,7 +72,48 @@ struct Capture {
     std::optional<PostBody> post;        // set when the download answered a form submission
 };
 
-using Message = std::variant<HostInfo, Hello, Capture>;
+// Where a link of a page was found, as the reference tells them apart.
+enum class LinkKind {
+    Link,   // <a> and <area>
+    Image,  // a picture shown on the page (<img>)
+    Frame,  // the page of an <iframe>
+    Text,   // an address written in the page's text or scripts
+};
+
+struct PageLink {
+    std::string url;  // http, https, ftp or ftps
+    std::string text;  // the link's text or the picture's alt text, UTF-8; may be empty
+    std::optional<std::string> fileName;  // the link's download attribute
+    LinkKind kind = LinkKind::Link;
+};
+
+// "Download all links" or "Download selected links" from the browser's right-click menu
+// (checklists B-04, B-05). Opens the Download All Links dialog.
+struct Links {
+    bool selection = false;  // only what the user selected on the page
+    std::optional<std::string> referrer;  // the page the links are on
+    std::string userAgent;
+    std::vector<PageLink> links;  // at least one
+    // What the browser would send to the links, for all of them together; each download keeps
+    // only the cookies that belong to its own address.
+    std::vector<model::Cookie> cookies;
+};
+
+// What the extension found out about some links of a Links message, sent on the same connection
+// while the Download All Links dialog is open.
+struct LinkDetails {
+    size_t index = 0;  // into Links::links; the receiver checks the range
+    bool failed = false;  // the request failed; nothing else is set
+    std::optional<std::int64_t> fileSize;
+    std::optional<std::string> mimeType;
+    std::optional<std::string> fileName;  // from Content-Disposition, not yet sanitized
+};
+
+struct LinkInfo {
+    std::vector<LinkDetails> items;
+};
+
+using Message = std::variant<HostInfo, Hello, Capture, Links, LinkInfo>;
 
 struct ParsedMessage {
     std::string id;  // echoed in answers
@@ -101,6 +147,7 @@ struct Config {
     std::vector<std::string> siteExceptions;      // host or host/path patterns, '*' wildcards
     std::vector<std::string> addressExceptions;   // whole-address patterns, '*' wildcards
     model::CaptureKeys keys;
+    model::BrowserMenu menu;  // for this browser's family
 };
 
 [[nodiscard]] std::string EncodeConfig(const Config& config, std::string_view replyTo);
@@ -108,5 +155,11 @@ struct Config {
 // The answer to a capture: accepted means LDM has taken the download over and the extension
 // cancels the browser's copy; otherwise the browser continues it.
 [[nodiscard]] std::string EncodeCaptureResult(std::string_view replyTo, bool accepted);
+
+// The answer to a Links message. Accepted: the dialog opens, and the extension may send LinkInfo
+// on the same connection until LDM sends links-done.
+[[nodiscard]] std::string EncodeLinksResult(std::string_view replyTo, bool accepted);
+// The Download All Links dialog closed: the extension stops checking the links and disconnects.
+[[nodiscard]] std::string EncodeLinksDone(std::string_view replyTo);
 
 }  // namespace ldm::browser

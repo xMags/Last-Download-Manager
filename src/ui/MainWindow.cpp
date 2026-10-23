@@ -70,15 +70,28 @@ bool ParsePlacement(const std::string& text, RECT& rect, UINT& showCommand, int&
 MainWindow::MainWindow(const Services& services) : services_(services)
 {
     if (services_.browser != nullptr) {
-        browserSessions_ = std::make_unique<BrowserSessions>(
-            *services_.browser, base::ToUtf8(LDM_VERSION_WIDE), [this](browser::Capture capture) {
-                // Already on the UI thread; queued so it waits for any open dialog like other input.
-                {
-                    const std::lock_guard lock(externalMutex_);
-                    externalInput_.emplace_back(std::move(capture));
-                }
-                ::PostMessageW(window_, kExternalInputMessage, 0, 0);
-            });
+        BrowserSessions::Handlers handlers;
+        // Captures and links arrive on the UI thread; they are queued so they wait for any open
+        // dialog like other input.
+        handlers.onCapture = [this](browser::Capture capture) { QueueExternalInput(std::move(capture)); };
+        handlers.onLinks = [this](BrowserSessions::LinksRequest request) {
+            if (controller_) {
+                controller_->Adds().ExpectLinks(request.connection);
+            }
+            QueueExternalInput(std::move(request));
+        };
+        handlers.onLinkInfo = [this](BrowserConnectionId connection, browser::LinkInfo info) {
+            if (controller_) {
+                controller_->Adds().OnLinkInfo(connection, std::move(info));
+            }
+        };
+        handlers.onClosed = [this](BrowserConnectionId connection) {
+            if (controller_) {
+                controller_->Adds().OnBrowserClosed(connection);
+            }
+        };
+        browserSessions_ = std::make_unique<BrowserSessions>(*services_.browser, base::ToUtf8(LDM_VERSION_WIDE),
+                                                             std::move(handlers));
     }
 }
 
@@ -187,6 +200,11 @@ void MainWindow::OnCreate()
         }
         return browsers;
     };
+    context.linksDone = [this](BrowserConnectionId connection, const std::string& requestId) {
+        if (browserSessions_) {
+            browserSessions_->LinksDone(connection, requestId);
+        }
+    };
     controller_ = std::make_unique<MainController>(std::move(context));
 
     list_.SetColumns(ParseColumns(settings.columnLayout));
@@ -281,24 +299,25 @@ void MainWindow::UpdateDropTarget(const model::Settings& settings)
     dropTarget_.Create(settings.dropTargetPosition, *theme_, std::move(callbacks));
 }
 
-void MainWindow::QueueDroppedUrls(std::vector<std::string> urls)
+void MainWindow::QueueExternalInput(ExternalInput input)
 {
-    // Dropping runs inside the source program's drag loop: queue the addresses and return at once,
-    // so a dialog never holds the browser's drag and drop hostage.
     {
         const std::lock_guard lock(externalMutex_);
-        externalInput_.emplace_back(std::move(urls));
+        externalInput_.push_back(std::move(input));
     }
     ::PostMessageW(window_, kExternalInputMessage, 0, 0);
 }
 
+void MainWindow::QueueDroppedUrls(std::vector<std::string> urls)
+{
+    // Dropping runs inside the source program's drag loop: queue the addresses and return at once,
+    // so a dialog never holds the browser's drag and drop hostage.
+    QueueExternalInput(std::move(urls));
+}
+
 void MainWindow::PostLaunchRequest(core::LaunchRequest request)
 {
-    {
-        const std::lock_guard lock(externalMutex_);
-        externalInput_.emplace_back(std::move(request));
-    }
-    ::PostMessageW(window_, kExternalInputMessage, 0, 0);
+    QueueExternalInput(std::move(request));
 }
 
 void MainWindow::PostBrowserEvent(BrowserEvent event)
@@ -350,6 +369,8 @@ void MainWindow::DrainExternalInput()
             controller_->OnLaunchRequest(*request);
         } else if (auto* capture = std::get_if<browser::Capture>(&*next)) {
             controller_->OnBrowserCapture(std::move(*capture));
+        } else if (auto* links = std::get_if<BrowserSessions::LinksRequest>(&*next)) {
+            controller_->OnBrowserLinks(std::move(*links));
         } else {
             controller_->OnDroppedUrls(std::move(std::get<std::vector<std::string>>(*next)));
         }

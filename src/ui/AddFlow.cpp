@@ -6,7 +6,9 @@
 #include "core/Url.h"
 #include "ui/Clipboard.h"
 #include "ui/History.h"
+#include "ui/PageLinks.h"
 #include "ui/dialogs/AddUrlDialog.h"
+#include "ui/dialogs/AllLinksDialog.h"
 #include "ui/dialogs/BatchDialog.h"
 #include "ui/dialogs/CategoryDialog.h"
 #include "ui/dialogs/ConfirmDialogs.h"
@@ -16,6 +18,7 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <set>
 
 namespace ldm::ui {
 
@@ -369,6 +372,134 @@ void AddFlow::AddList(std::vector<std::string> urls, const std::wstring& title)
     UrlListDialog dialog(*context_.theme, title, std::move(urls));
     if (const auto choice = dialog.Run(context_.owner); choice && !choice->urls.empty()) {
         AddMany(choice->urls, choice->start, std::nullopt, std::nullopt);
+    }
+}
+
+void AddFlow::ExpectLinks(BrowserConnectionId connection)
+{
+    earlyLinkInfo_.try_emplace(connection);
+}
+
+void AddFlow::OnLinkInfo(BrowserConnectionId connection, browser::LinkInfo info)
+{
+    if (linksDialog_ != nullptr && connection == linksConnection_) {
+        linksDialog_->ApplyDetails(info.items);
+        return;
+    }
+    const auto early = earlyLinkInfo_.find(connection);
+    if (early == earlyLinkInfo_.end()) {
+        return;  // no dialog waits for this connection
+    }
+    // Bounded: a link may be reported more than once, but not without end.
+    std::vector<browser::LinkDetails>& items = early->second.items;
+    constexpr size_t kLimit = browser::kMaxPageLinks * 2;
+    const size_t room = kLimit - std::min(items.size(), kLimit);
+    const size_t take = std::min(room, info.items.size());
+    items.insert(items.end(), std::make_move_iterator(info.items.begin()),
+                 std::make_move_iterator(info.items.begin() + static_cast<std::ptrdiff_t>(take)));
+}
+
+void AddFlow::OnBrowserClosed(BrowserConnectionId connection)
+{
+    if (linksDialog_ != nullptr && connection == linksConnection_) {
+        linksDialog_->StopChecking();
+    }
+    if (const auto early = earlyLinkInfo_.find(connection); early != earlyLinkInfo_.end()) {
+        early->second.closed = true;
+    }
+}
+
+void AddFlow::AddPageLinks(browser::Links links, BrowserConnectionId connection, const std::string& requestId)
+{
+    EarlyLinkInfo early;
+    if (const auto found = earlyLinkInfo_.find(connection); found != earlyLinkInfo_.end()) {
+        early = std::move(found->second);
+        earlyLinkInfo_.erase(found);
+    }
+    const auto snapshot = context_.snapshot();
+    if (!snapshot || snapshot->categories.empty()) {
+        if (context_.linksDone) {
+            context_.linksDone(connection, requestId);
+        }
+        return;
+    }
+    const model::Settings& settings = snapshot->settings;
+
+    std::set<std::string> listed;
+    for (const auto& view : snapshot->downloads) {
+        listed.insert(view->download.url);
+    }
+    AllLinksDialog::Initial initial;
+    initial.rows = MakeLinkRows(links, listed);
+    for (const browser::LinkDetails& details : early.items) {
+        (void)ApplyLinkDetails(initial.rows, details);
+    }
+    initial.selection = links.selection;
+    initial.filter = LinkFilter{settings.allLinksHideHtml, settings.allLinksHideImages, settings.allLinksHideRepeated};
+    initial.useLinkText = settings.allLinksUseLinkText;
+    initial.categories = snapshot->categories;
+    initial.category = GeneralCategory(snapshot->categories);
+    const std::vector<std::string> folders = HistoryEntries(settings.recentFolders);
+    if (!folders.empty()) {
+        initial.folder = folders.front();
+    } else {
+        for (const model::Category& category : snapshot->categories) {
+            if (initial.category == category.id) {
+                initial.folder = category.folder;
+            }
+        }
+    }
+
+    AllLinksDialog dialog(*context_.theme, std::move(initial));
+    if (early.closed) {
+        dialog.StopChecking();
+    }
+    linksConnection_ = connection;
+    linksDialog_ = &dialog;
+    const auto choice = dialog.Run(context_.owner);
+    linksDialog_ = nullptr;
+    linksConnection_ = 0;
+    if (context_.linksDone) {
+        context_.linksDone(connection, requestId);
+    }
+
+    const LinkFilter filter = dialog.Filter();
+    const bool useLinkText = dialog.UseLinkText();
+    if (filter.hideHtml != settings.allLinksHideHtml || filter.hideImages != settings.allLinksHideImages ||
+        filter.hideRepeated != settings.allLinksHideRepeated || useLinkText != settings.allLinksUseLinkText) {
+        ModifySettings([filter, useLinkText](model::Settings& s) {
+            s.allLinksHideHtml = filter.hideHtml;
+            s.allLinksHideImages = filter.hideImages;
+            s.allLinksHideRepeated = filter.hideRepeated;
+            s.allLinksUseLinkText = useLinkText;
+        });
+    }
+    if (!choice) {
+        return;
+    }
+    if (choice->saveTo == AllLinksDialog::SaveTo::OneFolder) {
+        const std::string folder = choice->folder;
+        ModifySettings([folder](model::Settings& s) { s.recentFolders = PushHistory(s.recentFolders, folder, kFolderHistoryLimit); });
+    }
+    for (const AllLinksDialog::Pick& pick : choice->picks) {
+        core::AddDownloadCommand command;
+        command.token = nextToken_++;
+        command.url = pick.url;
+        command.fileName = pick.fileName;
+        command.description = pick.description;
+        if (choice->saveTo == AllLinksDialog::SaveTo::OneCategory) {
+            command.categoryId = choice->category;
+        } else if (choice->saveTo == AllLinksDialog::SaveTo::OneFolder) {
+            command.saveDir = choice->folder;
+        }
+        command.referer = links.referrer;
+        command.parentPage = links.referrer;
+        command.userAgent = links.userAgent;
+        command.cookies = CookiesForAddress(links.cookies, pick.url);
+        // Added to the list without starting, as the reference adds them to its queue.
+        command.mode = core::AddMode::Later;
+        command.duplicatePolicy = model::DuplicatePolicy::AddNumbered;
+        Post(std::move(command));
     }
 }
 

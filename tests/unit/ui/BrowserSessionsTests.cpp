@@ -91,7 +91,9 @@ TEST(BrowserSessions, CapturesAreAcceptedOnlyAfterHelloAndWithAValidAddress)
 {
     RecordingLink link;
     std::vector<std::string> captured;
-    ldm::ui::BrowserSessions sessions(link, "5.0.0", [&](ldm::browser::Capture capture) { captured.push_back(capture.url); });
+    ldm::ui::BrowserSessions::Handlers handlers;
+    handlers.onCapture = [&](ldm::browser::Capture capture) { captured.push_back(capture.url); };
+    ldm::ui::BrowserSessions sessions(link, "5.0.0", std::move(handlers));
     const ldm::model::Settings settings;
     ldm::browser::Capture capture;
     capture.url = "https://a.test/x.zip";
@@ -106,6 +108,71 @@ TEST(BrowserSessions, CapturesAreAcceptedOnlyAfterHelloAndWithAValidAddress)
     sessions.OnEvent(Event(1, capture, "c2"), settings);
     EXPECT_EQ(nlohmann::json::parse(link.sent.back().second)["accepted"], true);
     EXPECT_EQ(captured, std::vector<std::string>{"https://a.test/x.zip"});
+}
+
+TEST(BrowserSessions, ConfigCarriesTheMenuItemsOfTheBrowsersFamily)
+{
+    RecordingLink link;
+    ldm::ui::BrowserSessions sessions(link, "5.0.0", {});
+    ldm::model::Settings settings;
+    settings.chromiumMenu.downloadAll = false;
+    settings.firefoxMenu.downloadLink = false;
+    sessions.OnSettingsChanged(settings);
+    sessions.OnEvent(Event(1, ldm::browser::HostInfo{ldm::browser::BrowserFamily::Chromium, "x"}), settings);
+    sessions.OnEvent(Event(1, SampleHello()), settings);
+    sessions.OnEvent(Event(2, ldm::browser::HostInfo{ldm::browser::BrowserFamily::Firefox, "y"}), settings);
+    sessions.OnEvent(Event(2, SampleHello()), settings);
+    ASSERT_EQ(link.sent.size(), 2u);
+    EXPECT_EQ(nlohmann::json::parse(link.sent[0].second)["menu"], nlohmann::json({{"downloadLink", true}, {"downloadAll", false}}));
+    EXPECT_EQ(nlohmann::json::parse(link.sent[1].second)["menu"], nlohmann::json({{"downloadLink", false}, {"downloadAll", true}}));
+
+    link.sent.clear();
+    settings.chromiumMenu.downloadAll = true;
+    sessions.OnSettingsChanged(settings);
+    ASSERT_EQ(link.sent.size(), 2u) << "a menu change is pushed to every browser";
+    EXPECT_EQ(nlohmann::json::parse(link.sent[0].second)["menu"]["downloadAll"], true);
+}
+
+TEST(BrowserSessions, LinksOpenTheDialogAndTheirDetailsFollow)
+{
+    RecordingLink link;
+    std::vector<ldm::ui::BrowserSessions::LinksRequest> requests;
+    std::vector<size_t> detailCounts;
+    ldm::ui::BrowserSessions::Handlers handlers;
+    handlers.onLinks = [&](ldm::ui::BrowserSessions::LinksRequest request) { requests.push_back(std::move(request)); };
+    handlers.onLinkInfo = [&](BrowserConnectionId, ldm::browser::LinkInfo info) { detailCounts.push_back(info.items.size()); };
+    ldm::ui::BrowserSessions sessions(link, "5.0.0", std::move(handlers));
+    const ldm::model::Settings settings;
+    ldm::browser::Links links;
+    links.userAgent = "UA";
+    links.links.push_back({"https://a.test/x.zip", "X", std::nullopt, ldm::browser::LinkKind::Link});
+
+    sessions.OnEvent(Event(1, ldm::browser::HostInfo{}), settings);
+    sessions.OnEvent(Event(1, links, "l1"), settings);
+    EXPECT_EQ(nlohmann::json::parse(link.sent.back().second)["accepted"], false) << "no hello yet";
+    EXPECT_TRUE(requests.empty());
+
+    sessions.OnEvent(Event(1, SampleHello()), settings);
+    sessions.OnEvent(Event(1, links, "l2"), settings);
+    const auto answer = nlohmann::json::parse(link.sent.back().second);
+    EXPECT_EQ(answer["type"], "links-result");
+    EXPECT_EQ(answer["id"], "l2");
+    EXPECT_EQ(answer["accepted"], true);
+    ASSERT_EQ(requests.size(), 1u);
+    EXPECT_EQ(requests[0].connection, 1u);
+    EXPECT_EQ(requests[0].requestId, "l2");
+
+    sessions.OnEvent(Event(1, ldm::browser::LinkInfo{{ldm::browser::LinkDetails{0}}}, "i1"), settings);
+    EXPECT_EQ(detailCounts, std::vector<size_t>{1});
+
+    sessions.LinksDone(1, "l2");
+    const auto done = nlohmann::json::parse(link.sent.back().second);
+    EXPECT_EQ(done["type"], "links-done");
+    EXPECT_EQ(done["id"], "l2");
+    const size_t sentBefore = link.sent.size();
+    sessions.OnEvent({1, std::nullopt}, settings);  // the connection closed
+    sessions.LinksDone(1, "l2");
+    EXPECT_EQ(link.sent.size(), sentBefore) << "nothing goes to a closed connection";
 }
 
 TEST(AddressExceptions, PatternsAreTrimmedAndMustBeOneWord)

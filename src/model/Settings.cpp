@@ -258,6 +258,14 @@ void VisitSettings(Visitor& v, SettingsType& s)
     v.Bool("browser.keys.force.delete", s.captureKeys.forceDelete);
     v.Bool("browser.keys.forceNeedsLinkClick", s.captureKeys.forceNeedsLinkClick);
     v.Bool("browser.keys.skipWebContent", s.captureKeys.skipWebContent);
+    v.Bool("browser.menu.chromium.downloadLink", s.chromiumMenu.downloadLink);
+    v.Bool("browser.menu.chromium.downloadAll", s.chromiumMenu.downloadAll);
+    v.Bool("browser.menu.firefox.downloadLink", s.firefoxMenu.downloadLink);
+    v.Bool("browser.menu.firefox.downloadAll", s.firefoxMenu.downloadAll);
+    v.Bool("allLinks.useLinkText", s.allLinksUseLinkText);
+    v.Bool("allLinks.hideHtml", s.allLinksHideHtml);
+    v.Bool("allLinks.hideImages", s.allLinksHideImages);
+    v.Bool("allLinks.hideRepeated", s.allLinksHideRepeated);
 
     v.String("saveTo.temporaryDirectory", s.temporaryDirectory);
     v.Bool("saveTo.setFileDateFromServer", s.setFileDateFromServer);

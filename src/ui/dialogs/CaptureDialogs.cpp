@@ -249,4 +249,42 @@ bool CaptureKeysDialog::OnCommand(int id, int code, HWND control)
     return true;
 }
 
+// ---------------------------------------------------------------------------------------------
+// Browser context menu
+
+BrowserMenuDialog::BrowserMenuDialog(const Theme& theme, BrowserMenus menus)
+    : Dialog(IDD_BROWSER_MENU, theme), menus_(menus)
+{
+}
+
+std::optional<BrowserMenus> BrowserMenuDialog::Run(HWND owner)
+{
+    RunModal(owner);
+    return result_;
+}
+
+bool BrowserMenuDialog::OnInit()
+{
+    SetChecked(IDC_MENU_CHROMIUM_LINK, menus_.chromium.downloadLink);
+    SetChecked(IDC_MENU_CHROMIUM_ALL, menus_.chromium.downloadAll);
+    SetChecked(IDC_MENU_FIREFOX_LINK, menus_.firefox.downloadLink);
+    SetChecked(IDC_MENU_FIREFOX_ALL, menus_.firefox.downloadAll);
+    return true;
+}
+
+bool BrowserMenuDialog::OnCommand(int id, int code, HWND control)
+{
+    if (id != IDOK) {
+        return Dialog::OnCommand(id, code, control);
+    }
+    BrowserMenus menus;
+    menus.chromium.downloadLink = Checked(IDC_MENU_CHROMIUM_LINK);
+    menus.chromium.downloadAll = Checked(IDC_MENU_CHROMIUM_ALL);
+    menus.firefox.downloadLink = Checked(IDC_MENU_FIREFOX_LINK);
+    menus.firefox.downloadAll = Checked(IDC_MENU_FIREFOX_ALL);
+    result_ = menus;
+    Close(IDOK);
+    return true;
+}
+
 }  // namespace ldm::ui

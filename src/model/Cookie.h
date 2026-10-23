@@ -27,6 +27,12 @@ struct Cookie {
 // other control characters, a plausible host name, a path starting with '/'.
 [[nodiscard]] bool IsValidCookie(const Cookie& cookie) noexcept;
 
+// True when a browser would send `cookie` with a request to this address (RFC 6265 section 5.4:
+// domain match, path match, and https for secure cookies). `host` and `scheme` are lower case;
+// `path` starts with '/'.
+[[nodiscard]] bool CookieApplies(const Cookie& cookie, std::string_view scheme, std::string_view host,
+                                 std::string_view path) noexcept;
+
 // One line of the Netscape cookie file format, which libcurl's cookie engine reads. libcurl then
 // sends each cookie only to the hosts and paths it belongs to, also after redirects. Callers pass
 // only valid cookies.

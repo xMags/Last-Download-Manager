@@ -47,6 +47,8 @@ add_library(ldm_ui STATIC
     MainController.h
     MainWindow.cpp
     MainWindow.h
+    PageLinks.cpp
+    PageLinks.h
     ShellActions.h
     StartupRegistration.h
     StatusBar.cpp
@@ -65,6 +67,8 @@ add_library(ldm_ui STATIC
     UiBridge.h
     dialogs/AddUrlDialog.cpp
     dialogs/AddUrlDialog.h
+    dialogs/AllLinksDialog.cpp
+    dialogs/AllLinksDialog.h
     dialogs/BatchDialog.cpp
     dialogs/BatchDialog.h
     dialogs/CaptureDialogs.cpp

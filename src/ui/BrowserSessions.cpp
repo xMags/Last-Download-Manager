@@ -2,6 +2,7 @@
 
 #include "core/Url.h"
 
+#include <algorithm>
 #include <cctype>
 #include <sstream>
 #include <utility>
@@ -22,7 +23,8 @@ std::string ConfigInputs(const model::Settings& settings)
     std::string keys;
     for (const bool flag : {k.preventEnabled, k.preventAlt, k.preventShift, k.preventCtrl, k.forceEnabled, k.forceAlt,
                             k.forceShift, k.forceCtrl, k.forceInsert, k.forceDelete, k.forceNeedsLinkClick,
-                            k.skipWebContent}) {
+                            k.skipWebContent, settings.chromiumMenu.downloadLink, settings.chromiumMenu.downloadAll,
+                            settings.firefoxMenu.downloadLink, settings.firefoxMenu.downloadAll}) {
         keys += flag ? '1' : '0';
     }
     return settings.capturedExtensions + kSeparator + settings.captureSiteExceptions + kSeparator +
@@ -41,16 +43,17 @@ std::vector<std::string> Words(const std::string& text)
 
 }  // namespace
 
-BrowserSessions::BrowserSessions(BrowserLink& link, std::string appVersion,
-                                 std::function<void(browser::Capture)> onCapture)
-    : link_(link), appVersion_(std::move(appVersion)), onCapture_(std::move(onCapture))
+BrowserSessions::BrowserSessions(BrowserLink& link, std::string appVersion, Handlers handlers)
+    : link_(link), appVersion_(std::move(appVersion)), handlers_(std::move(handlers))
 {
 }
 
 void BrowserSessions::OnEvent(BrowserEvent event, const model::Settings& settings)
 {
     if (!event.message) {
-        sessions_.erase(event.connection);
+        if (sessions_.erase(event.connection) > 0 && handlers_.onClosed) {
+            handlers_.onClosed(event.connection);
+        }
         return;
     }
     browser::ParsedMessage& parsed = *event.message;
@@ -64,7 +67,7 @@ void BrowserSessions::OnEvent(BrowserEvent event, const model::Settings& setting
     }
     if (auto* hello = std::get_if<browser::Hello>(&parsed.message)) {
         session->second.hello = std::move(*hello);
-        link_.Send(event.connection, browser::EncodeConfig(MakeConfig(settings), parsed.id));
+        link_.Send(event.connection, browser::EncodeConfig(MakeConfig(settings, session->second.host.family), parsed.id));
         return;
     }
     if (auto* capture = std::get_if<browser::Capture>(&parsed.message)) {
@@ -72,9 +75,33 @@ void BrowserSessions::OnEvent(BrowserEvent event, const model::Settings& setting
         // copy. Anything LDM could not download is refused, so the browser keeps it.
         const bool accepted = session->second.hello.has_value() && core::ParseUrl(capture->url).has_value();
         link_.Send(event.connection, browser::EncodeCaptureResult(parsed.id, accepted));
-        if (accepted && onCapture_) {
-            onCapture_(std::move(*capture));
+        if (accepted && handlers_.onCapture) {
+            handlers_.onCapture(std::move(*capture));
         }
+        return;
+    }
+    if (auto* links = std::get_if<browser::Links>(&parsed.message)) {
+        // The dialog opens when at least one link is an address LDM can download.
+        const bool usable = std::any_of(links->links.begin(), links->links.end(),
+                                        [](const browser::PageLink& l) { return core::ParseUrl(l.url).has_value(); });
+        const bool accepted = session->second.hello.has_value() && usable && handlers_.onLinks;
+        link_.Send(event.connection, browser::EncodeLinksResult(parsed.id, accepted));
+        if (accepted) {
+            handlers_.onLinks(LinksRequest{event.connection, parsed.id, std::move(*links)});
+        }
+        return;
+    }
+    if (auto* info = std::get_if<browser::LinkInfo>(&parsed.message)) {
+        if (session->second.hello && handlers_.onLinkInfo) {
+            handlers_.onLinkInfo(event.connection, std::move(*info));
+        }
+    }
+}
+
+void BrowserSessions::LinksDone(BrowserConnectionId connection, const std::string& requestId)
+{
+    if (sessions_.contains(connection)) {
+        link_.Send(connection, browser::EncodeLinksDone(requestId));
     }
 }
 
@@ -91,15 +118,14 @@ void BrowserSessions::OnSettingsChanged(const model::Settings& settings)
     if (first) {
         return;
     }
-    const std::string config = browser::EncodeConfig(MakeConfig(settings), kPushId);
     for (const auto& [connection, session] : sessions_) {
         if (session.hello) {
-            link_.Send(connection, config);
+            link_.Send(connection, browser::EncodeConfig(MakeConfig(settings, session.host.family), kPushId));
         }
     }
 }
 
-browser::Config BrowserSessions::MakeConfig(const model::Settings& settings) const
+browser::Config BrowserSessions::MakeConfig(const model::Settings& settings, browser::BrowserFamily family) const
 {
     browser::Config config;
     config.appVersion = appVersion_;
@@ -113,6 +139,7 @@ browser::Config BrowserSessions::MakeConfig(const model::Settings& settings) con
     // Address patterns hold no spaces, so whitespace separates them as well as line breaks do.
     config.addressExceptions = Words(settings.captureAddressExceptions);
     config.keys = settings.captureKeys;
+    config.menu = family == browser::BrowserFamily::Firefox ? settings.firefoxMenu : settings.chromiumMenu;
     return config;
 }
 

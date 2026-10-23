@@ -346,6 +346,7 @@ void OptionsDialog::Load()
     Check(IDC_OPT_CLIPBOARD, s.monitorClipboard);
 
     captureKeys_ = s.captureKeys;
+    browserMenus_ = BrowserMenus{s.chromiumMenu, s.firefoxMenu};
     Put(IDC_OPT_TYPES, base::ToUtf16(s.capturedExtensions));
     Put(IDC_OPT_SITES, base::ToUtf16(s.captureSiteExceptions));
     addressExceptions_ = SplitWords(base::ToUtf16(s.captureAddressExceptions));
@@ -562,6 +563,13 @@ void OptionsDialog::OnPageCommand(int id, int code)
         }
         break;
     }
+    case IDC_OPT_MENU: {
+        BrowserMenuDialog dialog(CurrentTheme(), browserMenus_);
+        if (auto menus = dialog.Run(Handle())) {
+            browserMenus_ = *menus;
+        }
+        break;
+    }
     case IDC_OPT_TYPES_DEFAULT:
         Put(IDC_OPT_TYPES, base::ToUtf16(model::DefaultCapturedExtensions()));
         break;
@@ -734,6 +742,8 @@ bool OptionsDialog::Store()
     s.captureSiteExceptions = base::ToUtf8(JoinWords(SplitWords(Get(IDC_OPT_SITES)), L" "));
     s.captureAddressExceptions = base::ToUtf8(JoinWords(addressExceptions_, L"\n"));
     s.captureKeys = captureKeys_;
+    s.chromiumMenu = browserMenus_.chromium;
+    s.firefoxMenu = browserMenus_.firefox;
 
     StoreCategory(currentCategory_);
     for (const model::Category& category : categories_) {
@@ -858,6 +868,8 @@ void OptionsDialog::ApplyEditedFields(const model::Settings& edited, model::Sett
     current.captureSiteExceptions = edited.captureSiteExceptions;
     current.captureAddressExceptions = edited.captureAddressExceptions;
     current.captureKeys = edited.captureKeys;
+    current.chromiumMenu = edited.chromiumMenu;
+    current.firefoxMenu = edited.firefoxMenu;
     current.temporaryDirectory = edited.temporaryDirectory;
     current.setFileDateFromServer = edited.setFileDateFromServer;
     current.showStartDialog = edited.showStartDialog;

@@ -187,6 +187,24 @@ std::optional<model::Cookie> ParseCookie(const nlohmann::json& object)
     return cookie;
 }
 
+// The required "cookies" array of at most `max` valid cookies.
+bool ParseCookies(const nlohmann::json& object, size_t max, std::vector<model::Cookie>& out)
+{
+    const auto cookies = object.find("cookies");
+    if (cookies == object.end() || !cookies->is_array() || cookies->size() > max) {
+        return false;
+    }
+    out.reserve(cookies->size());
+    for (const auto& entry : *cookies) {
+        auto cookie = ParseCookie(entry);
+        if (!cookie) {
+            return false;
+        }
+        out.push_back(std::move(*cookie));
+    }
+    return true;
+}
+
 // The "post" member of a capture: absent or null for none; otherwise the content type (one header
 // value, so no line breaks) and the base64 body.
 bool ParsePost(const nlohmann::json& object, std::optional<PostBody>& out)
@@ -241,21 +259,141 @@ std::optional<Capture> ParseCapture(const nlohmann::json& object)
         return std::nullopt;
     }
     capture.userAgent = std::move(*userAgent);
-    if (!ParsePost(object, capture.post)) {
+    if (!ParsePost(object, capture.post) || !ParseCookies(object, kMaxCookies, capture.cookies)) {
         return std::nullopt;
-    }
-    const auto cookies = object.find("cookies");
-    if (cookies == object.end() || !cookies->is_array() || cookies->size() > kMaxCookies) {
-        return std::nullopt;
-    }
-    for (const auto& entry : *cookies) {
-        auto cookie = ParseCookie(entry);
-        if (!cookie) {
-            return std::nullopt;
-        }
-        capture.cookies.push_back(std::move(*cookie));
     }
     return capture;
+}
+
+std::optional<LinkKind> ParseLinkKind(const std::string& kind)
+{
+    if (kind == "link") {
+        return LinkKind::Link;
+    }
+    if (kind == "image") {
+        return LinkKind::Image;
+    }
+    if (kind == "frame") {
+        return LinkKind::Frame;
+    }
+    if (kind == "text") {
+        return LinkKind::Text;
+    }
+    return std::nullopt;
+}
+
+std::optional<PageLink> ParsePageLink(const nlohmann::json& object)
+{
+    if (!object.is_object()) {
+        return std::nullopt;
+    }
+    const auto url = object.find("url");
+    const auto kind = Text(object, "kind", 16);
+    if (url == object.end() || !url->is_string() || !IsDownloadAddress(url->get_ref<const std::string&>()) || !kind) {
+        return std::nullopt;
+    }
+    const auto parsedKind = ParseLinkKind(*kind);
+    if (!parsedKind) {
+        return std::nullopt;
+    }
+    PageLink link;
+    link.url = url->get<std::string>();
+    link.kind = *parsedKind;
+    // The parser has checked that strings are valid UTF-8; link texts are free text otherwise.
+    std::optional<std::string> text;
+    const auto plain = [](size_t max) {
+        return [max](const std::string& value) { return value.size() <= max && HasNoControlCharacters(value); };
+    };
+    if (!OptionalField(object, "text", plain(kMaxLinkText), text) ||
+        !OptionalField(object, "fileName", plain(kMaxFileName), link.fileName)) {
+        return std::nullopt;
+    }
+    link.text = text.value_or(std::string());
+    if (link.fileName && link.fileName->empty()) {
+        link.fileName.reset();
+    }
+    return link;
+}
+
+std::optional<Links> ParseLinks(const nlohmann::json& object)
+{
+    Links links;
+    const auto selection = Boolean(object, "selection");
+    auto userAgent = Text(object, "userAgent", kMaxUserAgent);
+    if (!selection || !userAgent || userAgent->empty() ||
+        !OptionalField(object, "referrer", IsDownloadAddress, links.referrer)) {
+        return std::nullopt;
+    }
+    links.selection = *selection;
+    links.userAgent = std::move(*userAgent);
+    const auto list = object.find("links");
+    if (list == object.end() || !list->is_array() || list->empty() || list->size() > kMaxPageLinks) {
+        return std::nullopt;
+    }
+    links.links.reserve(list->size());
+    for (const auto& entry : *list) {
+        auto link = ParsePageLink(entry);
+        if (!link) {
+            return std::nullopt;
+        }
+        links.links.push_back(std::move(*link));
+    }
+    if (!ParseCookies(object, kMaxPageLinkCookies, links.cookies)) {
+        return std::nullopt;
+    }
+    return links;
+}
+
+std::optional<LinkDetails> ParseLinkDetails(const nlohmann::json& object)
+{
+    if (!object.is_object()) {
+        return std::nullopt;
+    }
+    const auto index = object.find("index");
+    if (index == object.end() || !index->is_number_unsigned() || index->get<std::uint64_t>() >= kMaxPageLinks) {
+        return std::nullopt;
+    }
+    LinkDetails details;
+    details.index = static_cast<size_t>(index->get<std::uint64_t>());
+    const auto failed = object.find("failed");
+    if (failed != object.end() && !failed->is_null()) {
+        if (!failed->is_boolean()) {
+            return std::nullopt;
+        }
+        details.failed = failed->get<bool>();
+    }
+    const auto plain = [](size_t max) {
+        return [max](const std::string& value) { return !value.empty() && value.size() <= max && HasNoControlCharacters(value); };
+    };
+    if (!OptionalField(object, "mimeType", plain(kMaxMimeType), details.mimeType) ||
+        !OptionalField(object, "fileName", plain(kMaxFileName), details.fileName)) {
+        return std::nullopt;
+    }
+    const auto size = object.find("fileSize");
+    if (size != object.end() && !size->is_null()) {
+        if (!size->is_number_integer() || size->get<std::int64_t>() < 0) {
+            return std::nullopt;
+        }
+        details.fileSize = size->get<std::int64_t>();
+    }
+    return details;
+}
+
+std::optional<LinkInfo> ParseLinkInfo(const nlohmann::json& object)
+{
+    const auto items = object.find("items");
+    if (items == object.end() || !items->is_array() || items->size() > kMaxPageLinks) {
+        return std::nullopt;
+    }
+    LinkInfo info;
+    for (const auto& entry : *items) {
+        auto details = ParseLinkDetails(entry);
+        if (!details) {
+            return std::nullopt;
+        }
+        info.items.push_back(std::move(*details));
+    }
+    return info;
 }
 
 nlohmann::json Envelope(std::string_view id, std::string_view type)
@@ -309,6 +447,14 @@ std::optional<ParsedMessage> ParseMessage(std::string_view json)
         if (auto capture = ParseCapture(message)) {
             return ParsedMessage{std::move(id), std::move(*capture)};
         }
+    } else if (type == "links") {
+        if (auto links = ParseLinks(message)) {
+            return ParsedMessage{std::move(id), std::move(*links)};
+        }
+    } else if (type == "link-info") {
+        if (auto info = ParseLinkInfo(message)) {
+            return ParsedMessage{std::move(id), std::move(*info)};
+        }
     }
     return std::nullopt;
 }
@@ -360,6 +506,7 @@ std::string EncodeConfig(const Config& config, std::string_view replyTo)
         {"forceNeedsLinkClick", keys.forceNeedsLinkClick},
         {"skipWebContent", keys.skipWebContent},
     };
+    message["menu"] = {{"downloadLink", config.menu.downloadLink}, {"downloadAll", config.menu.downloadAll}};
     return message.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
 }
 
@@ -368,6 +515,18 @@ std::string EncodeCaptureResult(std::string_view replyTo, bool accepted)
     nlohmann::json message = Envelope(replyTo, "capture-result");
     message["accepted"] = accepted;
     return message.dump();
+}
+
+std::string EncodeLinksResult(std::string_view replyTo, bool accepted)
+{
+    nlohmann::json message = Envelope(replyTo, "links-result");
+    message["accepted"] = accepted;
+    return message.dump();
+}
+
+std::string EncodeLinksDone(std::string_view replyTo)
+{
+    return Envelope(replyTo, "links-done").dump();
 }
 
 std::optional<std::string> DecodeBase64(std::string_view text)
