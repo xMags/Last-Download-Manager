@@ -1,8 +1,8 @@
 #pragma once
 
 #include "model/Category.h"
-#include "model/Cookie.h"
 #include "model/ConnectionRules.h"
+#include "model/Cookie.h"
 #include "model/Download.h"
 #include "model/Ids.h"
 #include "model/Settings.h"
@@ -31,6 +31,12 @@ enum class ExistingFilePolicy {
     Cancel,
 };
 
+// The form submission a download came from (checklist ENG-11).
+struct PostData {
+    std::string contentType;
+    std::string body;  // bytes, sent as is
+};
+
 struct AddDownloadCommand {
     std::uint64_t token = 0;  // echoed in AddResult so the caller can match the answer
     std::string url;
@@ -45,6 +51,7 @@ struct AddDownloadCommand {
     // From a browser capture: the browser's own User-Agent and the cookies it would send.
     std::optional<std::string> userAgent;
     std::vector<model::Cookie> cookies;
+    std::optional<PostData> post;
     AddMode mode = AddMode::StartNow;
     // Set after the user answered the duplicate prompt; otherwise Options > Downloads applies.
     std::optional<model::DuplicatePolicy> duplicatePolicy;

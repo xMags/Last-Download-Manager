@@ -129,6 +129,7 @@ void AddFlow::ApplyBrowserRequest(const std::optional<BrowserRequest>& browser, 
     command.parentPage = browser->referrer;
     command.userAgent = browser->userAgent;
     command.cookies = browser->cookies;
+    command.post = browser->post;
 }
 
 void AddFlow::AddImported(const std::vector<ImportedEntry>& entries)

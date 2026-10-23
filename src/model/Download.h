@@ -92,6 +92,10 @@ struct Download {
     // DPAPI-protected cookie lines from the browser that captured this download (model::CookiesToText);
     // empty for downloads added in LDM. Removed once the download completes.
     std::vector<std::uint8_t> cookieSecret;
+    // A download that came from submitting a form (checklist ENG-11): the DPAPI-protected request
+    // body and its Content-Type. Empty for ordinary downloads; removed once the download completes.
+    std::vector<std::uint8_t> postSecret;
+    std::optional<std::string> postContentType;
 
     CompletionAction completionAction = CompletionAction::None;
 

@@ -571,6 +571,25 @@ TEST_F(CoordinatorTest, BrowserCaptureCarriesCookiesAndUserAgentUntilCompletion)
     EXPECT_TRUE(Stored(id)->cookieSecret.empty()) << "cookies are kept only until completion (decision 3)";
 }
 
+TEST_F(CoordinatorTest, FormDownloadsUseOneConnectionAndForgetTheFormWhenDone)
+{
+    const DownloadId id = *Add("https://files.test/get", AddMode::StartNow, [](AddDownloadCommand& c) {
+        c.post = ldm::core::PostData{"application/x-www-form-urlencoded", "token=abc"};
+    }).id;
+    const auto& request = engine_.starts.back();
+    ASSERT_TRUE(request.post);
+    EXPECT_EQ(request.post->body, "token=abc");
+    EXPECT_EQ(request.post->contentType, "application/x-www-form-urlencoded");
+    EXPECT_EQ(request.maxConnections, 1);
+    EXPECT_EQ(Stored(id)->postSecret.front(), 'P') << "stored through the secret protector";
+    EXPECT_TRUE(View(id).download.postSecret.empty()) << "snapshots never carry secrets";
+
+    Finish(id, 1, TransferOutcome::Completed, {{0, 4, 4}}, std::nullopt, 4);
+    Send(id, 1, ldm::core::FinalizeFinished{});
+    EXPECT_TRUE(Stored(id)->postSecret.empty());
+    EXPECT_FALSE(Stored(id)->postContentType);
+}
+
 TEST_F(CoordinatorTest, SpeculativeAddFollowsServerNameUntilConfirmed)
 {
     const DownloadId id = *Add("http://x.test/download?id=1", AddMode::Speculative).id;

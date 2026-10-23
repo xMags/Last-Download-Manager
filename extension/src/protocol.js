@@ -112,7 +112,8 @@ export function toLdmCookie(cookie) {
 /**
  * The capture message for a browser download.
  * @param {{url: string, finalUrl?: string, referrer?: string, fileName?: string, fileSize?: number,
- *          mimeType?: string, userAgent: string, cookies: object[]}} download
+ *          mimeType?: string, userAgent: string, cookies: object[],
+ *          post?: {contentType: string, body: string}}} download post body is base64
  */
 export function makeCapture(download) {
   const optionalAddress = (value) => (isDownloadAddress(value) ? value : undefined);
@@ -142,6 +143,9 @@ export function makeCapture(download) {
     mimeType: optionalText(download.mimeType, 256),
     userAgent: cleanText(download.userAgent, 1024) || 'Mozilla/5.0',
     cookies,
+    post: download.post && optionalText(download.post.contentType, 256)
+      ? { contentType: download.post.contentType, body: download.post.body }
+      : undefined,
   };
 }
 

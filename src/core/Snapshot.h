@@ -19,7 +19,7 @@ namespace ldm::core {
 
 // One row of the download list, with the live values the database does not hold.
 struct DownloadView {
-    model::Download download;  // secrets removed: loginSecret and cookieSecret are always empty here
+    model::Download download;  // secrets removed: loginSecret, cookieSecret and postSecret are always empty here
     bool hasPassword = false;
     bool awaitingConfirmation = false;  // speculative add whose info dialog is still open
     std::int64_t bytesPerSecond = 0;

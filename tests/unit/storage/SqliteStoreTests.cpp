@@ -35,6 +35,8 @@ Download SampleDownload(std::string publicId)
     d.loginUser = "user";
     d.loginSecret = {1, 2, 3};
     d.cookieSecret = {4, 5, 6, 7};
+    d.postSecret = {8, 9};
+    d.postContentType = "application/x-www-form-urlencoded";
     d.createdAtMs = 1'700'000'000'000;
     d.segments = {{0, 500, 500}, {500, 1000, 120}};
     return d;
@@ -60,6 +62,8 @@ TEST(SqliteStore, InsertAndLoadRoundTrip)
     EXPECT_FALSE(d.validators.lastModified.has_value());
     EXPECT_EQ(d.loginSecret, original.loginSecret);
     EXPECT_EQ(d.cookieSecret, original.cookieSecret);
+    EXPECT_EQ(d.postSecret, original.postSecret);
+    EXPECT_EQ(d.postContentType, original.postContentType);
     ASSERT_EQ(d.segments.size(), 2u);
     EXPECT_EQ(d.segments[1].start, 500);
     EXPECT_EQ(d.segments[1].end, 1000);

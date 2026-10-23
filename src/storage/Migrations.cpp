@@ -94,6 +94,11 @@ CREATE TABLE settings (
     Migration{2, R"sql(
 ALTER TABLE downloads ADD COLUMN cookie_secret BLOB;
 )sql"},
+    // Form (POST) downloads: the body, DPAPI protected, and its Content-Type.
+    Migration{3, R"sql(
+ALTER TABLE downloads ADD COLUMN post_secret BLOB;
+ALTER TABLE downloads ADD COLUMN post_content_type TEXT;
+)sql"},
 };
 
 base::Result<int> CurrentVersion(Connection& connection)

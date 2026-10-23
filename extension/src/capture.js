@@ -18,6 +18,7 @@ export class DownloadCapture {
    *          userAgent: string, canHideDownloadUi: boolean}} options
    *   ready settles once the stored settings are loaded; a download can wake the extension first.
    *   keyVerdict gives 'prevent', 'force' or 'none' for {url, finalUrl, referrer, mimeType, fileName}.
+   *   postFor (optional) gives the form submission a download answered, or null.
    */
   constructor(api, connection, options) {
     this.api = api;
@@ -68,6 +69,7 @@ export class DownloadCapture {
         mimeType: item.mime,
         userAgent: this.options.userAgent,
         cookies: await this.cookiesFor([url, finalUrl]),
+        post: this.options.postFor?.(url) ?? undefined,
       });
       const answer = await this.connection.oneShot(message, ANSWER_TIMEOUT_MS);
       if (!isAcceptedCapture(answer, message.id)) {

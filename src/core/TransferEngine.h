@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/Commands.h"
 #include "model/Download.h"
 #include "model/Ids.h"
 
@@ -30,6 +31,9 @@ struct TransferRequest {
     // Browser cookies in Netscape format, decrypted just before the start like credentials.
     // libcurl sends each one only to its own host and path, also after redirects.
     std::vector<std::string> cookieLines;
+    // A form submission to repeat (POST), decrypted just before the start. Always one connection:
+    // sending a form several times at once can have effects on the site.
+    std::optional<PostData> post;
     std::optional<std::string> proxy;  // libcurl proxy URL; absent = direct connection
     bool ftpActiveMode = false;        // Options > Proxy: passive FTP is the default
 

@@ -141,6 +141,40 @@ TEST(BrowserProtocol, RejectsInvalidCaptures)
     EXPECT_FALSE(ldm::browser::ParseMessage(R"({"v":1,"id":"c","type":"capture","url":"https://a.test/x","cookies":[]})"));
 }
 
+TEST(BrowserProtocol, CaptureCarriesFormData)
+{
+    const auto parsed = ldm::browser::ParseMessage(CaptureJson(
+        R"("url":"https://a.test/get","cookies":[],"post":{"contentType":"application/x-www-form-urlencoded","body":"dG9rZW49YWJj"})"));
+    ASSERT_TRUE(parsed);
+    const auto& capture = std::get<ldm::browser::Capture>(parsed->message);
+    ASSERT_TRUE(capture.post);
+    EXPECT_EQ(capture.post->contentType, "application/x-www-form-urlencoded");
+    EXPECT_EQ(capture.post->body, "token=abc");
+}
+
+TEST(BrowserProtocol, RejectsUnsafeFormData)
+{
+    // A line break in the content type would add a request header.
+    EXPECT_FALSE(ldm::browser::ParseMessage(CaptureJson(
+        R"("url":"https://a.test/get","cookies":[],"post":{"contentType":"text/plain\r\nX-Evil: 1","body":"YQ=="})")));
+    EXPECT_FALSE(ldm::browser::ParseMessage(CaptureJson(
+        R"("url":"https://a.test/get","cookies":[],"post":{"contentType":"text/plain","body":"not base64!"})")));
+    EXPECT_FALSE(ldm::browser::ParseMessage(CaptureJson(R"("url":"https://a.test/get","cookies":[],"post":"x")")));
+}
+
+TEST(BrowserProtocol, Base64)
+{
+    EXPECT_EQ(ldm::browser::DecodeBase64(""), "");
+    EXPECT_EQ(ldm::browser::DecodeBase64("YQ=="), "a");
+    EXPECT_EQ(ldm::browser::DecodeBase64("YWI="), "ab");
+    EXPECT_EQ(ldm::browser::DecodeBase64("YWJj"), "abc");
+    EXPECT_EQ(ldm::browser::DecodeBase64("AP8="), std::string("\x00\xff", 2));
+    EXPECT_FALSE(ldm::browser::DecodeBase64("YQ="));
+    EXPECT_FALSE(ldm::browser::DecodeBase64("Y==="));
+    EXPECT_FALSE(ldm::browser::DecodeBase64("YQ==YWJj")) << "padding only at the end";
+    EXPECT_FALSE(ldm::browser::DecodeBase64("YW Jj"));
+}
+
 TEST(BrowserProtocol, EncodesCaptureResult)
 {
     const auto json = nlohmann::json::parse(ldm::browser::EncodeCaptureResult("c1", true));

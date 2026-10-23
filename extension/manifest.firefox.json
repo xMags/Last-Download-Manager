@@ -32,7 +32,8 @@
     "cookies",
     "downloads",
     "nativeMessaging",
-    "storage"
+    "storage",
+    "webRequest"
   ],
   "host_permissions": [
     "<all_urls>"
