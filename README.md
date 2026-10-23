@@ -7,7 +7,7 @@ A native Windows download manager written in C++ with plain Win32. It aims to be
 | Milestone | Scope | State |
 |---|---|---|
 | 1 | Reference study and parity checklist | Done |
-| 2 | Native shell and reliable downloads | In progress |
+| 2 | Native shell and reliable downloads | Done |
 | 3 | Browser integration and media capture | Planned |
 | 4 | Queues, scheduler, organization and Site Grabber | Planned |
 | 5 | Packaging and installer | Planned |
