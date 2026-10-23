@@ -32,7 +32,7 @@ constexpr wchar_t kCloseGlyph = 0xE8BB;  // ChromeClose
 constexpr int kHeaderHeight96 = 22;
 constexpr int kCloseButton96 = 18;
 constexpr int kCloseGlyph96 = 10;
-constexpr int kTreeItemHeight96 = 17;
+constexpr int kTreeItemHeight96 = 21;
 constexpr int kTreeIcon96 = 14;  // the reference's tree icons sit inside short rows with room to spare
 
 // In Image order. the reference gives each built-in category its own icon; LDM draws its own from the

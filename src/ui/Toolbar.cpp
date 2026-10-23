@@ -74,7 +74,10 @@ std::vector<int> ParseOrder(const std::string& layout)
     return std::any_of(order.begin(), order.end(), [](int command) { return command != 0; }) ? order : DefaultOrder();
 }
 
-TBBUTTON MakeButton(int command)
+// the reference's large buttons all share one width; longer labels end in "..." and show whole in the tooltip.
+constexpr int kLargeButtonWidth96 = 60;
+
+TBBUTTON MakeButton(int command, bool autosize)
 {
     TBBUTTON button{};
     if (command == 0) {
@@ -85,7 +88,7 @@ TBBUTTON MakeButton(int command)
     button.iBitmap = static_cast<int>(it - kButtons.begin());
     button.idCommand = command;
     button.fsState = TBSTATE_ENABLED;
-    button.fsStyle = BTNS_BUTTON | BTNS_AUTOSIZE;
+    button.fsStyle = autosize ? BTNS_BUTTON | BTNS_AUTOSIZE : BTNS_BUTTON;
     button.iString = reinterpret_cast<INT_PTR>(it->label);  // TBBUTTON stores strings as INT_PTR
     return button;
 }
@@ -137,6 +140,21 @@ void Toolbar::Refresh(bool largeButtons, const Theme& theme)
     const int padding = Scale(large_ ? 10 : 6, dpi);
     ::SendMessageW(window_, TB_SETPADDING, 0, MAKELPARAM(padding, Scale(large_ ? 6 : 6, dpi)));
     ::SendMessageW(window_, TB_SETMAXTEXTROWS, large_ ? 1 : 0, 0);
+    // Large: one fixed width with ellipsis, as the reference. Small: icon-only buttons sized to their image.
+    const int fixedWidth = Scale(kLargeButtonWidth96, dpi);
+    ::SendMessageW(window_, TB_SETBUTTONWIDTH, 0, large_ ? MAKELPARAM(fixedWidth, fixedWidth) : MAKELPARAM(0, Scale(400, dpi)));
+    ::SendMessageW(window_, TB_SETDRAWTEXTFLAGS, DT_END_ELLIPSIS, large_ ? DT_END_ELLIPSIS : 0);
+    const int count = static_cast<int>(::SendMessageW(window_, TB_BUTTONCOUNT, 0, 0));
+    for (int i = 0; i < count; ++i) {
+        TBBUTTONINFOW info{sizeof(info)};
+        info.dwMask = TBIF_BYINDEX | TBIF_STYLE;
+        ::SendMessageW(window_, TB_GETBUTTONINFOW, static_cast<WPARAM>(i), reinterpret_cast<LPARAM>(&info));
+        if ((info.fsStyle & BTNS_SEP) != 0) {
+            continue;
+        }
+        info.fsStyle = large_ ? static_cast<BYTE>(info.fsStyle & ~BTNS_AUTOSIZE) : static_cast<BYTE>(info.fsStyle | BTNS_AUTOSIZE);
+        ::SendMessageW(window_, TB_SETBUTTONINFOW, static_cast<WPARAM>(i), reinterpret_cast<LPARAM>(&info));
+    }
     ::SendMessageW(window_, TB_AUTOSIZE, 0, 0);
     ::InvalidateRect(window_, nullptr, TRUE);
 }
@@ -156,7 +174,7 @@ void Toolbar::ApplyLayout(const std::string& layout)
     }
     std::vector<TBBUTTON> buttons;
     for (const int command : ParseOrder(layout)) {
-        buttons.push_back(MakeButton(command));
+        buttons.push_back(MakeButton(command, !large_));
     }
     ::SendMessageW(window_, TB_ADDBUTTONSW, buttons.size(), reinterpret_cast<LPARAM>(buttons.data()));
     ::SendMessageW(window_, TB_AUTOSIZE, 0, 0);
@@ -207,7 +225,7 @@ bool Toolbar::HandleNotify(const NMHDR& header, LRESULT& result, bool& layoutCha
             result = FALSE;
             return true;
         }
-        info.tbButton = MakeButton(kButtons[static_cast<size_t>(info.iItem)].command);
+        info.tbButton = MakeButton(kButtons[static_cast<size_t>(info.iItem)].command, !large_);
         if (info.pszText != nullptr && info.cchText > 0) {
             wcsncpy_s(info.pszText, static_cast<size_t>(info.cchText), kButtons[static_cast<size_t>(info.iItem)].label,
                       _TRUNCATE);
@@ -222,6 +240,16 @@ bool Toolbar::HandleNotify(const NMHDR& header, LRESULT& result, bool& layoutCha
         }
         ApplyLayout(layout);
         result = TBNRF_ENDCUSTOMIZE;
+        return true;
+    }
+    case TBN_GETINFOTIPW: {
+        // The whole label, which a fixed-width button may have cut short.
+        auto& tip = const_cast<NMTBGETINFOTIPW&>(reinterpret_cast<const NMTBGETINFOTIPW&>(header));  // documented in-out
+        const auto it = std::find_if(kButtons.begin(), kButtons.end(), [&tip](const ButtonInfo& b) { return b.command == tip.iItem; });
+        if (it != kButtons.end() && tip.pszText != nullptr && tip.cchTextMax > 0) {
+            wcsncpy_s(tip.pszText, static_cast<size_t>(tip.cchTextMax), it->label, _TRUNCATE);
+        }
+        result = 0;
         return true;
     }
     case TBN_TOOLBARCHANGE:
