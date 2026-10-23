@@ -138,7 +138,14 @@ struct FinalizeFinished {
     std::optional<TransferFailure> failure;
 };
 
-using EnginePayload = std::variant<ResponseInfo, ProgressInfo, TransferFinished, FinalizeFinished>;
+// The proxy of a run whose lookup could not answer at once (design section 4). Sent by the proxy
+// resolver, not the engine, but through the same listener, so it is ordered with engine events
+// and a late answer for an older run is dropped by its epoch.
+struct ProxyResolved {
+    std::optional<std::string> proxy;  // nothing: connect directly
+};
+
+using EnginePayload = std::variant<ResponseInfo, ProgressInfo, TransferFinished, FinalizeFinished, ProxyResolved>;
 
 struct EngineEvent {
     model::DownloadId id;

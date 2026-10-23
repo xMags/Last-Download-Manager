@@ -89,12 +89,50 @@ std::string WithScheme(const std::string& proxy)
     return proxy.find("://") == std::string::npos ? "http://" + proxy : proxy;
 }
 
+// Bounds a PAC download or a WPAD probe, so a stuck network never holds a download for long.
+constexpr int kLookupTimeoutMs = 10'000;
+
+// The system's static proxy for `url`, honouring its bypass list.
+std::optional<std::string> StaticProxyFor(const core::Url& url, const std::optional<std::string>& staticProxy,
+                                          const std::string& bypass)
+{
+    if (!staticProxy) {
+        return std::nullopt;
+    }
+    size_t pos = 0;
+    while (pos < bypass.size()) {
+        size_t end = bypass.find_first_of("; ", pos);
+        if (end == std::string::npos) {
+            end = bypass.size();
+        }
+        const std::string pattern = bypass.substr(pos, end - pos);
+        pos = end + 1;
+        if (pattern == "<local>" ? url.host.find('.') == std::string::npos : core::WildcardMatch(pattern, url.host)) {
+            return std::nullopt;
+        }
+    }
+    const auto picked = PickFromList(*staticProxy, url.scheme);
+    return picked ? std::optional<std::string>(WithScheme(*picked)) : std::nullopt;
+}
+
 }  // namespace
 
-WinHttpProxyResolver::WinHttpProxyResolver(core::SecretProtector& secrets) : secrets_(secrets) {}
+WinHttpProxyResolver::WinHttpProxyResolver(core::SecretProtector& secrets, core::EngineListener& listener)
+    : secrets_(secrets), listener_(listener)
+{
+}
 
 WinHttpProxyResolver::~WinHttpProxyResolver()
 {
+    {
+        std::lock_guard lock(mutex_);
+        stopping_ = true;
+        jobs_.clear();
+    }
+    wake_.notify_one();
+    if (worker_.joinable()) {
+        worker_.join();
+    }
     if (session_ != nullptr) {
         ::WinHttpCloseHandle(session_);
     }
@@ -105,39 +143,32 @@ void WinHttpProxyResolver::Configure(const model::Settings& settings)
     settings_ = settings;
 }
 
-std::optional<std::string> WinHttpProxyResolver::ProxyFor(const std::string& url)
-{
-    switch (settings_.proxyMode) {
-    case model::ProxyMode::None:
-        return std::nullopt;
-    case model::ProxyMode::System:
-        return ResolveWithWinHttp(url, std::nullopt);
-    case model::ProxyMode::AutoConfigScript:
-        if (settings_.autoConfigScriptUrl.empty()) {
-            return std::nullopt;
-        }
-        return ResolveWithWinHttp(url, settings_.autoConfigScriptUrl);
-    case model::ProxyMode::Manual:
-        return ManualProxy(url);
-    }
-    return std::nullopt;
-}
-
-std::optional<std::string> WinHttpProxyResolver::ResolveWithWinHttp(const std::string& url,
-                                                                    const std::optional<std::string>& scriptUrl)
+core::ProxyLookup WinHttpProxyResolver::Resolve(model::DownloadId id, std::int64_t epoch, const std::string& url)
 {
     const auto parsed = core::ParseUrl(url);
     if (!parsed) {
-        return std::nullopt;
+        return {};
     }
-    std::optional<std::string> script = scriptUrl;
-    bool autoDetect = false;
-    std::optional<std::string> staticProxy;
-    std::string bypass;
-    if (!script) {
+    Job job;
+    job.id = id;
+    job.epoch = epoch;
+    job.url = url;
+    switch (settings_.proxyMode) {
+    case model::ProxyMode::None:
+        return {};
+    case model::ProxyMode::Manual:
+        return core::ProxyLookup{false, ManualProxy(url)};
+    case model::ProxyMode::AutoConfigScript:
+        if (settings_.autoConfigScriptUrl.empty()) {
+            return {};
+        }
+        job.script = settings_.autoConfigScriptUrl;
+        break;
+    case model::ProxyMode::System: {
+        // Reading the system settings is a quick registry read; only detection and scripts are slow.
         WINHTTP_CURRENT_USER_IE_PROXY_CONFIG config{};
         if (!::WinHttpGetIEProxyConfigForCurrentUser(&config)) {
-            return std::nullopt;
+            return {};
         }
         GlobalString autoConfig;
         GlobalString proxy;
@@ -145,28 +176,73 @@ std::optional<std::string> WinHttpProxyResolver::ResolveWithWinHttp(const std::s
         autoConfig.value = config.lpszAutoConfigUrl;
         proxy.value = config.lpszProxy;
         proxyBypass.value = config.lpszProxyBypass;
-        autoDetect = config.fAutoDetect != FALSE;
+        job.autoDetect = config.fAutoDetect != FALSE;
         if (autoConfig.value != nullptr) {
-            script = base::ToUtf8(autoConfig.value);
+            job.script = base::ToUtf8(autoConfig.value);
         }
         if (proxy.value != nullptr) {
-            staticProxy = base::ToUtf8(proxy.value);
+            job.staticProxy = base::ToUtf8(proxy.value);
         }
         if (proxyBypass.value != nullptr) {
-            bypass = base::ToUtf8(proxyBypass.value);
+            job.bypass = base::ToUtf8(proxyBypass.value);
+        }
+        if (!job.script && !job.autoDetect) {
+            return core::ProxyLookup{false, StaticProxyFor(*parsed, job.staticProxy, job.bypass)};
+        }
+        break;
+    }
+    }
+    {
+        std::lock_guard lock(mutex_);
+        if (stopping_) {
+            return {};
+        }
+        jobs_.push_back(std::move(job));
+        if (!worker_.joinable()) {
+            worker_ = std::thread([this] { RunWorker(); });
         }
     }
+    wake_.notify_one();
+    return core::ProxyLookup{true, std::nullopt};
+}
 
-    if (script || autoDetect) {
+void WinHttpProxyResolver::RunWorker()
+{
+    while (true) {
+        Job job;
+        {
+            std::unique_lock lock(mutex_);
+            wake_.wait(lock, [this] { return stopping_ || !jobs_.empty(); });
+            if (stopping_) {
+                return;
+            }
+            job = std::move(jobs_.front());
+            jobs_.pop_front();
+        }
+        std::optional<std::string> proxy = LookUp(job);
+        listener_.OnEngineEvent(core::EngineEvent{job.id, job.epoch, core::ProxyResolved{std::move(proxy)}});
+    }
+}
+
+std::optional<std::string> WinHttpProxyResolver::LookUp(const Job& job)
+{
+    const auto parsed = core::ParseUrl(job.url);
+    if (!parsed) {
+        return std::nullopt;
+    }
+    if (job.script || job.autoDetect) {
         if (session_ == nullptr) {
             session_ = ::WinHttpOpen(L"Last Download Manager", WINHTTP_ACCESS_TYPE_NO_PROXY, WINHTTP_NO_PROXY_NAME,
                                      WINHTTP_NO_PROXY_BYPASS, 0);
+            if (session_ != nullptr) {
+                ::WinHttpSetTimeouts(session_, kLookupTimeoutMs, kLookupTimeoutMs, kLookupTimeoutMs, kLookupTimeoutMs);
+            }
         }
         if (session_ != nullptr) {
             WINHTTP_AUTOPROXY_OPTIONS options{};
             std::wstring scriptWide;
-            if (script) {
-                scriptWide = base::ToUtf16(*script);
+            if (job.script) {
+                scriptWide = base::ToUtf16(*job.script);
                 options.dwFlags = WINHTTP_AUTOPROXY_CONFIG_URL;
                 options.lpszAutoConfigUrl = scriptWide.c_str();
             } else {
@@ -175,7 +251,7 @@ std::optional<std::string> WinHttpProxyResolver::ResolveWithWinHttp(const std::s
             }
             options.fAutoLogonIfChallenged = TRUE;
             WINHTTP_PROXY_INFO info{};
-            if (::WinHttpGetProxyForUrl(session_, base::ToUtf16(url).c_str(), &options, &info)) {
+            if (::WinHttpGetProxyForUrl(session_, base::ToUtf16(job.url).c_str(), &options, &info)) {
                 GlobalString proxy;
                 GlobalString infoBypass;
                 proxy.value = info.lpszProxy;
@@ -189,23 +265,7 @@ std::optional<std::string> WinHttpProxyResolver::ResolveWithWinHttp(const std::s
         }
         // Detection or the script failed: fall through to the static proxy, as browsers do.
     }
-    if (!staticProxy) {
-        return std::nullopt;
-    }
-    size_t pos = 0;
-    while (pos < bypass.size()) {
-        size_t end = bypass.find_first_of("; ", pos);
-        if (end == std::string::npos) {
-            end = bypass.size();
-        }
-        const std::string pattern = bypass.substr(pos, end - pos);
-        pos = end + 1;
-        if (pattern == "<local>" ? parsed->host.find('.') == std::string::npos : core::WildcardMatch(pattern, parsed->host)) {
-            return std::nullopt;
-        }
-    }
-    const auto picked = PickFromList(*staticProxy, parsed->scheme);
-    return picked ? std::optional<std::string>(WithScheme(*picked)) : std::nullopt;
+    return StaticProxyFor(*parsed, job.staticProxy, job.bypass);
 }
 
 bool WinHttpProxyResolver::Bypassed(const std::string& host) const

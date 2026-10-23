@@ -14,8 +14,8 @@
 
 namespace ldm::core {
 
-// The core thread (design section 3): one queue of commands and engine events, drained in order
-// into the coordinator, plus the coordinator's timers. Commands from any thread are serialized
+// The core thread (design section 3): one queue of commands and engine events (proxy answers
+// included), drained in order into the coordinator, plus the coordinator's timers. Commands from any thread are serialized
 // here, so two simultaneous requests can never interleave.
 //
 // Lifetime: construct, create the engine with this object as its listener, create the
