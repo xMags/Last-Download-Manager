@@ -2,6 +2,7 @@ find_package(nlohmann_json CONFIG REQUIRED)
 
 add_executable(ldm_integration_tests
     BrowserHostTests.cpp
+    ChildProcessTests.cpp
     CoreTests.cpp
     EngineTests.cpp
     FixtureServer.cpp
