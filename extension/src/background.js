@@ -35,7 +35,9 @@ const connection = new LdmConnection(api, {
 });
 
 function render() {
-  applyToolbar(api, toolbarAppearance({ enabled, connection: connection.state })).catch(() => {});
+  applyToolbar(api, toolbarAppearance({ enabled, connection: connection.state })).catch((error) => {
+    console.warn('LDM: could not update the toolbar button', error);
+  });
 }
 
 // Listeners are registered synchronously, so events that woke the script are not missed.

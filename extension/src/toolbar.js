@@ -6,9 +6,10 @@ import { State } from './connection.js';
 const TITLE = 'Last Download Manager';
 const TOGGLE_HINT = '(click to turn browser integration on or off)';
 
-const ICONS = {
-  on: { 16: 'icons/ldm-16.png', 32: 'icons/ldm-32.png' },
-  off: { 16: 'icons/ldm-off-16.png', 32: 'icons/ldm-off-32.png' },
+// Absolute paths: Chrome resolves relative ones against the background script's folder (src/).
+export const ICONS = {
+  on: { 16: '/icons/ldm-16.png', 32: '/icons/ldm-32.png' },
+  off: { 16: '/icons/ldm-off-16.png', 32: '/icons/ldm-off-32.png' },
 };
 
 /**
