@@ -60,6 +60,22 @@ bool WildcardMatch(std::string_view pattern, std::string_view text)
     return p == pattern.size();
 }
 
+bool MatchesExtensionList(std::string_view list, std::string_view extension)
+{
+    if (extension.empty()) {
+        return false;
+    }
+    for (std::string_view entry : Words(list)) {
+        if (!entry.empty() && entry.front() == '.') {
+            entry.remove_prefix(1);
+        }
+        if (WildcardMatch(entry, extension)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 std::optional<model::CategoryId> MatchCategory(std::span<const model::Category> categories, std::string_view fileName,
                                                const Url& url)
 {

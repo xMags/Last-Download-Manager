@@ -89,31 +89,48 @@ bool AddFlow::ResolveDuplicate(const std::string& url, std::optional<model::Dupl
     return true;
 }
 
-void AddFlow::AddAddress(const std::string& url, bool silent)
+void AddFlow::AddAddress(const ExternalAdd& add)
 {
     const auto snapshot = context_.snapshot();
-    if (!snapshot) {
+    if (!snapshot || !core::ParseUrl(add.url)) {
         return;
     }
     std::optional<model::DuplicatePolicy> policy;
-    if (silent) {
+    if (add.silent) {
         policy = model::DuplicatePolicy::AddNumbered;  // nobody to ask; never replace silently
-    } else if (!ResolveDuplicate(url, policy)) {
+    } else if (!ResolveDuplicate(add.url, policy)) {
         return;
     }
-    if (silent || !snapshot->settings.showStartDialog) {
+    if (add.silent || !snapshot->settings.showStartDialog) {
         core::AddDownloadCommand command;
         command.token = nextToken_++;
-        command.url = url;
+        command.url = add.url;
+        command.saveDir = add.saveDir;
+        command.fileName = add.fileName;
         command.duplicatePolicy = policy;
-        command.mode = snapshot->settings.queueOnly ? core::AddMode::Later : core::AddMode::StartNow;
-        if (!silent && command.mode == core::AddMode::StartNow) {
+        command.mode = add.queueOnly || snapshot->settings.queueOnly ? core::AddMode::Later : core::AddMode::StartNow;
+        if (!add.silent && command.mode == core::AddMode::StartNow) {
             progressOnAdd_.push_back(command.token);
         }
         Post(std::move(command));
         return;
     }
-    AddWithInfoDialog(url, std::nullopt, std::nullopt, policy);
+    AddWithInfoDialog(InfoDialogInput{add.url, std::nullopt, std::nullopt, policy, add.saveDir, add.fileName});
+}
+
+void AddFlow::AddImported(const std::vector<ImportedEntry>& entries)
+{
+    for (const ImportedEntry& entry : entries) {
+        core::AddDownloadCommand command;
+        command.token = nextToken_++;
+        command.url = entry.url;
+        command.fileName = entry.fileName;
+        command.description = entry.description;
+        command.referer = entry.referer;
+        command.mode = core::AddMode::Later;
+        command.duplicatePolicy = model::DuplicatePolicy::AddNumbered;
+        Post(std::move(command));
+    }
 }
 
 void AddFlow::AddUrl(std::string initialUrl)
@@ -156,12 +173,15 @@ void AddFlow::AddUrl(std::string initialUrl)
         Post(std::move(command));
         return;
     }
-    AddWithInfoDialog(url, input->user, input->password, policy);
+    AddWithInfoDialog(InfoDialogInput{url, input->user, input->password, policy, std::nullopt, std::nullopt});
 }
 
-void AddFlow::AddWithInfoDialog(const std::string& url, std::optional<std::string> user, std::optional<std::string> password,
-                                std::optional<model::DuplicatePolicy> duplicatePolicy)
+void AddFlow::AddWithInfoDialog(InfoDialogInput input)
 {
+    const std::string& url = input.url;
+    std::optional<std::string>& user = input.user;
+    std::optional<std::string>& password = input.password;
+    const std::optional<model::DuplicatePolicy>& duplicatePolicy = input.duplicatePolicy;
     const auto snapshot = context_.snapshot();
     const auto parsed = core::ParseUrl(url);
     if (!snapshot || !parsed || snapshot->categories.empty()) {
@@ -172,6 +192,10 @@ void AddFlow::AddWithInfoDialog(const std::string& url, std::optional<std::strin
     DownloadInfoDialog::Initial initial;
     initial.url = url;
     initial.fileName = core::SanitizeFileName(core::FileNameFromUrlPath(parsed->path));
+    if (input.fileName) {
+        initial.fileName = *input.fileName;  // the category follows the chosen name
+        initial.fileNameFixed = true;
+    }
     initial.categories = snapshot->categories;
     initial.category = core::MatchCategory(snapshot->categories, initial.fileName, *parsed);
     if (!initial.category) {
@@ -181,6 +205,10 @@ void AddFlow::AddWithInfoDialog(const std::string& url, std::optional<std::strin
         if (category.id == *initial.category) {
             initial.saveDir = category.folder;
         }
+    }
+    if (input.saveDir) {
+        initial.saveDir = *input.saveDir;
+        initial.saveDirFixed = true;
     }
     initial.recentFolders = HistoryEntries(settings.recentFolders);
 

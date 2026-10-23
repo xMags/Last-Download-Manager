@@ -18,6 +18,24 @@ namespace ldm::ui {
 
 class DownloadInfoDialog;
 
+// One address that arrives from outside the Add URL dialog: the command line, a second launch,
+// the clipboard monitor or the drop target.
+struct ExternalAdd {
+    std::string url;
+    std::optional<std::string> saveDir;   // overrides the category folder
+    std::optional<std::string> fileName;  // overrides the name taken from the address
+    bool silent = false;     // no dialog at all (checklist A-10 silent mode)
+    bool queueOnly = false;  // add without starting
+};
+
+// An entry of an imported list (Tasks > Import).
+struct ImportedEntry {
+    std::string url;
+    std::optional<std::string> fileName;
+    std::string description;
+    std::optional<std::string> referer;
+};
+
 // Every way a download enters the list from the UI (checklist A-01 to A-08): Add URL with its
 // history, the duplicate question, the Download File Info dialog with speculative start, batch
 // downloads and address lists.
@@ -38,9 +56,9 @@ public:
     AddFlow& operator=(const AddFlow&) = delete;
 
     void AddUrl(std::string initialUrl);
-    // One address from the command line, the clipboard monitor or the drop target. `silent`
-    // skips every dialog (checklist A-10 silent mode).
-    void AddAddress(const std::string& url, bool silent);
+    void AddAddress(const ExternalAdd& add);
+    // Adds every entry stopped, without questions: duplicates get numbered names (checklist A-11).
+    void AddImported(const std::vector<ImportedEntry>& entries);
     void AddBatch();
     void AddFromClipboard();
     // Lets the user pick from `urls`, then adds the checked ones.
@@ -58,8 +76,16 @@ private:
         std::optional<core::ConfirmDownloadCommand> confirmation;  // sent once the id is known
     };
 
-    void AddWithInfoDialog(const std::string& url, std::optional<std::string> user, std::optional<std::string> password,
-                           std::optional<model::DuplicatePolicy> duplicatePolicy);
+    struct InfoDialogInput {
+        std::string url;
+        std::optional<std::string> user;
+        std::optional<std::string> password;
+        std::optional<model::DuplicatePolicy> duplicatePolicy;
+        std::optional<std::string> saveDir;
+        std::optional<std::string> fileName;
+    };
+
+    void AddWithInfoDialog(InfoDialogInput input);
     // Asks about an address already in the list when Options say so (checklist A-05). Returns false
     // when nothing more should happen: the user cancelled, or the existing download was resumed.
     [[nodiscard]] bool ResolveDuplicate(const std::string& url, std::optional<model::DuplicatePolicy>& policy);

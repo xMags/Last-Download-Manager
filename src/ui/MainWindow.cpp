@@ -22,6 +22,9 @@ constexpr int kSplitterWidth96 = 5;
 constexpr int kMinimumTreeWidth96 = 120;
 constexpr int kMinimumListWidth96 = 200;
 constexpr UINT kSaveLayoutMessage = WM_APP + 10;
+constexpr UINT kExternalInputMessage = WM_APP + 11;
+constexpr UINT_PTR kExternalInputRetryTimer = 1;
+constexpr UINT kExternalInputRetryMs = 500;
 
 std::wstring WindowTitle()
 {
@@ -166,6 +169,7 @@ void MainWindow::OnCreate()
     tray_.Attach(window_);
     ApplySnapshot(snapshot_);
     services_.bridge->Attach(window_);
+    ::AddClipboardFormatListener(window_);
 }
 
 void MainWindow::CreateFonts()
@@ -209,6 +213,9 @@ void MainWindow::ApplyViewSettings(const model::Settings& settings, bool initial
         toolbar_.Refresh(settings.largeToolbarButtons, *theme_);
         Layout();
     }
+    if (previous == nullptr || previous->showDropTarget != settings.showDropTarget) {
+        UpdateDropTarget(settings);
+    }
     if (previous != nullptr && previous->trayIconStyle != settings.trayIconStyle) {
         tray_.SetStyle(settings.trayIconStyle);
     }
@@ -218,6 +225,74 @@ void MainWindow::ApplyViewSettings(const model::Settings& settings, bool initial
         }
     }
     appliedSettings_ = settings;
+}
+
+void MainWindow::UpdateDropTarget(const model::Settings& settings)
+{
+    if (!settings.showDropTarget) {
+        dropTarget_.Destroy();
+        return;
+    }
+    if (dropTarget_.IsOpen()) {
+        return;
+    }
+    DropTargetWindow::Callbacks callbacks;
+    // Dropping runs inside the source program's drag loop: queue the addresses and return at once,
+    // so a dialog never holds the browser's drag and drop hostage.
+    callbacks.dropped = [this](std::vector<std::string> urls) {
+        {
+            const std::lock_guard lock(externalMutex_);
+            externalInput_.emplace_back(std::move(urls));
+        }
+        ::PostMessageW(window_, kExternalInputMessage, 0, 0);
+    };
+    callbacks.hideRequested = [this] {
+        services_.commands->Post(core::ModifySettingsCommand{[](model::Settings& s) { s.showDropTarget = false; }});
+    };
+    callbacks.openMain = [this] { Restore(); };
+    callbacks.moved = [this](const std::string& position) {
+        services_.commands->Post(core::ModifySettingsCommand{[position](model::Settings& s) { s.dropTargetPosition = position; }});
+    };
+    dropTarget_.Create(settings.dropTargetPosition, *theme_, std::move(callbacks));
+}
+
+void MainWindow::PostLaunchRequest(core::LaunchRequest request)
+{
+    {
+        const std::lock_guard lock(externalMutex_);
+        externalInput_.emplace_back(std::move(request));
+    }
+    ::PostMessageW(window_, kExternalInputMessage, 0, 0);
+}
+
+void MainWindow::DrainExternalInput()
+{
+    if (draining_ || !controller_) {
+        return;  // the outer call picks up anything queued meanwhile
+    }
+    draining_ = true;
+    for (;;) {
+        if (!::IsWindowEnabled(window_)) {
+            // A modal dialog is open; try again shortly instead of stacking dialogs.
+            ::SetTimer(window_, kExternalInputRetryTimer, kExternalInputRetryMs, nullptr);
+            break;
+        }
+        std::optional<ExternalInput> next;
+        {
+            const std::lock_guard lock(externalMutex_);
+            if (externalInput_.empty()) {
+                break;
+            }
+            next = std::move(externalInput_.front());
+            externalInput_.pop_front();
+        }
+        if (auto* request = std::get_if<core::LaunchRequest>(&*next)) {
+            controller_->OnLaunchRequest(*request);
+        } else {
+            controller_->OnDroppedUrls(std::move(std::get<std::vector<std::string>>(*next)));
+        }
+    }
+    draining_ = false;
 }
 
 void MainWindow::RestorePlacement(const std::string& placement, int showCommand)
@@ -479,6 +554,21 @@ LRESULT MainWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
     case kSaveLayoutMessage:
         SaveViewState();
         return 0;
+    case kExternalInputMessage:
+        DrainExternalInput();
+        return 0;
+    case WM_TIMER:
+        if (wParam == kExternalInputRetryTimer) {
+            ::KillTimer(window_, kExternalInputRetryTimer);
+            DrainExternalInput();
+            return 0;
+        }
+        break;
+    case WM_CLIPBOARDUPDATE:
+        if (controller_) {
+            controller_->OnClipboardChanged();
+        }
+        return 0;
     case kSnapshotMessage:
         ApplySnapshot(services_.bridge->TakeSnapshot());
         return 0;
@@ -507,6 +597,9 @@ LRESULT MainWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         }
         return 0;
     case WM_DESTROY:
+        ::RemoveClipboardFormatListener(window_);
+        ::KillTimer(window_, kExternalInputRetryTimer);
+        dropTarget_.Destroy();
         services_.bridge->Attach(nullptr);
         ::PostQuitMessage(0);
         return 0;

@@ -28,6 +28,8 @@ DownloadInfoDialog::Choice DownloadInfoDialog::Run(HWND owner)
 bool DownloadInfoDialog::OnInit()
 {
     settingText_ = true;
+    nameEdited_ = initial_.fileNameFixed;
+    folderEdited_ = initial_.saveDirFixed;
     SetText(IDC_INFO_URL, base::ToUtf16(initial_.url));
     SetText(IDC_INFO_NAME, base::ToUtf16(initial_.fileName));
     const HWND folders = Item(IDC_INFO_FOLDER);

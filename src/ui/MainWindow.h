@@ -1,9 +1,11 @@
 #pragma once
 
 #include "core/Commands.h"
+#include "core/LaunchRequest.h"
 #include "core/Snapshot.h"
 #include "ui/CategoryPane.h"
 #include "ui/DownloadListView.h"
+#include "ui/DropTargetWindow.h"
 #include "ui/Handles.h"
 #include "ui/MainController.h"
 #include "ui/ShellActions.h"
@@ -17,8 +19,13 @@
 
 #include <windows.h>
 
+#include <deque>
 #include <memory>
+#include <mutex>
 #include <optional>
+#include <string>
+#include <variant>
+#include <vector>
 
 namespace ldm::ui {
 
@@ -52,6 +59,9 @@ public:
     // Leaves the message loop after saving view state (Tasks > Exit, tray Exit).
     void Exit();
 
+    // Queues a launch request for the UI thread. Safe to call from any thread.
+    void PostLaunchRequest(core::LaunchRequest request);
+
 private:
     static LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam);
     LRESULT HandleMessage(UINT message, WPARAM wParam, LPARAM lParam);
@@ -67,6 +77,12 @@ private:
     void OnTrayEvent(UINT event, POINT anchor);
     void UpdateStatus();
     [[nodiscard]] RECT SplitterRect() const;
+    void UpdateDropTarget(const model::Settings& settings);
+    // Handles queued launch requests and drops one at a time, waiting while a modal dialog is open.
+    void DrainExternalInput();
+
+    // Input that arrives from outside the window and may open dialogs.
+    using ExternalInput = std::variant<core::LaunchRequest, std::vector<std::string>>;
 
     Services services_;
     HWND window_ = nullptr;
@@ -80,6 +96,7 @@ private:
     DownloadListView list_;
     StatusBar status_;
     TrayIcon tray_;
+    DropTargetWindow dropTarget_;
     std::unique_ptr<MainController> controller_;
 
     UniqueFont uiFont_;
@@ -89,6 +106,10 @@ private:
     bool draggingSplitter_ = false;
     bool exiting_ = false;
     int initialShowCommand_ = SW_SHOWNORMAL;
+    bool draining_ = false;
+
+    std::mutex externalMutex_;  // guards externalInput_; launch requests arrive on the pipe thread
+    std::deque<ExternalInput> externalInput_;
 };
 
 }  // namespace ldm::ui

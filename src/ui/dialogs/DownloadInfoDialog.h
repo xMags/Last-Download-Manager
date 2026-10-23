@@ -39,6 +39,9 @@ public:
         std::optional<model::CategoryId> category;
         std::vector<model::Category> categories;
         std::vector<std::string> recentFolders;
+        // Chosen by the caller (for example on the command line): later server details never replace them.
+        bool fileNameFixed = false;
+        bool saveDirFixed = false;
     };
 
     // `addCategory` runs the category dialog and returns the new category, if one was added.

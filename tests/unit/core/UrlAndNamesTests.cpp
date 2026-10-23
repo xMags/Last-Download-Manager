@@ -1,6 +1,7 @@
 #include "core/FileNames.h"
 #include "core/Matching.h"
 #include "core/Url.h"
+#include "model/Settings.h"
 
 #include <gtest/gtest.h>
 
@@ -103,6 +104,17 @@ TEST(Matching, Wildcards)
     EXPECT_TRUE(WildcardMatch("a*b*c", "aXXbYYc"));
     EXPECT_FALSE(WildcardMatch("a*b*c", "aXXbYY"));
     EXPECT_TRUE(WildcardMatch("127.0.0.1", "127.0.0.1"));
+}
+
+TEST(Matching, ExtensionLists)
+{
+    const std::string list = ldm::model::DefaultCapturedExtensions();
+    EXPECT_TRUE(ldm::core::MatchesExtensionList(list, "zip"));
+    EXPECT_TRUE(ldm::core::MatchesExtensionList(list, "ISO"));
+    EXPECT_TRUE(ldm::core::MatchesExtensionList(list, "r01"));  // "R0*"
+    EXPECT_FALSE(ldm::core::MatchesExtensionList(list, "html"));
+    EXPECT_FALSE(ldm::core::MatchesExtensionList(list, ""));
+    EXPECT_TRUE(ldm::core::MatchesExtensionList(".mp4 .mkv", "MKV"));
 }
 
 TEST(Matching, CategoryPrefersSitesThenExtensions)

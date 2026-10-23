@@ -12,9 +12,11 @@ add_executable(ldm_unit_tests
     model/SettingsTests.cpp
     storage/SqliteStoreTests.cpp
     ui/BatchAndHistoryTests.cpp
+    ui/ExportAndLaunchTests.cpp
     ui/ListModelTests.cpp)
 target_link_libraries(ldm_unit_tests PRIVATE
     ldm_engine
+    ldm_platform
     ldm_storage
     ldm_ui
     GTest::gtest
