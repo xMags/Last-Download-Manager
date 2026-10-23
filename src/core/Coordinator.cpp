@@ -1226,11 +1226,10 @@ bool Coordinator::IsReserved(const std::filesystem::path& path, std::optional<mo
 std::optional<std::string> Coordinator::UniqueFileName(const std::filesystem::path& directory, const std::string& name,
                                                        std::optional<model::DownloadId> except) const
 {
-    for (int n = 1; n <= kMaxNumberedNames; ++n) {
-        std::string candidate = n == 1 ? name : NumberedFileName(name, n);
+    const auto isFree = [this, &directory, &except](const std::string& candidate) {
         const std::filesystem::path path = directory / PathFromUtf8(candidate);
         if (IsReserved(path, except)) {
-            continue;
+            return false;
         }
         // The download's own existing file (its earlier final name) does not block it.
         bool ownFile = false;
@@ -1239,10 +1238,18 @@ std::optional<std::string> Coordinator::UniqueFileName(const std::filesystem::pa
             ownFile = it != entries_.end() &&
                       base::PathComparisonKey(FinalPath(it->second.download)) == base::PathComparisonKey(path);
         }
-        if (!ownFile && ports_.fileSystem->Exists(path)) {
-            continue;
+        return ownFile || !ports_.fileSystem->Exists(path);
+    };
+    if (isFree(name)) {
+        return name;
+    }
+    // "a (2).zip" taken: continue with "a (3).zip" rather than "a (2) (2).zip".
+    const NumberedName numbered = SplitNumberedFileName(name);
+    for (int n = numbered.number + 1; n <= numbered.number + kMaxNumberedNames; ++n) {
+        std::string candidate = NumberedFileName(numbered.base, n);
+        if (isFree(candidate)) {
+            return candidate;
         }
-        return candidate;
     }
     return std::nullopt;
 }
