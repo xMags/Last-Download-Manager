@@ -19,6 +19,8 @@ namespace {
 constexpr wchar_t kClassName[] = L"LdmMainWindow";
 constexpr int kToolbarId = 100;
 constexpr int kSplitterWidth96 = 5;
+constexpr int kMargin96 = 6;   // the reference: grey border around the panes
+constexpr int kTopGap96 = 12;  // the reference: space between the toolbar line and the panes
 constexpr int kDividerPx = 1;  // hairlines stay one physical pixel at every DPI
 constexpr int kMinimumTreeWidth96 = 120;
 constexpr int kMinimumListWidth96 = 200;
@@ -126,7 +128,6 @@ bool MainWindow::PreTranslate(MSG& message)
 
 void MainWindow::OnCreate()
 {
-    CreateFonts();
     const model::Settings& settings = snapshot_->settings;
     toolbar_.Create(window_, kToolbarId, settings.largeToolbarButtons, settings.toolbarLayout, *theme_);
     categories_.Create(window_, CategoryPane::Callbacks{
@@ -144,6 +145,7 @@ void MainWindow::OnCreate()
                               [this](POINT screen) { controller_->ShowRowMenu(screen); },
                               [this] { ::PostMessageW(window_, kSaveLayoutMessage, 0, 0); }});
     status_.Create(window_, *theme_);
+    CreateFonts();  // after the children exist, so each one receives its font
 
     MainController::Context context;
     context.owner = window_;
@@ -329,15 +331,34 @@ void MainWindow::SaveViewState()
     }});
 }
 
-RECT MainWindow::SplitterRect() const
+MainWindow::PaneRects MainWindow::Panes() const
 {
     RECT client{};
     ::GetClientRect(window_, &client);
     const UINT dpi = DpiOf(window_);
-    const int top = ContentTop();
-    const int bottom = client.bottom - status_.PreferredHeight();
-    const int x = Scale(treeWidth96_, dpi);
-    return RECT{x, top, x + Scale(kSplitterWidth96, dpi), bottom};
+    const int margin = Scale(kMargin96, dpi);
+    PaneRects panes;
+    panes.toolbarBottom = toolbar_.PreferredHeight();
+    const int top = panes.toolbarBottom + kDividerPx + Scale(kTopGap96, dpi);
+    const int bottom = std::max<int>(top, client.bottom - status_.PreferredHeight() - margin);
+    const int right = std::max(margin, static_cast<int>(client.right) - margin);
+    panes.categoriesVisible = !categoriesHidden_;
+    if (!panes.categoriesVisible) {
+        panes.listFrame = RECT{margin, top, right, bottom};
+        return panes;
+    }
+    const int maxTree = std::max(Scale(kMinimumTreeWidth96, dpi), right - margin - Scale(kMinimumListWidth96, dpi));
+    const int treeWidth = std::clamp(Scale(treeWidth96_, dpi), Scale(kMinimumTreeWidth96, dpi), maxTree);
+    const int splitter = Scale(kSplitterWidth96, dpi);
+    panes.categoryFrame = RECT{margin, top, margin + treeWidth, bottom};
+    panes.splitter = RECT{panes.categoryFrame.right, top, panes.categoryFrame.right + splitter, bottom};
+    panes.listFrame = RECT{panes.splitter.right, top, std::max<int>(panes.splitter.right, right), bottom};
+    return panes;
+}
+
+RECT MainWindow::SplitterRect() const
+{
+    return Panes().splitter;
 }
 
 void MainWindow::Layout()
@@ -345,53 +366,46 @@ void MainWindow::Layout()
     if (window_ == nullptr || toolbar_.Handle() == nullptr || list_.Handle() == nullptr) {
         return;
     }
-    // The gaps between children (hairlines, splitter) move with the layout.
+    // The frames and gaps between children move with the layout.
     ::InvalidateRect(window_, nullptr, FALSE);
     RECT client{};
     ::GetClientRect(window_, &client);
-    const UINT dpi = DpiOf(window_);
     const int toolbarHeight = toolbar_.PreferredHeight();
     const int statusHeight = status_.PreferredHeight();
     ::MoveWindow(toolbar_.Handle(), 0, 0, client.right, toolbarHeight, TRUE);
     ::MoveWindow(status_.Handle(), 0, client.bottom - statusHeight, client.right, statusHeight, TRUE);
-    const int top = ContentTop();
-    const int bottom = client.bottom - statusHeight;
-    if (categoriesHidden_) {
-        ::MoveWindow(list_.Handle(), 0, top, client.right, bottom - top, TRUE);
-        return;
-    }
-    const int maxTree = std::max(Scale(kMinimumTreeWidth96, dpi), static_cast<int>(client.right) - Scale(kMinimumListWidth96, dpi));
-    const int treeWidth = std::clamp(Scale(treeWidth96_, dpi), Scale(kMinimumTreeWidth96, dpi), maxTree);
-    const int splitter = Scale(kSplitterWidth96, dpi);
-    categories_.Layout(RECT{0, top, treeWidth, bottom});
-    ::MoveWindow(list_.Handle(), treeWidth + splitter, top, client.right - treeWidth - splitter, bottom - top, TRUE);
-}
 
-int MainWindow::ContentTop() const
-{
-    return toolbar_.PreferredHeight() + kDividerPx;
+    const PaneRects panes = Panes();
+    // The list sits inside a one pixel border; the category pane inside a border and one pixel of padding.
+    RECT list = panes.listFrame;
+    ::InflateRect(&list, -kDividerPx, -kDividerPx);
+    ::MoveWindow(list_.Handle(), list.left, list.top, std::max(0L, list.right - list.left), std::max(0L, list.bottom - list.top),
+                 TRUE);
+    if (panes.categoriesVisible) {
+        RECT inner = panes.categoryFrame;
+        ::InflateRect(&inner, -2 * kDividerPx, -2 * kDividerPx);
+        categories_.Layout(inner);
+    }
 }
 
 void MainWindow::Paint()
 {
     PAINTSTRUCT paint{};
     const HDC dc = ::BeginPaint(window_, &paint);
+    // Children clip themselves (WS_CLIPCHILDREN): this only reaches the margins and frames, which
+    // the class brush already filled with the panel color.
+    const PaneRects panes = Panes();
     RECT client{};
     ::GetClientRect(window_, &client);
-    const int toolbarHeight = toolbar_.Handle() != nullptr ? toolbar_.PreferredHeight() : 0;
-    const int statusTop = client.bottom - (status_.Handle() != nullptr ? status_.PreferredHeight() : 0);
-    // Children clip themselves (WS_CLIPCHILDREN): this only reaches the gaps between them.
-    RECT content{0, toolbarHeight, client.right, statusTop};
-    ::FillRect(dc, &content, theme_->WindowBrush());
-    UniqueBrush divider(::CreateSolidBrush(theme_->Colors().divider));
-    RECT underToolbar{0, toolbarHeight, client.right, toolbarHeight + kDividerPx};
-    ::FillRect(dc, &underToolbar, divider.get());
-    if (!categoriesHidden_ && list_.Handle() != nullptr) {
-        RECT listRect{};
-        ::GetWindowRect(list_.Handle(), &listRect);
-        ::MapWindowPoints(nullptr, window_, reinterpret_cast<POINT*>(&listRect), 2);
-        RECT splitter{listRect.left - kDividerPx, toolbarHeight + kDividerPx, listRect.left, statusTop};
-        ::FillRect(dc, &splitter, divider.get());
+    const Palette& colors = theme_->Colors();
+    UniqueBrush line(::CreateSolidBrush(colors.border));
+    const RECT underToolbar{0, panes.toolbarBottom, client.right, panes.toolbarBottom + kDividerPx};
+    ::FillRect(dc, &underToolbar, line.get());
+    UniqueBrush listBorder(::CreateSolidBrush(colors.listBorder));
+    ::FrameRect(dc, &panes.listFrame, listBorder.get());
+    if (panes.categoriesVisible) {
+        UniqueBrush frame(::CreateSolidBrush(colors.divider));
+        ::FrameRect(dc, &panes.categoryFrame, frame.get());
     }
     ::EndPaint(window_, &paint);
 }
@@ -580,7 +594,8 @@ LRESULT MainWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
     }
     case WM_MOUSEMOVE:
         if (draggingSplitter_) {
-            treeWidth96_ = std::max(kMinimumTreeWidth96, Unscale(GET_X_LPARAM(lParam), DpiOf(window_)));
+            const UINT dpi = DpiOf(window_);
+            treeWidth96_ = std::max(kMinimumTreeWidth96, Unscale(GET_X_LPARAM(lParam) - Scale(kMargin96, dpi), dpi));
             Layout();
         }
         return 0;

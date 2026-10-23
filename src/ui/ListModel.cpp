@@ -24,14 +24,15 @@ struct ColumnInfo {
 };
 
 constexpr std::array<ColumnInfo, kColumnCount> kColumns{{
-    {Column::Queue, "queue", L"Q", 24, true, std::nullopt},
-    {Column::FileName, "name", L"File Name", 260, true, SortKey::FileName},
-    {Column::Size, "size", L"Size", 80, true, SortKey::Size},
-    {Column::Status, "status", L"Status", 90, true, SortKey::Status},
-    {Column::TimeLeft, "left", L"Time left", 90, true, SortKey::TimeLeft},
-    {Column::TransferRate, "rate", L"Transfer rate", 115, true, SortKey::TransferRate},
-    {Column::LastTryDate, "lasttry", L"Last Try Date", 130, true, SortKey::LastTryDate},
-    {Column::Description, "description", L"Description", 200, true, SortKey::Description},
+    // Default widths follow the reference's (at 100% scaling); Last Try Date is wider so the date stays readable.
+    {Column::Queue, "queue", L"Q", 20, true, std::nullopt},
+    {Column::FileName, "name", L"File Name", 152, true, SortKey::FileName},
+    {Column::Size, "size", L"Size", 75, true, SortKey::Size},
+    {Column::Status, "status", L"Status", 65, true, SortKey::Status},
+    {Column::TimeLeft, "left", L"Time left", 75, true, SortKey::TimeLeft},
+    {Column::TransferRate, "rate", L"Transfer rate", 94, true, SortKey::TransferRate},
+    {Column::LastTryDate, "lasttry", L"Last Try Date", 100, true, SortKey::LastTryDate},
+    {Column::Description, "description", L"Description", 150, true, SortKey::Description},
     {Column::DateAdded, "added", L"Date Added", 130, false, SortKey::DateAdded},
     {Column::SaveTo, "saveto", L"Save To", 200, false, SortKey::SavePath},
     {Column::Referer, "referer", L"Referer", 200, false, SortKey::Referer},
@@ -232,10 +233,12 @@ std::optional<SortKey> SortKeyForColumn(Column column)
 
 std::vector<ColumnState> DefaultColumns()
 {
+    // the reference shows File Name first, then the queue marker; kColumns stays in Column order.
     std::vector<ColumnState> columns;
     for (const ColumnInfo& info : kColumns) {
         columns.push_back(ColumnState{info.id, info.width, info.visible});
     }
+    std::swap(columns[static_cast<size_t>(Column::Queue)], columns[static_cast<size_t>(Column::FileName)]);
     return columns;
 }
 

@@ -135,7 +135,8 @@ TEST(ListModel, ColumnLayoutRoundTripAndRepair)
 {
     auto columns = DefaultColumns();
     ASSERT_EQ(columns.size(), kColumnCount);
-    EXPECT_EQ(columns[1].id, Column::FileName);
+    EXPECT_EQ(columns[0].id, Column::FileName);
+    EXPECT_EQ(columns[1].id, Column::Queue);
     std::swap(columns[1], columns[3]);
     columns[0].visible = false;
     columns[1].width = 333;
