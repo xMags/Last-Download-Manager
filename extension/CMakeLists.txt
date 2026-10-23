@@ -7,10 +7,12 @@ if(NOT LDM_NODE)
     return()
 endif()
 
+# One fixed folder for every preset (build/extension), so the folder a browser loaded unpacked is
+# always the one the latest build updated.
 add_custom_target(ldm_extension ALL
-    COMMAND ${LDM_NODE} ${PROJECT_SOURCE_DIR}/tools/build-extension.mjs --out ${PROJECT_BINARY_DIR}/extension
+    COMMAND ${LDM_NODE} ${PROJECT_SOURCE_DIR}/tools/build-extension.mjs
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
-    COMMENT "Building the browser extension into ${PROJECT_BINARY_DIR}/extension"
+    COMMENT "Building the browser extension into build/extension"
     VERBATIM)
 
 if(LDM_BUILD_TESTS)
