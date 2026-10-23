@@ -19,10 +19,14 @@
 //   /control/log         JSON: request log and the highest number of concurrent responses
 //   /control/bump        changes the content of /versioned.bin
 //   /control/reset       clears the log and per-route counters
+// An FTP listener on its own port serves the same payload (see ftp-reference-fixture.mjs); the
+// ready line reports it as "ftpPort".
 import { createHash, randomBytes } from 'node:crypto';
 import { createServer } from 'node:http';
 import { pathToFileURL } from 'node:url';
 import { brotliCompressSync, gzipSync } from 'node:zlib';
+
+import { createFtpFixture } from './ftp-reference-fixture.mjs';
 
 const USER = 'ldm';
 const PASSWORD = 'secret';
@@ -274,7 +278,8 @@ export function createReferenceFixture({ size = 16 * 1024 * 1024, delayMs = 40, 
         finish(404);
     }
   });
-  return { server, sha256: digest, size };
+  const ftp = createFtpFixture({ data, delayMs, chunkSize, record, nextId: () => ++requestId });
+  return { server, ftpServer: ftp.server, sha256: digest, size };
 }
 
 function parseArguments(argv) {
@@ -297,9 +302,14 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     ...options, log: quiet ? () => {} : event => process.stdout.write(`${JSON.stringify(event)}\n`),
   });
   fixture.server.listen(0, '127.0.0.1', () => {
-    process.stdout.write(`${JSON.stringify({ event: 'ready', port: fixture.server.address().port, size: fixture.size, sha256: fixture.sha256 })}\n`);
+    fixture.ftpServer.listen(0, '127.0.0.1', () => {
+      process.stdout.write(`${JSON.stringify({
+        event: 'ready', port: fixture.server.address().port, ftpPort: fixture.ftpServer.address().port,
+        size: fixture.size, sha256: fixture.sha256,
+      })}\n`);
+    });
   });
-  const stop = () => { fixture.server.close(); fixture.server.closeAllConnections(); };
+  const stop = () => { fixture.server.close(); fixture.server.closeAllConnections(); fixture.ftpServer.close(); };
   process.once('SIGINT', stop);
   process.once('SIGTERM', stop);
   // A test harness that dies leaves stdin closed; exit with it instead of lingering.

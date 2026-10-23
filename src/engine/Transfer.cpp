@@ -562,7 +562,10 @@ void Transfer::OnConnectionDone(CURL* easy, CURLcode result, Clock::time_point n
     }
 
     const std::uint32_t segmentKey = connection->segmentKey;
-    const bool rangeRejected = connection->rangeRejected;
+    // An FTP server that refuses REST on an extra connection is the FTP form of a server ignoring
+    // ranges (ENG-05, ENG-13): fall back to the one connection that is already running.
+    const bool restRefused = !http_ && result == CURLE_FTP_COULDNT_USE_REST && connection->ranged && !connection->probe;
+    const bool rangeRejected = connection->rangeRejected || restRefused;
     const bool finishedNormally = connection->reachedEnd || (result == CURLE_OK && connection->accepted);
     std::optional<TransferFailure> failure = connection->failure;
     if (!failure && !finishedNormally && !rangeRejected) {

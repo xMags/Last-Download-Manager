@@ -10,7 +10,7 @@
     {
       "name": "curl",
       "default-features": false,
-      "features": ["ssl", "sspi", "http2", "brotli", "idn"]
+      "features": ["ssl", "sspi", "http2", "brotli", "idn", "non-http"]
     },
     "sqlite3",
     "nlohmann-json",

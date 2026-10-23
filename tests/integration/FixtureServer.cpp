@@ -121,6 +121,7 @@ std::unique_ptr<FixtureServer> FixtureServer::Launch(const FixtureOptions& optio
         throw std::runtime_error("fixture did not start: " + line);
     }
     server->port_ = ready.at("port").get<int>();
+    server->ftpPort_ = ready.value("ftpPort", 0);
     return server;
 }
 
@@ -137,6 +138,12 @@ FixtureServer::~FixtureServer()
 std::string FixtureServer::Url(const std::string& path) const
 {
     return "http://127.0.0.1:" + std::to_string(port_) + path;
+}
+
+std::string FixtureServer::FtpUrl(const std::string& path, const std::string& user) const
+{
+    const std::string login = user.empty() ? std::string() : user + ":x@";
+    return "ftp://" + login + "127.0.0.1:" + std::to_string(ftpPort_) + path;
 }
 
 nlohmann::json FixtureServer::Log() const
