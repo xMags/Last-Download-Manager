@@ -14,6 +14,7 @@ add_executable(ldm_unit_tests
     engine/FailurePolicyTests.cpp
     engine/HttpHeadersTests.cpp
     engine/TokenBucketTests.cpp
+    media/HlsPlaylistTests.cpp
     media/NumberTextTests.cpp
     media/UrlReferenceTests.cpp
     model/DownloadTests.cpp
@@ -36,5 +37,6 @@ target_link_libraries(ldm_unit_tests PRIVATE
     GTest::gtest
     GTest::gtest_main)
 target_compile_definitions(ldm_unit_tests PRIVATE
-    LDM_CAPTURE_CASES="${PROJECT_SOURCE_DIR}/extension/test/capture-cases.json")
+    LDM_CAPTURE_CASES="${PROJECT_SOURCE_DIR}/extension/test/capture-cases.json"
+    LDM_MEDIA_FIXTURES="${PROJECT_SOURCE_DIR}/tests/fixtures/media")
 gtest_discover_tests(ldm_unit_tests DISCOVERY_MODE PRE_TEST)
