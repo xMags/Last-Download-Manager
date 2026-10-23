@@ -137,9 +137,6 @@ struct ParsedMessage {
 
 [[nodiscard]] std::string EncodeHostInfo(const HostInfo& info);
 
-// Standard base64 (RFC 4648, with padding). Nothing for anything else, including whitespace.
-[[nodiscard]] std::optional<std::string> DecodeBase64(std::string_view text);
-
 // Capture rules LDM pushes to the extension; the extension decides locally from them (M3 design
 // decision 2). Grows with each capture feature.
 struct Config {

@@ -1,6 +1,7 @@
 find_package(nlohmann_json CONFIG REQUIRED)
 
 add_executable(ldm_unit_tests
+    base/Base64Tests.cpp
     base/PathsTests.cpp
     base/ResultTests.cpp
     base/UtfTests.cpp
@@ -13,6 +14,8 @@ add_executable(ldm_unit_tests
     engine/FailurePolicyTests.cpp
     engine/HttpHeadersTests.cpp
     engine/TokenBucketTests.cpp
+    media/NumberTextTests.cpp
+    media/UrlReferenceTests.cpp
     model/DownloadTests.cpp
     model/SettingsTests.cpp
     storage/SqliteStoreTests.cpp
@@ -25,6 +28,7 @@ add_executable(ldm_unit_tests
 target_link_libraries(ldm_unit_tests PRIVATE
     ldm_browser
     ldm_engine
+    ldm_media
     ldm_platform
     ldm_storage
     ldm_ui

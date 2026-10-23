@@ -1,4 +1,6 @@
 add_library(ldm_base STATIC
+    Base64.cpp
+    Base64.h
     Paths.cpp
     Paths.h
     Result.h
