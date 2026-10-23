@@ -141,8 +141,8 @@ api.action.onClicked.addListener(async () => {
 if (api.downloads.onDeterminingFilename) {
   // Chrome and Edge: here the name is known, also when it comes from Content-Disposition.
   api.downloads.onDeterminingFilename.addListener((item, suggest) => {
-    suggest();  // keep the browser's own name; the decision runs on its own
-    capture.take(item, baseName(item.filename)).catch((error) => console.warn('LDM: capture failed', error));
+    capture.takeBeforeNaming(item, suggest).catch((error) => console.warn('LDM: capture failed', error));
+    return true;  // suggest comes later, once LDM has answered
   });
 } else {
   // Firefox decides the name before the download is created.

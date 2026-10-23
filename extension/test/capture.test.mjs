@@ -155,6 +155,27 @@ test('a download that already finished is left alone', async () => {
   assert.equal(connection.sent.length, 0);
 });
 
+test('Chrome settles the name only after LDM refused, so it asks where to save only for downloads it keeps', async () => {
+  const item = { ...ITEM, filename: 'C:\\Downloads\\x.zip' };
+  for (const answer of ['refuse', 'none']) {
+    const { api, calls } = fakeBrowser();
+    const suggest = () => calls.push(['suggest']);
+    assert.equal(await newCapture(api, fakeConnection({ answer })).takeBeforeNaming(item, suggest), false);
+    assert.deepEqual(calls.map(([name]) => name), ['ui', 'pause', 'resume', 'ui', 'suggest'], answer);
+  }
+  const { api, calls } = fakeBrowser();
+  assert.equal(await newCapture(api, fakeConnection()).takeBeforeNaming(item, () => calls.push(['suggest'])), true);
+  assert.ok(!calls.some(([name]) => name === 'suggest'), 'a taken download is erased, not named');
+});
+
+test('the name is settled when the decision fails', async () => {
+  const { api } = fakeBrowser();
+  api.downloads.search = async () => { throw new Error('broken'); };
+  let suggested = 0;
+  await assert.rejects(newCapture(api, fakeConnection()).takeBeforeNaming({ ...ITEM, filename: 'x.zip' }, () => { suggested += 1; }));
+  assert.equal(suggested, 1);
+});
+
 test('nothing happens when integration is off, the type is not captured, or a private window has no cookie store', async () => {
   for (const [item, name, enabled] of [[ITEM, 'x.zip', false], [ITEM, 'x.txt', true], [{ ...ITEM, incognito: true }, 'x.zip', true]]) {
     const { api, calls } = fakeBrowser();
