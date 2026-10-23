@@ -90,6 +90,10 @@ CREATE TABLE settings (
   value TEXT NOT NULL
 ) STRICT;
 )sql"},
+    // Browser capture (M3): the captured request's cookies, DPAPI protected like login_secret.
+    Migration{2, R"sql(
+ALTER TABLE downloads ADD COLUMN cookie_secret BLOB;
+)sql"},
 };
 
 base::Result<int> CurrentVersion(Connection& connection)

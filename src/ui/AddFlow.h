@@ -2,6 +2,7 @@
 
 #include "core/Commands.h"
 #include "core/Snapshot.h"
+#include "model/Cookie.h"
 #include "ui/Theme.h"
 
 #include <windows.h>
@@ -18,14 +19,22 @@ namespace ldm::ui {
 
 class DownloadInfoDialog;
 
+// What the browser sent along with a captured download.
+struct BrowserRequest {
+    std::optional<std::string> referrer;  // the page the download started from
+    std::string userAgent;
+    std::vector<model::Cookie> cookies;
+};
+
 // One address that arrives from outside the Add URL dialog: the command line, a second launch,
-// the clipboard monitor or the drop target.
+// the clipboard monitor, the drop target or the browser extension.
 struct ExternalAdd {
     std::string url;
     std::optional<std::string> saveDir;   // overrides the category folder
     std::optional<std::string> fileName;  // overrides the name taken from the address
     bool silent = false;     // no dialog at all (checklist A-10 silent mode)
     bool queueOnly = false;  // add without starting
+    std::optional<BrowserRequest> browser;  // set for downloads captured from a browser
 };
 
 // An entry of an imported list (Tasks > Import).
@@ -83,6 +92,7 @@ private:
         std::optional<model::DuplicatePolicy> duplicatePolicy;
         std::optional<std::string> saveDir;
         std::optional<std::string> fileName;
+        std::optional<BrowserRequest> browser;
     };
 
     void AddWithInfoDialog(InfoDialogInput input);
@@ -92,6 +102,8 @@ private:
     void AddMany(const std::vector<std::string>& urls, bool start, std::optional<std::string> user,
                  std::optional<std::string> password);
     void Post(core::Command command);
+    // Copies the browser's referrer, User-Agent and cookies into an add command.
+    static void ApplyBrowserRequest(const std::optional<BrowserRequest>& browser, core::AddDownloadCommand& command);
     void ModifySettings(std::function<void(model::Settings&)> modify);
     void ShowError(const std::wstring& message) const;
 

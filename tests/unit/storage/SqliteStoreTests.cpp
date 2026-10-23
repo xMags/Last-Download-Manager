@@ -34,6 +34,7 @@ Download SampleDownload(std::string publicId)
     d.validators.etag = "\"abc\"";
     d.loginUser = "user";
     d.loginSecret = {1, 2, 3};
+    d.cookieSecret = {4, 5, 6, 7};
     d.createdAtMs = 1'700'000'000'000;
     d.segments = {{0, 500, 500}, {500, 1000, 120}};
     return d;
@@ -58,6 +59,7 @@ TEST(SqliteStore, InsertAndLoadRoundTrip)
     EXPECT_EQ(d.validators.etag, "\"abc\"");
     EXPECT_FALSE(d.validators.lastModified.has_value());
     EXPECT_EQ(d.loginSecret, original.loginSecret);
+    EXPECT_EQ(d.cookieSecret, original.cookieSecret);
     ASSERT_EQ(d.segments.size(), 2u);
     EXPECT_EQ(d.segments[1].start, 500);
     EXPECT_EQ(d.segments[1].end, 1000);

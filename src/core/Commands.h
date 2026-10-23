@@ -1,6 +1,7 @@
 #pragma once
 
 #include "model/Category.h"
+#include "model/Cookie.h"
 #include "model/ConnectionRules.h"
 #include "model/Download.h"
 #include "model/Ids.h"
@@ -41,6 +42,9 @@ struct AddDownloadCommand {
     std::optional<std::string> parentPage;
     std::optional<std::string> loginUser;
     std::optional<std::string> loginPassword;
+    // From a browser capture: the browser's own User-Agent and the cookies it would send.
+    std::optional<std::string> userAgent;
+    std::vector<model::Cookie> cookies;
     AddMode mode = AddMode::StartNow;
     // Set after the user answered the duplicate prompt; otherwise Options > Downloads applies.
     std::optional<model::DuplicatePolicy> duplicatePolicy;

@@ -89,6 +89,9 @@ struct Download {
 
     std::optional<std::string> loginUser;
     std::vector<std::uint8_t> loginSecret;  // DPAPI-protected; empty when there is no password
+    // DPAPI-protected cookie lines from the browser that captured this download (model::CookiesToText);
+    // empty for downloads added in LDM. Removed once the download completes.
+    std::vector<std::uint8_t> cookieSecret;
 
     CompletionAction completionAction = CompletionAction::None;
 

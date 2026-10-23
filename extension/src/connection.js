@@ -36,6 +36,33 @@ export class LdmConnection {
     this.port = null;
     this.ready = null;
     this.state = State.NotRunning;
+    this.pending = new Map();  // request id -> resolve function, answered by LDM
+  }
+
+  /**
+   * Sends a message that LDM answers (an answer carries the same id) and resolves with the answer,
+   * or with null when the connection ends or no answer comes within `timeoutMs`.
+   */
+  request(message, timeoutMs) {
+    if (!this.port || this.state !== State.Connected) {
+      return Promise.resolve(null);
+    }
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(message.id);
+        resolve(null);
+      }, timeoutMs);
+      this.pending.set(message.id, (answer) => {
+        clearTimeout(timer);
+        resolve(answer);
+      });
+      try {
+        this.port.postMessage(message);
+      } catch {
+        this.pending.get(message.id)?.(null);
+        this.pending.delete(message.id);
+      }
+    });
   }
 
   /**
@@ -70,6 +97,12 @@ export class LdmConnection {
           this.setState(State.Connected);
           this.hooks.onConfig(config);
           resolve(true);
+          return;
+        }
+        const answer = typeof message?.id === 'string' ? this.pending.get(message.id) : undefined;
+        if (answer) {
+          this.pending.delete(message.id);
+          answer(message);
         }
       });
       port.onDisconnect.addListener((disconnected) => {
@@ -86,6 +119,10 @@ export class LdmConnection {
   closed(state) {
     this.port = null;
     this.ready = null;
+    for (const answer of this.pending.values()) {
+      answer(null);
+    }
+    this.pending.clear();
     this.setState(state);
   }
 

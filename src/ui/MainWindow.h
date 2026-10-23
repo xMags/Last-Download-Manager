@@ -103,7 +103,7 @@ private:
     void DrainBrowserEvents();
 
     // Input that arrives from outside the window and may open dialogs.
-    using ExternalInput = std::variant<core::LaunchRequest, std::vector<std::string>>;
+    using ExternalInput = std::variant<core::LaunchRequest, std::vector<std::string>, browser::Capture>;
 
     Services services_;
     HWND window_ = nullptr;

@@ -109,6 +109,7 @@ void AddFlow::AddAddress(const ExternalAdd& add)
         command.saveDir = add.saveDir;
         command.fileName = add.fileName;
         command.duplicatePolicy = policy;
+        ApplyBrowserRequest(add.browser, command);
         command.mode = add.queueOnly || snapshot->settings.queueOnly ? core::AddMode::Later : core::AddMode::StartNow;
         if (!add.silent && command.mode == core::AddMode::StartNow) {
             progressOnAdd_.push_back(command.token);
@@ -116,7 +117,18 @@ void AddFlow::AddAddress(const ExternalAdd& add)
         Post(std::move(command));
         return;
     }
-    AddWithInfoDialog(InfoDialogInput{add.url, std::nullopt, std::nullopt, policy, add.saveDir, add.fileName});
+    AddWithInfoDialog(InfoDialogInput{add.url, std::nullopt, std::nullopt, policy, add.saveDir, add.fileName, add.browser});
+}
+
+void AddFlow::ApplyBrowserRequest(const std::optional<BrowserRequest>& browser, core::AddDownloadCommand& command)
+{
+    if (!browser) {
+        return;
+    }
+    command.referer = browser->referrer;
+    command.parentPage = browser->referrer;
+    command.userAgent = browser->userAgent;
+    command.cookies = browser->cookies;
 }
 
 void AddFlow::AddImported(const std::vector<ImportedEntry>& entries)
@@ -223,6 +235,7 @@ void AddFlow::AddWithInfoDialog(InfoDialogInput input)
         command.loginPassword = password;
         command.mode = core::AddMode::Speculative;
         command.duplicatePolicy = duplicatePolicy;
+        ApplyBrowserRequest(input.browser, command);
         pendingAdds_[token] = PendingAdd{token};
         Post(std::move(command));
     }
@@ -272,6 +285,7 @@ void AddFlow::AddWithInfoDialog(InfoDialogInput input)
         command.loginPassword = password;
         command.mode = choice.action == DownloadInfoDialog::Action::Start ? core::AddMode::StartNow : core::AddMode::Later;
         command.duplicatePolicy = duplicatePolicy;
+        ApplyBrowserRequest(input.browser, command);
         if (command.mode == core::AddMode::StartNow) {
             progressOnAdd_.push_back(token);
         }

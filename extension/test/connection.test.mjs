@@ -126,3 +126,32 @@ test('browser names come from Chromium brands or Firefox info', async () => {
   const firefox = { runtime: { getBrowserInfo: async () => ({ name: 'Firefox', version: '144.0' }) } };
   assert.deepEqual(await browserInfo(firefox, {}), { browser: 'Firefox', browserVersion: '144.0' });
 });
+
+test('requests get the answer with their id, and nothing once the connection ends', async () => {
+  const api = fakeApi();
+  const { connection } = newConnection(api);
+  const ready = connection.connect();
+  await new Promise((resolve) => setImmediate(resolve));
+  api.ports[0].receive(CONFIG);
+  await ready;
+
+  const answered = connection.request({ v: 1, id: 'c1', type: 'capture' }, 1000);
+  api.ports[0].receive({ v: 1, id: 'other', type: 'capture-result', accepted: true });
+  api.ports[0].receive({ v: 1, id: 'c1', type: 'capture-result', accepted: true });
+  assert.equal((await answered).id, 'c1');
+
+  const orphaned = connection.request({ v: 1, id: 'c2', type: 'capture' }, 1000);
+  api.ports[0].disconnect(api, 'Native host has exited.');
+  assert.equal(await orphaned, null);
+  assert.equal(await connection.request({ v: 1, id: 'c3', type: 'capture' }, 1000), null, 'not connected');
+});
+
+test('an unanswered request times out', async () => {
+  const api = fakeApi();
+  const { connection } = newConnection(api);
+  const ready = connection.connect();
+  await new Promise((resolve) => setImmediate(resolve));
+  api.ports[0].receive(CONFIG);
+  await ready;
+  assert.equal(await connection.request({ v: 1, id: 'slow', type: 'capture' }, 20), null);
+});

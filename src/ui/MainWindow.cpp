@@ -70,7 +70,15 @@ bool ParsePlacement(const std::string& text, RECT& rect, UINT& showCommand, int&
 MainWindow::MainWindow(const Services& services) : services_(services)
 {
     if (services_.browser != nullptr) {
-        browserSessions_ = std::make_unique<BrowserSessions>(*services_.browser, base::ToUtf8(LDM_VERSION_WIDE));
+        browserSessions_ = std::make_unique<BrowserSessions>(
+            *services_.browser, base::ToUtf8(LDM_VERSION_WIDE), [this](browser::Capture capture) {
+                // Already on the UI thread; queued so it waits for any open dialog like other input.
+                {
+                    const std::lock_guard lock(externalMutex_);
+                    externalInput_.emplace_back(std::move(capture));
+                }
+                ::PostMessageW(window_, kExternalInputMessage, 0, 0);
+            });
     }
 }
 
@@ -340,6 +348,8 @@ void MainWindow::DrainExternalInput()
         }
         if (auto* request = std::get_if<core::LaunchRequest>(&*next)) {
             controller_->OnLaunchRequest(*request);
+        } else if (auto* capture = std::get_if<browser::Capture>(&*next)) {
+            controller_->OnBrowserCapture(std::move(*capture));
         } else {
             controller_->OnDroppedUrls(std::move(std::get<std::vector<std::string>>(*next)));
         }

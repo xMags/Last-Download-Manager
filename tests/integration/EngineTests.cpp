@@ -3,6 +3,7 @@
 #include "FixtureServer.h"
 
 #include "engine/CurlEngine.h"
+#include "model/Cookie.h"
 
 #include <gtest/gtest.h>
 
@@ -477,6 +478,21 @@ TEST_F(EngineTest, AuthenticationRequiredAndAccepted)
         ASSERT_EQ(finished.outcome, TransferOutcome::Completed) << (finished.failure ? finished.failure->message : "");
         EXPECT_TRUE(HoldsPayload(PartialPath(id), server_->Size()));
     }
+}
+
+TEST_F(EngineTest, BrowserCookiesReachOnlyTheirOwnHostOnEveryConnection)
+{
+    const auto denied = Run(Request("/cookie.bin", 1));
+    ASSERT_EQ(denied.outcome, TransferOutcome::Failed);
+
+    auto request = Request("/cookie.bin", 1, 2);
+    request.cookieLines = {
+        ldm::model::ToNetscapeLine({"127.0.0.1", true, "/", false, 0, "sid", "abc"}),
+        ldm::model::ToNetscapeLine({"other.test", false, "/", false, 0, "leak", "x"}),
+    };
+    const auto finished = Run(std::move(request));
+    ASSERT_EQ(finished.outcome, TransferOutcome::Completed) << (finished.failure ? finished.failure->message : "");
+    EXPECT_TRUE(HoldsPayload(PartialPath(2), server_->Size()));
 }
 
 TEST_F(EngineTest, RetryAfterAndServiceUnavailableAreRetried)

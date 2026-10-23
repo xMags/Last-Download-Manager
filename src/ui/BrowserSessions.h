@@ -4,6 +4,7 @@
 #include "model/Settings.h"
 #include "ui/BrowserLink.h"
 
+#include <functional>
 #include <map>
 #include <optional>
 #include <string>
@@ -20,7 +21,9 @@ public:
         std::optional<browser::Hello> hello;  // nothing until the extension said hello
     };
 
-    BrowserSessions(BrowserLink& link, std::string appVersion);
+    // `onCapture` receives each accepted capture; it runs inside OnEvent and must only queue,
+    // because a dialog may be open.
+    BrowserSessions(BrowserLink& link, std::string appVersion, std::function<void(browser::Capture)> onCapture);
 
     void OnEvent(BrowserEvent event, const model::Settings& settings);
     void OnSettingsChanged(const model::Settings& settings);
@@ -32,6 +35,7 @@ private:
 
     BrowserLink& link_;
     std::string appVersion_;
+    std::function<void(browser::Capture)> onCapture_;
     std::map<BrowserConnectionId, Session> sessions_;
     // The settings MakeConfig reads, as last pushed; extend together with MakeConfig.
     std::optional<std::string> configInputs_;

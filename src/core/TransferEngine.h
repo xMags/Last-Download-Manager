@@ -27,6 +27,9 @@ struct TransferRequest {
     std::optional<std::string> referer;
     std::string userAgent;
     std::optional<TransferCredentials> credentials;
+    // Browser cookies in Netscape format, decrypted just before the start like credentials.
+    // libcurl sends each one only to its own host and path, also after redirects.
+    std::vector<std::string> cookieLines;
     std::optional<std::string> proxy;  // libcurl proxy URL; absent = direct connection
     bool ftpActiveMode = false;        // Options > Proxy: passive FTP is the default
 

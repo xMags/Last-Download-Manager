@@ -257,6 +257,12 @@ void Transfer::StartConnection(Segment& segment, bool probe, Clock::time_point n
     if (request_.ftpActiveMode) {
         curl_easy_setopt(easy, CURLOPT_FTPPORT, "-");
     }
+    if (!request_.cookieLines.empty()) {
+        curl_easy_setopt(easy, CURLOPT_COOKIEFILE, "");  // turns on the cookie engine without reading a file
+        for (const std::string& line : request_.cookieLines) {
+            curl_easy_setopt(easy, CURLOPT_COOKIELIST, line.c_str());  // copied by libcurl
+        }
+    }
 
     std::string range;
     if (connection->ranged) {
