@@ -23,6 +23,7 @@
   },
   "permissions": [
     "alarms",
+    "contextMenus",
     "cookies",
     "downloads",
     "downloads.ui",

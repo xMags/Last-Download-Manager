@@ -185,3 +185,48 @@ test('a one-shot connection that ends without an answer gives null', async () =>
   api.ports[0].disconnectListeners.forEach((listener) => listener(api.ports[0]));
   assert.equal(await answered, null);
 });
+
+test('a conversation stays open after the answer until either side ends it', async () => {
+  const api = fakeApi();
+  const { connection } = newConnection(api);
+  const later = [];
+  let ends = 0;
+  const opened = connection.conversation({ v: 1, id: 'l1', type: 'links' }, 1000, {
+    onMessage: (message) => later.push(message.type),
+    onEnd: () => { ends += 1; },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  const port = api.ports[0];
+  port.disconnectCalls = 0;
+  const realDisconnect = port.disconnect.bind(port);
+  port.disconnect = () => { port.disconnectCalls += 1; };
+  assert.equal(port.sent[0].startLdm, true);
+  port.receive(CONFIG);
+  port.receive({ v: 1, id: 'l1', type: 'links-result', accepted: true });
+  const conversation = await opened;
+  assert.equal(conversation.answer.accepted, true);
+  assert.equal(port.disconnectCalls, 0, 'still open');
+
+  conversation.send({ v: 1, id: 'i1', type: 'link-info', items: [] });
+  assert.equal(port.sent.at(-1).id, 'i1');
+  port.receive({ v: 1, id: 'l1', type: 'links-done' });
+  assert.deepEqual(later, ['links-done']);
+
+  realDisconnect(api, 'Native host has exited.');
+  conversation.close();
+  assert.equal(ends, 1, 'the end is reported once');
+  conversation.send({ v: 1, id: 'i2', type: 'link-info', items: [] });
+  assert.notEqual(port.sent.at(-1).id, 'i2', 'nothing is sent after the end');
+});
+
+test('a conversation without an answer gives null and closes', async () => {
+  const api = fakeApi();
+  const { connection } = newConnection(api);
+  let ends = 0;
+  const opened = connection.conversation({ v: 1, id: 'l2', type: 'links' }, 20, {
+    onMessage: () => {},
+    onEnd: () => { ends += 1; },
+  });
+  assert.equal(await opened, null);
+  assert.equal(ends, 0, 'onEnd is only for a conversation that was answered');
+});

@@ -29,6 +29,7 @@
   },
   "permissions": [
     "alarms",
+    "contextMenus",
     "cookies",
     "downloads",
     "nativeMessaging",
