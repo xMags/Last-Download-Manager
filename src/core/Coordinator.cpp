@@ -259,6 +259,8 @@ void Coordinator::Handle(Command command)
                 ReplaceSiteLogins(typed.logins);
             } else if constexpr (std::is_same_v<T, ReplaceServerLimitsCommand>) {
                 ReplaceServerLimits(std::move(typed.limits));
+            } else if constexpr (std::is_same_v<T, QuotaDecisionCommand>) {
+                DecideQuota(typed.keepDownloading);
             } else {
                 static_assert(sizeof(T) == 0, "unhandled command");
             }
@@ -477,7 +479,18 @@ void Coordinator::Resume(const std::vector<model::DownloadId>& ids)
 void Coordinator::Stop(const std::vector<model::DownloadId>& ids)
 {
     for (const model::DownloadId id : ids) {
-        if (Entry* entry = Find(id); entry != nullptr && entry->running) {
+        Entry* entry = Find(id);
+        if (entry == nullptr) {
+            continue;
+        }
+        if (entry->quotaHeld) {
+            // Stopped by the user: it no longer starts by itself when the quota allows.
+            entry->quotaHeld = false;
+            entry->download.lastResult.reset();
+            Save(*entry);
+            MarkChanged(*entry);
+        }
+        if (entry->running) {
             RequestStop(*entry);
         }
     }
@@ -760,6 +773,7 @@ void Coordinator::UpdateSettings(model::Settings settings)
     ports_.proxy->Configure(settings_);
     ApplySpeedLimiter();
     snapshotDirty_ = true;
+    EnforceQuota();  // a new limit may stop downloads, or release held ones
 }
 
 void Coordinator::ReplaceSiteLogins(const std::vector<SiteLoginInput>& logins)
@@ -888,10 +902,15 @@ void Coordinator::OnProgress(Entry& entry, const ProgressInfo& progress)
     entry.connections = progress.connections;
     entry.retrying = progress.lastRetry;
     entry.unsaved = true;
-    if (ports_.clock->Steady() - entry.lastCheckpoint >= config_.checkpointInterval) {
+    const auto now = ports_.clock->Steady();
+    // receivedBytes is the run's running total; only the growth since the last report is new.
+    quota_.Record(now, progress.receivedBytes - entry.quotaCountedBytes, QuotaLength());
+    entry.quotaCountedBytes = progress.receivedBytes;
+    if (now - entry.lastCheckpoint >= config_.checkpointInterval) {
         Save(entry);
     }
     MarkChanged(entry);
+    EnforceQuota();
 }
 
 void Coordinator::OnFinished(Entry& entry, const TransferFinished& finished)
@@ -1023,6 +1042,13 @@ void Coordinator::OnFinalized(Entry& entry, const FinalizeFinished& finalized)
 void Coordinator::Start(Entry& entry)
 {
     model::Download& d = entry.download;
+    if (QuotaBlocks(ports_.clock->Steady())) {
+        HoldForQuota(entry);
+        d.status = DownloadStatus::Paused;
+        Save(entry);
+        return;
+    }
+    entry.quotaHeld = false;
     d.epoch += 1;
     d.status = DownloadStatus::Downloading;
     d.lastTryAtMs = ports_.clock->NowUnixMs();
@@ -1046,6 +1072,7 @@ void Coordinator::Start(Entry& entry)
         return;
     }
     Save(entry);  // the epoch is stored before the engine can report anything for it
+    entry.quotaCountedBytes = d.DownloadedBytes();  // bytes from earlier runs were counted then
     entry.running = true;
     entry.stopRequested = false;
     MarkChanged(entry);
@@ -1312,6 +1339,7 @@ void Coordinator::Tick()
             Save(entry);
         }
     }
+    EnforceQuota();
     if (snapshotDirty_ && now - lastSnapshot_ >= config_.snapshotInterval) {
         PublishSnapshot();
     }
@@ -1328,7 +1356,110 @@ std::chrono::steady_clock::time_point Coordinator::NextDeadline() const
             deadline = std::min(deadline, entry.lastCheckpoint + config_.checkpointInterval);
         }
     }
+    // Wake when the quota period ends, to restart held downloads, or when an override runs out.
+    const auto now = ports_.clock->Steady();
+    if (const auto end = quota_.End(now, QuotaLength()); end && settings_.quota.enabled) {
+        deadline = std::min(deadline, *end);
+    }
+    if (quotaIgnoredUntil_) {
+        deadline = std::min(deadline, *quotaIgnoredUntil_);
+    }
     return deadline;
+}
+
+std::chrono::minutes Coordinator::QuotaLength() const
+{
+    return std::chrono::hours(std::max(1, settings_.quota.hours));
+}
+
+bool Coordinator::QuotaBlocks(std::chrono::steady_clock::time_point now) const
+{
+    if (!settings_.quota.enabled || shuttingDown_) {
+        return false;
+    }
+    if (quotaIgnoredUntil_ && now < *quotaIgnoredUntil_) {
+        return false;
+    }
+    return quota_.Used(now, QuotaLength()) >= std::int64_t{settings_.quota.megabytes} * 1024 * 1024;
+}
+
+void Coordinator::HoldForQuota(Entry& entry)
+{
+    entry.quotaHeld = true;
+    entry.download.lastResult = "Waiting for the download quota; continues by itself when the quota period ends";
+    MarkChanged(entry);
+}
+
+void Coordinator::StopForQuota()
+{
+    for (auto& [id, entry] : entries_) {
+        if (entry.running && !entry.stopRequested) {
+            HoldForQuota(entry);
+            RequestStop(entry);
+        }
+    }
+}
+
+void Coordinator::EnforceQuota()
+{
+    if (shuttingDown_) {
+        return;
+    }
+    const auto now = ports_.clock->Steady();
+    if (quotaIgnoredUntil_ && now >= *quotaIgnoredUntil_) {
+        quotaIgnoredUntil_.reset();
+    }
+    if (!QuotaBlocks(now)) {
+        quotaQuestionOpen_ = false;
+        for (auto& [id, entry] : entries_) {
+            if (entry.quotaHeld && !entry.running && !entry.finalizing && !entry.deleteWhenStopped) {
+                entry.quotaHeld = false;
+                entry.download.lastResult.reset();
+                if (CanStart(entry.download.status)) {
+                    Start(entry);
+                } else {
+                    MarkChanged(entry);
+                }
+            }
+        }
+        return;
+    }
+    const bool anyRunning =
+        std::any_of(entries_.begin(), entries_.end(), [](const auto& item) { return item.second.running && !item.second.stopRequested; });
+    if (!anyRunning) {
+        return;
+    }
+    if (!settings_.quota.warnBeforeStopping) {
+        StopForQuota();
+        return;
+    }
+    if (quotaQuestionOpen_) {
+        return;  // the downloads run on until the user answers
+    }
+    quotaQuestionOpen_ = true;
+    QuotaReached reached;
+    reached.megabytes = settings_.quota.megabytes;
+    reached.hours = settings_.quota.hours;
+    if (const auto end = quota_.End(now, QuotaLength())) {
+        reached.periodEndsAtUnixMs =
+            ports_.clock->NowUnixMs() + std::chrono::duration_cast<std::chrono::milliseconds>(*end - now).count();
+    }
+    Notify(reached);
+}
+
+void Coordinator::DecideQuota(bool keepDownloading)
+{
+    if (!quotaQuestionOpen_) {
+        return;  // the period ended, or the limit changed, before the answer came
+    }
+    quotaQuestionOpen_ = false;
+    const auto now = ports_.clock->Steady();
+    if (keepDownloading) {
+        quotaIgnoredUntil_ = quota_.End(now, QuotaLength());
+        EnforceQuota();
+        return;
+    }
+    StopForQuota();
 }
 
 void Coordinator::PublishSnapshot()
@@ -1355,6 +1486,7 @@ void Coordinator::PublishSnapshot()
             view->receivedBytes = entry->running ? entry->receivedBytes : entry->download.DownloadedBytes();
             view->connections = entry->connections;
             view->retrying = entry->retrying;
+            view->waitingForQuota = entry->quotaHeld;
             if (entry->bytesPerSecond > 0 && entry->download.totalSize) {
                 view->secondsLeft = std::max<std::int64_t>(*entry->download.totalSize - view->receivedBytes, 0) /
                                     entry->bytesPerSecond;
@@ -1377,6 +1509,17 @@ void Coordinator::PublishSnapshot()
         snapshot->siteLogins.push_back(SiteLoginView{login.pattern, login.username});
     }
     snapshot->speedLimiterOn = speedLimiterOn_;
+    const auto now = ports_.clock->Steady();
+    if (settings_.quota.enabled) {
+        snapshot->quotaLimitBytes = std::int64_t{settings_.quota.megabytes} * 1024 * 1024;
+        snapshot->quotaUsedBytes = quota_.Used(now, QuotaLength());
+        const bool anyHeld =
+            std::any_of(entries_.begin(), entries_.end(), [](const auto& item) { return item.second.quotaHeld; });
+        if (const auto end = quota_.End(now, QuotaLength()); end && anyHeld) {
+            snapshot->quotaEndsAtUnixMs =
+                ports_.clock->NowUnixMs() + std::chrono::duration_cast<std::chrono::milliseconds>(*end - now).count();
+        }
+    }
     snapshotDirty_ = false;
     lastSnapshot_ = ports_.clock->Steady();
     ports_.observer->OnSnapshot(std::move(snapshot));

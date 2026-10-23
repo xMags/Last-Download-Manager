@@ -3,6 +3,7 @@ add_executable(ldm_unit_tests
     base/ResultTests.cpp
     base/UtfTests.cpp
     core/CoordinatorTests.cpp
+    core/QuotaTests.cpp
     core/SegmentPlannerTests.cpp
     core/UrlAndNamesTests.cpp
     engine/FailurePolicyTests.cpp

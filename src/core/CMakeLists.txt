@@ -12,6 +12,8 @@ add_library(ldm_core STATIC
     LaunchRequest.h
     Matching.cpp
     Matching.h
+    Quota.cpp
+    Quota.h
     Ports.h
     SegmentPlanner.cpp
     SegmentPlanner.h

@@ -21,6 +21,10 @@ struct PageInfo {
     const wchar_t* title;
 };
 
+// The Options dialog whose page keys the hook handles. Hook procedures get no context pointer;
+// one modal Options dialog exists at a time, on the UI thread.
+thread_local OptionsDialog* pageKeyTarget = nullptr;
+
 constexpr std::array<PageInfo, 7> kPages{{
     {IDD_OPTIONS_GENERAL, L"General"},
     {IDD_OPTIONS_SAVE, L"Save to"},
@@ -185,7 +189,51 @@ bool OptionsDialog::OnInit()
     }
     Load();
     ShowPage(0);
+    pageKeyTarget = this;
+    pageKeyHook_ = ::SetWindowsHookExW(WH_MSGFILTER, &OptionsDialog::PageKeyFilter, nullptr, ::GetCurrentThreadId());
     return true;
+}
+
+void OptionsDialog::OnDestroying()
+{
+    if (pageKeyHook_ != nullptr) {
+        ::UnhookWindowsHookEx(pageKeyHook_);
+        pageKeyHook_ = nullptr;
+    }
+    if (pageKeyTarget == this) {
+        pageKeyTarget = nullptr;
+    }
+}
+
+LRESULT CALLBACK OptionsDialog::PageKeyFilter(int code, WPARAM wParam, LPARAM lParam)
+{
+    const auto* message = reinterpret_cast<const MSG*>(lParam);  // documented for WH_MSGFILTER
+    OptionsDialog* dialog = pageKeyTarget;
+    if (code == MSGF_DIALOGBOX && dialog != nullptr && message != nullptr && message->message == WM_KEYDOWN &&
+        ::GetKeyState(VK_CONTROL) < 0 &&
+        (message->hwnd == dialog->Handle() || ::IsChild(dialog->Handle(), message->hwnd))) {
+        int delta = 0;
+        if (message->wParam == VK_TAB) {
+            delta = ::GetKeyState(VK_SHIFT) < 0 ? -1 : 1;
+        } else if (message->wParam == VK_NEXT) {
+            delta = 1;
+        } else if (message->wParam == VK_PRIOR) {
+            delta = -1;
+        }
+        if (delta != 0) {
+            dialog->StepPage(delta);
+            return 1;  // consumed
+        }
+    }
+    return ::CallNextHookEx(nullptr, code, wParam, lParam);
+}
+
+void OptionsDialog::StepPage(int delta)
+{
+    const HWND tab = Item(IDC_OPT_TAB);
+    const int next = ((TabCtrl_GetCurSel(tab) + delta) % kPageCount + kPageCount) % kPageCount;
+    TabCtrl_SetCurSel(tab, next);
+    ShowPage(next);
 }
 
 void OptionsDialog::ShowPage(int index)
@@ -285,6 +333,11 @@ void OptionsDialog::Load()
     }
     Put(IDC_OPT_CONNECTIONS, std::to_wstring(s.defaultMaxConnections));
     RefreshLimits();
+    Check(IDC_OPT_QUOTA_ON, s.quota.enabled);
+    Put(IDC_OPT_QUOTA_MB, std::to_wstring(s.quota.megabytes));
+    Put(IDC_OPT_QUOTA_HOURS, std::to_wstring(s.quota.hours));
+    Check(IDC_OPT_QUOTA_WARN, s.quota.warnBeforeStopping);
+    UpdateQuotaControls();
 
     Check(IDC_OPT_PROXY_NONE, s.proxyMode == model::ProxyMode::None);
     Check(IDC_OPT_PROXY_SYSTEM, s.proxyMode == model::ProxyMode::System);
@@ -409,6 +462,14 @@ void OptionsDialog::UpdateStartDialogControls()
     ::EnableWindow(Control(IDC_OPT_QUEUE_ONLY), !dialog);
 }
 
+void OptionsDialog::UpdateQuotaControls()
+{
+    const bool enabled = IsChecked(IDC_OPT_QUOTA_ON);
+    for (const int id : {IDC_OPT_QUOTA_MB, IDC_OPT_QUOTA_HOURS, IDC_OPT_QUOTA_WARN}) {
+        ::EnableWindow(Control(id), enabled);
+    }
+}
+
 void OptionsDialog::OnPageCommand(int id, int code)
 {
     switch (id) {
@@ -430,6 +491,9 @@ void OptionsDialog::OnPageCommand(int id, int code)
         break;
     case IDC_OPT_START_DIALOG:
         UpdateStartDialogControls();
+        break;
+    case IDC_OPT_QUOTA_ON:
+        UpdateQuotaControls();
         break;
     case IDC_OPT_SCANNER_BROWSE:
         if (auto program = PickOpenFile(Handle(), L"Programs", L"*.exe")) {
@@ -599,6 +663,25 @@ bool OptionsDialog::Store()
     }
     s.defaultMaxConnections = *connections;
 
+    s.quota.enabled = IsChecked(IDC_OPT_QUOTA_ON);
+    s.quota.warnBeforeStopping = IsChecked(IDC_OPT_QUOTA_WARN);
+    const auto quotaMegabytes = GetNumber(IDC_OPT_QUOTA_MB);
+    const auto quotaHours = GetNumber(IDC_OPT_QUOTA_HOURS);
+    if (s.quota.enabled && (!quotaMegabytes || *quotaMegabytes < 1 || *quotaMegabytes > 10'000'000)) {
+        Warn(L"The download quota must be between 1 and 10,000,000 MB.");
+        return false;
+    }
+    if (s.quota.enabled && (!quotaHours || *quotaHours < 1 || *quotaHours > 23)) {
+        Warn(L"The quota period must be between 1 and 23 hours.");
+        return false;
+    }
+    if (quotaMegabytes && *quotaMegabytes >= 1 && *quotaMegabytes <= 10'000'000) {
+        s.quota.megabytes = *quotaMegabytes;
+    }
+    if (quotaHours && *quotaHours >= 1 && *quotaHours <= 23) {
+        s.quota.hours = *quotaHours;
+    }
+
     s.proxyMode = IsChecked(IDC_OPT_PROXY_NONE)     ? model::ProxyMode::None
                   : IsChecked(IDC_OPT_PROXY_PAC)    ? model::ProxyMode::AutoConfigScript
                   : IsChecked(IDC_OPT_PROXY_MANUAL) ? model::ProxyMode::Manual
@@ -669,6 +752,7 @@ void OptionsDialog::ApplyEditedFields(const model::Settings& edited, model::Sett
     current.virusScan = edited.virusScan;
     current.speedProfile = edited.speedProfile;
     current.defaultMaxConnections = edited.defaultMaxConnections;
+    current.quota = edited.quota;
     current.proxyMode = edited.proxyMode;
     current.autoConfigScriptUrl = edited.autoConfigScriptUrl;
     current.httpProxy = edited.httpProxy;

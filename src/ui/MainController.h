@@ -90,6 +90,7 @@ private:
     void SpeedLimiterSettings();
     void ShowOptions();
     void AskForLogin(const core::DownloadFailed& failed);
+    void AskAboutQuota(const core::QuotaReached& reached);
     void ChooseListFont();
     void ModifySettings(std::function<void(model::Settings&)> modify);
     void SetSort(SortKey key);

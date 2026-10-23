@@ -3,6 +3,7 @@
 #include "base/Result.h"
 #include "core/Commands.h"
 #include "core/Ports.h"
+#include "core/Quota.h"
 #include "core/Snapshot.h"
 #include "core/Store.h"
 #include "core/TransferEngine.h"
@@ -95,6 +96,8 @@ private:
         std::int64_t receivedBytes = 0;
         std::vector<ConnectionView> connections;
         std::optional<TransferFailure> retrying;
+        bool quotaHeld = false;              // paused by the quota; started again when it allows
+        std::int64_t quotaCountedBytes = 0;  // received bytes of this run already counted
 
         std::shared_ptr<const DownloadView> view;  // rebuilt when `viewDirty`
         bool viewDirty = true;
@@ -119,6 +122,7 @@ private:
     void UpdateSettings(model::Settings settings);
     void ReplaceSiteLogins(const std::vector<SiteLoginInput>& logins);
     void ReplaceServerLimits(std::vector<model::ServerLimit> limits);
+    void DecideQuota(bool keepDownloading);
 
     // Engine event handlers.
     void OnResponseInfo(Entry& entry, const ResponseInfo& info);
@@ -152,6 +156,14 @@ private:
     void PublishSnapshot();
     void UpdatePowerRequest();
     void ApplySpeedLimiter();
+
+    // Download quota (checklist O-05).
+    [[nodiscard]] std::chrono::minutes QuotaLength() const;
+    [[nodiscard]] bool QuotaBlocks(std::chrono::steady_clock::time_point now) const;
+    // Stops or asks when the quota is used up, and restarts held downloads once it allows.
+    void EnforceQuota();
+    void HoldForQuota(Entry& entry);
+    void StopForQuota();
     [[nodiscard]] Entry* Find(model::DownloadId id);
     [[nodiscard]] TransferRequest BuildRequest(Entry& entry);
     [[nodiscard]] base::Status SeedCategories();
@@ -169,6 +181,10 @@ private:
     bool speedLimiterOn_ = false;
     bool shuttingDown_ = false;
     bool powerActive_ = false;
+
+    QuotaPeriod quota_;
+    bool quotaQuestionOpen_ = false;  // QuotaReached was sent and not answered yet
+    std::optional<std::chrono::steady_clock::time_point> quotaIgnoredUntil_;
 
     bool snapshotDirty_ = true;
     std::uint64_t snapshotVersion_ = 0;

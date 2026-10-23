@@ -47,6 +47,13 @@ private:
     bool OnInit() override;
     bool OnCommand(int id, int code, HWND control) override;
     bool OnNotify(const NMHDR& header, LRESULT& result) override;
+    void OnDestroying() override;
+
+    // Ctrl+Tab, Ctrl+Shift+Tab, Ctrl+PgDn and Ctrl+PgUp switch pages, as in Windows property
+    // sheets. A modal dialog's keys never reach the app's message loop, so a message filter hook
+    // installed for the dialog's lifetime catches them.
+    static LRESULT CALLBACK PageKeyFilter(int code, WPARAM wParam, LPARAM lParam);
+    void StepPage(int delta);
 
     static INT_PTR CALLBACK PageProc(HWND page, UINT message, WPARAM wParam, LPARAM lParam);
     void OnPageCommand(int id, int code);
@@ -70,8 +77,10 @@ private:
     void RefreshLogins();
     void UpdateProxyControls();
     void UpdateStartDialogControls();
+    void UpdateQuotaControls();
 
     Input input_;
+    HHOOK pageKeyHook_ = nullptr;
     core::SecretProtector& secrets_;
     SystemActions& system_;
     std::array<HWND, kPageCount> pages_{};

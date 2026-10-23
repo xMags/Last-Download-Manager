@@ -113,6 +113,9 @@ std::wstring FormatStatus(const core::DownloadView& view)
     case DownloadStatus::Stopping:
         return L"Stopping...";
     case DownloadStatus::Paused: {
+        if (view.waitingForQuota) {
+            return L"Waiting for quota";
+        }
         if (const auto fraction = ProgressFraction(view); fraction && *fraction > 0.0) {
             return Printf(L"%.2f%ls", std::floor(*fraction * 10000.0) / 100.0, L"% (paused)");
         }

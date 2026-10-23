@@ -27,6 +27,7 @@ struct DownloadView {
     std::int64_t receivedBytes = 0;  // includes bytes not yet flushed, for display
     std::vector<ConnectionView> connections;
     std::optional<TransferFailure> retrying;  // set while the engine retries after a failure
+    bool waitingForQuota = false;  // paused by the download quota; starts again by itself
 };
 
 // A stored site login without its password.
@@ -46,6 +47,9 @@ struct Snapshot {
     bool speedLimiterOn = false;
     std::int64_t totalBytesPerSecond = 0;
     int activeDownloads = 0;
+    std::int64_t quotaLimitBytes = 0;  // 0: no download quota
+    std::int64_t quotaUsedBytes = 0;   // in the current quota period
+    std::optional<std::int64_t> quotaEndsAtUnixMs;  // while downloads wait for the quota
 };
 
 // Answer to AddDownloadCommand.
@@ -79,7 +83,15 @@ struct CoreError {
     std::string message;
 };
 
-using Notification = std::variant<AddResult, DownloadCompleted, DownloadFailed, CoreError>;
+// The download quota is used up while downloads run and Options ask to warn first (checklist
+// O-05). The downloads keep running until a QuotaDecisionCommand answers.
+struct QuotaReached {
+    int megabytes = 0;
+    int hours = 0;
+    std::int64_t periodEndsAtUnixMs = 0;
+};
+
+using Notification = std::variant<AddResult, DownloadCompleted, DownloadFailed, CoreError, QuotaReached>;
 
 // Receives the coordinator's output. Called on the core thread; implementations must only post to
 // their own thread.
