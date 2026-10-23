@@ -11,6 +11,19 @@ target_link_libraries(ldm PRIVATE
 # ldm-host.exe ships next to ldm.exe and is registered by it.
 add_dependencies(ldm ldm-host)
 
+# ffmpeg.exe and ffprobe.exe ship next to ldm.exe too (M3 design section 6, decision 5). vcpkg
+# builds them from the ffmpeg port in vcpkg.json and installs them in its tools folder; tests run
+# the copies next to ldm.exe, so they check exactly what ships.
+set(LDM_FFMPEG_TOOLS_DIR "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/tools/ffmpeg")
+foreach(tool IN ITEMS ffmpeg ffprobe)
+    if(NOT EXISTS "${LDM_FFMPEG_TOOLS_DIR}/${tool}.exe")
+        message(FATAL_ERROR "${tool}.exe is missing from ${LDM_FFMPEG_TOOLS_DIR}; the ffmpeg port in vcpkg.json should install it.")
+    endif()
+    add_custom_command(TARGET ldm POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${LDM_FFMPEG_TOOLS_DIR}/${tool}.exe" "$<TARGET_FILE_DIR:ldm>"
+        VERBATIM)
+endforeach()
+
 target_include_directories(ldm PRIVATE ${PROJECT_SOURCE_DIR}/resources)
 
 # The manifest is embedded through ldm.rc, so the linker must not generate a second one.
