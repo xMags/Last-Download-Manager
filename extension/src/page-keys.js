@@ -36,9 +36,13 @@
 
   const report = () => send({ type: 'keys', keys: { ...keys } });
 
+  // On keyboard layouts with AltGr (English India, German, ...) the right Alt key is AltGr, which
+  // Firefox reports with altKey false. People press it as Alt, so it counts as Alt.
+  const altHeld = (event) => event.altKey || event.getModifierState?.('AltGraph') === true;
+
   const update = (event, down) => {
     const before = JSON.stringify(keys);
-    keys.alt = event.altKey;
+    keys.alt = altHeld(event);
     keys.shift = event.shiftKey;
     keys.ctrl = event.ctrlKey;
     if (event.key === 'Insert') {
@@ -95,7 +99,7 @@
   };
 
   const pressedKeys = (event) => ({
-    alt: event.altKey, shift: event.shiftKey, ctrl: event.ctrlKey, insert: keys.insert, delete: keys.delete,
+    alt: altHeld(event), shift: event.shiftKey, ctrl: event.ctrlKey, insert: keys.insert, delete: keys.delete,
   });
 
   // Reported on the button press: the browser may start a download (Alt+click in Chrome) before
