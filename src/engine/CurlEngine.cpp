@@ -148,8 +148,20 @@ private:
 
             now = Clock::now();
             Clock::time_point deadline = now + std::chrono::seconds(1);
+            // Downloads take turns being serviced first, so under the global limit the one with
+            // the lowest id does not take every refill (Q-09).
+            if (!transfers_.empty()) {
+                std::vector<Transfer*> order;
+                order.reserve(transfers_.size());
+                for (auto& [id, transfer] : transfers_) {
+                    order.push_back(transfer.get());
+                }
+                const size_t first = serviceRotation_++ % order.size();
+                for (size_t step = 0; step < order.size(); ++step) {
+                    order[(first + step) % order.size()]->Service(now);
+                }
+            }
             for (auto it = transfers_.begin(); it != transfers_.end();) {
-                it->second->Service(now);
                 if (it->second->Done()) {
                     it = transfers_.erase(it);
                     continue;
@@ -248,6 +260,7 @@ private:
 
     // Network thread only.
     std::map<model::DownloadId, std::unique_ptr<Transfer>> transfers_;
+    size_t serviceRotation_ = 0;  // see the service loop
 
     std::jthread thread_;
 };

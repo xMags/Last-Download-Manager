@@ -186,6 +186,9 @@ private:
     std::vector<Segment> segments_;
     std::uint32_t nextSegmentKey_ = 0;
     std::vector<std::unique_ptr<Connection>> connections_;
+    // Where the next unpause pass starts. The first connection woken after a refill takes the
+    // tokens, so starting one later each time shares a limited rate evenly (P-04).
+    size_t unpauseRotation_ = 0;
 
     // Facts established by the first accepted response.
     std::optional<std::int64_t> totalSize_;

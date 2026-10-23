@@ -725,8 +725,10 @@ void Transfer::UnpauseConnections(Clock::time_point now)
 {
     // Unpausing may call OnData synchronously; it only touches connection and segment fields,
     // never connections_ itself, so iterating by index stays valid.
-    for (size_t i = 0; i < connections_.size(); ++i) {
-        Connection& connection = *connections_[i];
+    const size_t count = connections_.size();
+    const size_t first = count == 0 ? 0 : unpauseRotation_++ % count;
+    for (size_t step = 0; step < count; ++step) {
+        Connection& connection = *connections_[(first + step) % count];
         if (connection.pausedForRate) {
             if (bucket_.CanTake(now) && services_.globalBucket->CanTake(now)) {
                 connection.pausedForRate = false;

@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <limits>
 #include <mutex>
 #include <optional>
 #include <random>
@@ -529,6 +530,65 @@ TEST_F(EngineTest, SpeedLimitHoldsTheRate)
     ASSERT_EQ(finished.outcome, TransferOutcome::Completed);
     const double rate = static_cast<double>(server_->Size()) / seconds;
     EXPECT_NEAR(rate, static_cast<double>(kLimit), kLimit * 0.15) << "seconds: " << seconds;
+}
+
+TEST_F(EngineTest, SpeedLimitIsSharedFairlyBetweenConnections)
+{
+    auto request = Request("/range.bin");
+    request.speedLimitBytesPerSecond = 1024 * 1024;
+    request.maxConnections = 4;
+    engine_->Start(std::move(request));
+    // Connections finish segments and get new ones, so compare what each one present in two
+    // reports about half a second apart gained in between.
+    const auto before = listener_.WaitFor<ProgressInfo>(DownloadId{1}, 1, 30s, [](const ProgressInfo& p) {
+        return p.receivedBytes > 1024 * 1024 && p.connections.size() >= 3;
+    });
+    ASSERT_TRUE(before);
+    const std::int64_t target = before->receivedBytes + 512 * 1024;
+    const auto after = listener_.WaitFor<ProgressInfo>(DownloadId{1}, 1, 30s, [target](const ProgressInfo& p) {
+        return p.receivedBytes > target;
+    });
+    ASSERT_TRUE(after);
+    std::int64_t least = std::numeric_limits<std::int64_t>::max();
+    std::int64_t most = 0;
+    int compared = 0;
+    for (const auto& now : after->connections) {
+        for (const auto& then : before->connections) {
+            if (then.segmentStart == now.segmentStart) {
+                const std::int64_t gained = now.received - then.received;
+                least = std::min(least, gained);
+                most = std::max(most, gained);
+                compared += 1;
+            }
+        }
+    }
+    ASSERT_GE(compared, 2);
+    EXPECT_GE(least * 10, most * 4) << "least " << least << ", most " << most << " over " << compared << " connections";
+    engine_->Stop(DownloadId{1}, 1);
+    ASSERT_TRUE(listener_.Finished(DownloadId{1}, 1));
+}
+
+TEST_F(EngineTest, GlobalSpeedLimitIsSharedFairlyBetweenDownloads)
+{
+    engine_->SetGlobalSpeedLimit(1024 * 1024);
+    for (std::int64_t id = 1; id <= 2; ++id) {
+        auto request = Request("/range.bin", 1, id);
+        request.maxConnections = 2;
+        engine_->Start(std::move(request));
+    }
+    const auto first = listener_.WaitFor<ProgressInfo>(DownloadId{1}, 1, 30s, [](const ProgressInfo& p) {
+        return p.receivedBytes > 1024 * 1024;
+    });
+    ASSERT_TRUE(first);
+    const auto second = listener_.All<ProgressInfo>(DownloadId{2}, 1);
+    ASSERT_FALSE(second.empty());
+    const std::int64_t other = second.back().receivedBytes;
+    EXPECT_GE(other * 10, first->receivedBytes * 5) << "first " << first->receivedBytes << ", second " << other;
+    engine_->SetGlobalSpeedLimit(std::nullopt);
+    for (std::int64_t id = 1; id <= 2; ++id) {
+        engine_->Stop(DownloadId{id}, 1);
+        ASSERT_TRUE(listener_.Finished(DownloadId{id}, 1));
+    }
 }
 
 TEST_F(EngineTest, FinalizeMovesWithoutOverwriting)
