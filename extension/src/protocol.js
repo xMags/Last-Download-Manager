@@ -74,7 +74,14 @@ export function parseConfig(message) {
     siteExceptions: patternList(message.siteExceptions),
     addressExceptions: patternList(message.addressExceptions),
     keys: keySettings(message),
+    menu: menuSettings(message),
   };
+}
+
+/** Which right-click menu items LDM's Options turned on; both default to on, as in LDM. */
+export function menuSettings(config) {
+  const flag = (value) => value !== false;
+  return { downloadLink: flag(config?.menu?.downloadLink), downloadAll: flag(config?.menu?.downloadAll) };
 }
 
 const MAX_URL = 16 * 1024;
@@ -153,4 +160,146 @@ export function makeCapture(download) {
 export function isAcceptedCapture(message, id) {
   return message !== null && typeof message === 'object' && message.v === PROTOCOL_VERSION &&
     message.type === 'capture-result' && message.id === id && message.accepted === true;
+}
+
+// Limits of the links message, as LDM enforces them (browser/Protocol.h).
+export const MAX_PAGE_LINKS = 5000;
+const MAX_PAGE_LINK_COOKIES = 1000;
+const MAX_LINK_TEXT_BYTES = 1024;
+const MAX_FILE_NAME_BYTES = 1024;
+const MAX_MIME_TYPE_BYTES = 256;
+// LDM reads at most 4 MiB per message; this leaves room for the envelope and JSON escapes.
+const MAX_LINKS_MESSAGE_BYTES = 3.5 * 1024 * 1024;
+const MAX_LINK_COOKIE_BYTES = 1024 * 1024;
+const LINK_KINDS = new Set(['link', 'image', 'frame', 'text']);
+
+const encoder = new TextEncoder();
+
+/** Bytes of `text` in UTF-8. */
+export function utf8Length(text) {
+  return encoder.encode(text).length;
+}
+
+/**
+ * Page text made acceptable to LDM: lone surrogates (which no UTF-8 can hold) replaced, control
+ * characters and runs of white space turned into one space, trimmed, and cut to `maxBytes` of
+ * UTF-8 without splitting a character.
+ */
+export function cleanPageText(value, maxBytes) {
+  const text = String(value ?? '')
+    .replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, '�')
+    .replace(/[\s\u0000-\u001f\u007f]+/g, ' ')
+    .trim();
+  let bytes = 0;
+  let end = 0;
+  for (const character of text) {
+    const size = character.codePointAt(0) < 0x80 ? 1 : utf8Length(character);
+    if (bytes + size > maxBytes) {
+      break;
+    }
+    bytes += size;
+    end += character.length;
+  }
+  return text.slice(0, end).trimEnd();
+}
+
+/**
+ * The links message for Download All Links or Download selected links (checklist B-05). Links
+ * LDM would refuse are left out, and the list is cut so the message stays within LDM's limits.
+ * @param {{selection: boolean, referrer?: string, userAgent: string,
+ *          links: {url: string, text?: string, kind: string, fileName?: string}[],
+ *          cookies: object[]}} page cookies as the browser's cookies API gives them
+ * @returns {object | null} null when no link is left
+ */
+export function makeLinks(page) {
+  const message = {
+    v: PROTOCOL_VERSION,
+    id: nextId(),
+    type: 'links',
+    selection: Boolean(page.selection),
+    referrer: isDownloadAddress(page.referrer) ? page.referrer : undefined,
+    userAgent: cleanText(page.userAgent, 1024) || 'Mozilla/5.0',
+    links: [],
+    cookies: [],
+  };
+  let budget = MAX_LINKS_MESSAGE_BYTES - utf8Length(JSON.stringify(message));
+
+  const seen = new Set();
+  let cookieBytes = 0;
+  for (const cookie of page.cookies) {
+    const converted = toLdmCookie(cookie);
+    const key = converted && `${converted.domain}\t${converted.path}\t${converted.name}`;
+    if (!converted || seen.has(key)) {
+      continue;
+    }
+    const size = utf8Length(JSON.stringify(converted)) + 1;
+    if (message.cookies.length >= MAX_PAGE_LINK_COOKIES || cookieBytes + size > MAX_LINK_COOKIE_BYTES) {
+      break;
+    }
+    seen.add(key);
+    cookieBytes += size;
+    message.cookies.push(converted);
+  }
+  budget -= cookieBytes;
+
+  for (const link of page.links) {
+    if (message.links.length >= MAX_PAGE_LINKS) {
+      break;
+    }
+    if (!isDownloadAddress(link?.url) || !LINK_KINDS.has(link.kind)) {
+      continue;
+    }
+    const entry = { url: link.url, kind: link.kind };
+    const text = cleanPageText(link.text, MAX_LINK_TEXT_BYTES);
+    if (text) {
+      entry.text = text;
+    }
+    const fileName = cleanPageText(link.fileName, MAX_FILE_NAME_BYTES);
+    if (fileName) {
+      entry.fileName = fileName;
+    }
+    const size = utf8Length(JSON.stringify(entry)) + 1;
+    if (size > budget) {
+      break;
+    }
+    budget -= size;
+    message.links.push(entry);
+  }
+  return message.links.length > 0 ? message : null;
+}
+
+/** LDM's answer to a links message: true when the dialog opens, false when LDM declined it. */
+export function linksAccepted(message, id) {
+  return message !== null && typeof message === 'object' && message.v === PROTOCOL_VERSION &&
+    message.type === 'links-result' && message.id === id && message.accepted === true;
+}
+
+/** True when LDM says the Download All Links dialog of request `id` closed. */
+export function isLinksDone(message, id) {
+  return message !== null && typeof message === 'object' && message.v === PROTOCOL_VERSION &&
+    message.type === 'links-done' && message.id === id;
+}
+
+/**
+ * What was found out about some links, for the open Download All Links dialog.
+ * @param {{index: number, failed?: boolean, fileSize?: number, mimeType?: string,
+ *          fileName?: string}[]} items
+ */
+export function makeLinkInfo(items) {
+  const optionalText = (value, maxBytes) => {
+    const text = cleanPageText(value, maxBytes);
+    return text || undefined;
+  };
+  return {
+    v: PROTOCOL_VERSION,
+    id: nextId(),
+    type: 'link-info',
+    items: items.filter((item) => Number.isSafeInteger(item.index) && item.index >= 0 && item.index < MAX_PAGE_LINKS)
+      .map((item) => (item.failed ? { index: item.index, failed: true } : {
+        index: item.index,
+        fileSize: Number.isSafeInteger(item.fileSize) && item.fileSize >= 0 ? item.fileSize : undefined,
+        mimeType: optionalText(item.mimeType, MAX_MIME_TYPE_BYTES),
+        fileName: optionalText(item.fileName, MAX_FILE_NAME_BYTES),
+      })),
+  };
 }

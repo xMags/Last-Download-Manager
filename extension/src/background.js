@@ -2,14 +2,16 @@
 // toolbar button. Runs as a service worker in Chrome and Edge and as an event page in Firefox, so
 // it may be stopped when idle; everything that must survive lives in storage.local.
 
+import { AllLinks, LinksMessage } from './all-links.js';
 import { browserInfo } from './browser-info.js';
 import { DownloadCapture } from './capture.js';
 import { baseName } from './capture-rules.js';
 import { LdmConnection, State } from './connection.js';
+import { applyMenu, clickedAddress, menuItems, MenuId } from './context-menu.js';
 import { FormPosts } from './form-posts.js';
 import { downloadVerdict, keySettings, sendsForcedLinkToLdm } from './key-rules.js';
 import { cleanKeys, LinkClicks } from './link-clicks.js';
-import { isDownloadAddress } from './protocol.js';
+import { isDownloadAddress, menuSettings } from './protocol.js';
 import { applyToolbar, toolbarAppearance } from './toolbar.js';
 
 const api = globalThis.browser ?? globalThis.chrome;
@@ -30,8 +32,12 @@ const connection = new LdmConnection(api, {
     incognitoAllowed: await api.extension.isAllowedIncognitoAccess(),
   }),
   onConfig: (config) => {
+    const menuChanged = JSON.stringify(menuSettings(config)) !== JSON.stringify(menuSettings(rules));
     rules = config;
     api.storage.local.set({ config });
+    if (menuChanged) {
+      updateMenu();
+    }
   },
   onState: (state) => {
     render();
@@ -68,6 +74,49 @@ const capture = new DownloadCapture(api, connection, {
   canHideDownloadUi: typeof api.downloads.setUiOptions === 'function',
 });
 
+const allLinks = new AllLinks(api, connection, { userAgent: navigator.userAgent, tell });
+
+/** Shows `text` in the page the user is on; pages the browser protects show nothing. */
+function tell(tab, text) {
+  if (tab?.id === undefined) {
+    return;
+  }
+  api.scripting.executeScript({ target: { tabId: tab.id }, func: (message) => alert(message), args: [text] })
+    .catch(() => console.warn('LDM:', text));
+}
+
+// Menu updates run one after another, so a removeAll never races the creates of another update.
+let menuUpdate = Promise.resolve();
+function updateMenu() {
+  menuUpdate = menuUpdate
+    .then(() => applyMenu(api, menuItems(menuSettings(rules))))
+    .catch((error) => console.warn('LDM: could not update the right-click menu', error));
+}
+
+async function onMenuClick(info, tab) {
+  await settingsLoaded;
+  switch (info.menuItemId) {
+    case MenuId.Link:
+    case MenuId.Page: {
+      const href = clickedAddress(info);
+      if (tab?.incognito) {
+        tell(tab, LinksMessage.Private);
+      } else if (!isDownloadAddress(href)) {
+        tell(tab, 'Last Download Manager cannot download this address: it is only valid inside this page.');
+      } else if (!(await capture.sendLink(href, isDownloadAddress(info.pageUrl) ? info.pageUrl : undefined, { chosen: true }))) {
+        tell(tab, LinksMessage.NoContact);
+      }
+      break;
+    }
+    case MenuId.Selected:
+    case MenuId.All:
+      await allLinks.start(tab, info.frameId ?? 0, info.menuItemId === MenuId.Selected);
+      break;
+    default:
+      break;
+  }
+}
+
 function render() {
   applyToolbar(api, toolbarAppearance({ enabled, connection: connection.state })).catch((error) => {
     console.warn('LDM: could not update the toolbar button', error);
@@ -99,6 +148,10 @@ if (api.downloads.onDeterminingFilename) {
 const FORM_FILTER = { urls: ['<all_urls>'], types: ['main_frame', 'sub_frame'] };
 api.webRequest.onBeforeRequest.addListener((details) => forms.onBeforeRequest(details), FORM_FILTER, ['requestBody']);
 api.webRequest.onSendHeaders.addListener((details) => forms.onSendHeaders(details), FORM_FILTER, ['requestHeaders']);
+
+api.contextMenus.onClicked.addListener((info, tab) => {
+  onMenuClick(info, tab).catch((error) => console.warn('LDM: menu action failed', error));
+});
 
 api.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === RECONNECT_ALARM) {
@@ -177,5 +230,6 @@ api.runtime.onMessage.addListener((message, sender, reply) => {
 
 settingsLoaded.then(() => {
   render();
+  updateMenu();
   connection.connect();
 });

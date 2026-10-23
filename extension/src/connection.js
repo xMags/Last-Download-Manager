@@ -108,6 +108,76 @@ export class LdmConnection {
   }
 
   /**
+   * Like oneShot, but the connection stays open after LDM's answer, for messages that follow on
+   * it (Download All Links: link details towards LDM, links-done back).
+   * @param {{onMessage: function(object), onEnd: function()}} hooks for after the answer: each
+   *   later message from LDM, and the end of the connection (from either side, once)
+   * @returns {Promise<{answer: object, send: function(object), close: function()} | null>}
+   *   null when no answer came within `timeoutMs`; the connection is closed then
+   */
+  async conversation(message, timeoutMs, hooks) {
+    const hello = makeHello({ ...(await this.hooks.helloInfo()), startLdm: true });
+    return new Promise((resolve) => {
+      let port;
+      let answered = false;
+      let ended = false;
+      const end = () => {
+        if (ended) {
+          return;
+        }
+        ended = true;
+        clearTimeout(timer);
+        try {
+          port?.disconnect();
+        } catch {
+          // already gone
+        }
+        if (answered) {
+          hooks.onEnd();
+        } else {
+          resolve(null);
+        }
+      };
+      const timer = setTimeout(end, timeoutMs);
+      try {
+        port = this.api.runtime.connectNative(HOST_NAME);
+      } catch {
+        end();
+        return;
+      }
+      port.onMessage.addListener((received) => {
+        if (ended) {
+          return;
+        }
+        if (answered) {
+          hooks.onMessage(received);
+          return;
+        }
+        if (received?.id === message.id) {
+          answered = true;
+          clearTimeout(timer);
+          resolve({
+            answer: received,
+            send: (next) => {
+              if (!ended) {
+                try {
+                  port.postMessage(next);
+                } catch {
+                  end();
+                }
+              }
+            },
+            close: end,
+          });
+        }
+      });
+      port.onDisconnect.addListener(end);
+      port.postMessage(hello);
+      port.postMessage(message);
+    });
+  }
+
+  /**
    * Connects unless already connected or connecting. Resolves true once LDM sent its rules, false
    * when the connection ended first.
    * @param {{startLdm?: boolean}} options startLdm lets the host start LDM; only for real work.

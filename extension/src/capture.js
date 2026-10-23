@@ -86,11 +86,13 @@ export class DownloadCapture {
 
   /**
    * Gives a link clicked with the force keys straight to LDM (the browser does not load it).
+   * `chosen`: the user picked LDM for this link in the right-click menu, which works also while
+   * the toolbar button has integration turned off.
    * @returns {Promise<boolean>} true when LDM accepted it
    */
-  async sendLink(href, pageUrl) {
+  async sendLink(href, pageUrl, { chosen = false } = {}) {
     await this.options.ready;
-    if (!this.options.isEnabled() || !isCapturableAddress(href)) {
+    if ((!chosen && !this.options.isEnabled()) || !isCapturableAddress(href)) {
       return false;
     }
     const message = makeCapture({
