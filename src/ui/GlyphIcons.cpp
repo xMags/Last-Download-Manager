@@ -94,9 +94,12 @@ Canvas RenderGlyph(const Glyph& glyph, int size, bool grayed)
     return canvas;
 }
 
-// Icons are drawn this many times larger, then averaged down, for smooth edges on drawn shapes.
+// Drawn shapes are filled this many times larger, then averaged down, for smooth curves. Their
+// edges and stroke widths are first snapped to whole pixels of the final size, so straight lines
+// stay sharp instead of smearing across two pixels.
 constexpr int kSupersample = 4;
-constexpr COLORREF kDisabledGradientColor = RGB(0xC0, 0xC0, 0xC0);
+// Matches the toolbar's disabled label text, as the reference greys its disabled buttons.
+constexpr COLORREF kDisabledGradientColor = RGB(0xA0, 0xA0, 0xA0);
 // Stroke width of drawn shapes in the 32-unit design grid, close to the icon font's line weight.
 constexpr double kStroke = 1.4;
 
@@ -109,125 +112,147 @@ struct DesignRect {
     double radius;
 };
 
-void FillDesignRect(HDC dc, double unit, const DesignRect& r)
-{
-    const auto px = [unit](double v) { return static_cast<int>(std::lround(v * unit)); };
-    const int diameter = std::max(0, px(2 * r.radius));
-    ::RoundRect(dc, px(r.left), px(r.top), px(r.right), px(r.bottom), diameter, diameter);
-}
+// A rounded rectangle in whole pixels of the final icon size.
+struct PixelRect {
+    int left = 0;
+    int top = 0;
+    int right = 0;
+    int bottom = 0;
+    int radius = 0;
+};
 
-DesignRect Inset(const DesignRect& r, double by)
-{
-    return DesignRect{r.left + by, r.top + by, r.right - by, r.bottom - by, std::max(0.0, r.radius - by)};
-}
+// Lays shapes out on the final pixel grid and fills them on the supersampled canvas.
+class ShapePainter {
+public:
+    ShapePainter(HDC dc, int size) : dc_(dc), unit_(size / 32.0), stroke_(std::max(1, static_cast<int>(std::lround(kStroke * size / 32.0)))) {}
 
-// Outlines a set of parts: the union of the parts minus the same parts shrunk by the stroke.
-void OutlineParts(HDC dc, double unit, std::span<const DesignRect> parts)
-{
-    SelectObjectScope pen(dc, ::GetStockObject(NULL_PEN));
+    [[nodiscard]] int Stroke() const noexcept { return stroke_; }
+
+    [[nodiscard]] PixelRect Snap(const DesignRect& r) const
     {
-        SelectObjectScope white(dc, ::GetStockObject(WHITE_BRUSH));
-        for (const DesignRect& part : parts) {
-            FillDesignRect(dc, unit, part);
+        return PixelRect{Px(r.left), Px(r.top), Px(r.right), Px(r.bottom), Px(r.radius)};
+    }
+
+    // Shrinks each side by its own number of pixels.
+    [[nodiscard]] static PixelRect Inset(const PixelRect& r, int left, int top, int right, int bottom)
+    {
+        const int by = std::max(std::max(left, right), std::max(top, bottom));
+        return PixelRect{r.left + left, r.top + top, r.right - right, r.bottom - bottom, std::max(0, r.radius - by)};
+    }
+    [[nodiscard]] PixelRect Inset(const PixelRect& r) const { return Inset(r, stroke_, stroke_, stroke_, stroke_); }
+
+    void Fill(const PixelRect& r, bool white) const
+    {
+        SelectObjectScope pen(dc_, ::GetStockObject(NULL_PEN));
+        SelectObjectScope brush(dc_, ::GetStockObject(white ? WHITE_BRUSH : BLACK_BRUSH));
+        const int diameter = 2 * r.radius * kSupersample;
+        // RoundRect leaves out the right and bottom edges; +1 covers the whole last pixel row.
+        ::RoundRect(dc_, r.left * kSupersample, r.top * kSupersample, r.right * kSupersample + 1, r.bottom * kSupersample + 1,
+                    diameter, diameter);
+    }
+
+    void FillEllipse(const PixelRect& r, bool white) const
+    {
+        SelectObjectScope pen(dc_, ::GetStockObject(NULL_PEN));
+        SelectObjectScope brush(dc_, ::GetStockObject(white ? WHITE_BRUSH : BLACK_BRUSH));
+        ::Ellipse(dc_, r.left * kSupersample, r.top * kSupersample, r.right * kSupersample + 1, r.bottom * kSupersample + 1);
+    }
+
+    // Outlines parts: the union of the parts minus the same parts shrunk by the stroke.
+    void Outline(std::span<const PixelRect> parts) const
+    {
+        for (const PixelRect& part : parts) {
+            Fill(part, true);
+        }
+        for (const PixelRect& part : parts) {
+            Fill(Inset(part), false);
         }
     }
-    SelectObjectScope black(dc, ::GetStockObject(BLACK_BRUSH));
-    for (const DesignRect& part : parts) {
-        FillDesignRect(dc, unit, Inset(part, kStroke));
-    }
-}
 
-void FillParts(HDC dc, double unit, std::span<const DesignRect> parts)
-{
-    SelectObjectScope pen(dc, ::GetStockObject(NULL_PEN));
-    SelectObjectScope white(dc, ::GetStockObject(WHITE_BRUSH));
-    for (const DesignRect& part : parts) {
-        FillDesignRect(dc, unit, part);
-    }
-}
+private:
+    [[nodiscard]] int Px(double design) const { return static_cast<int>(std::lround(design * unit_)); }
+
+    HDC dc_;
+    double unit_;
+    int stroke_;
+};
 
 // A circle at the drawn-shape stroke; the icon font's ring is heavier than the reference's.
-void DrawRing(HDC dc, int size)
+void DrawRing(const ShapePainter& paint)
 {
-    const double unit = size / 32.0;
-    const auto px = [unit](double v) { return static_cast<int>(std::lround(v * unit)); };
-    SelectObjectScope pen(dc, ::GetStockObject(NULL_PEN));
-    {
-        SelectObjectScope white(dc, ::GetStockObject(WHITE_BRUSH));
-        ::Ellipse(dc, px(2.5), px(2.5), px(29.5), px(29.5));
-    }
-    SelectObjectScope black(dc, ::GetStockObject(BLACK_BRUSH));
-    ::Ellipse(dc, px(2.5 + kStroke), px(2.5 + kStroke), px(29.5 - kStroke), px(29.5 - kStroke));
+    const PixelRect outer = paint.Snap(DesignRect{2.5, 2.5, 29.5, 29.5, 0});
+    paint.FillEllipse(outer, true);
+    paint.FillEllipse(paint.Inset(outer), false);
 }
 
 // A hollow plus: the outline of two crossed bars.
-void DrawOutlinePlus(HDC dc, int size)
+void DrawOutlinePlus(const ShapePainter& paint)
 {
-    const DesignRect bars[] = {{12.0, 2.5, 20.0, 29.5, 1.5}, {2.5, 12.0, 29.5, 20.0, 1.5}};
-    OutlineParts(dc, size / 32.0, bars);
+    const PixelRect bars[] = {paint.Snap({12.0, 2.5, 20.0, 29.5, 1.5}), paint.Snap({2.5, 12.0, 29.5, 20.0, 1.5})};
+    paint.Outline(bars);
 }
 
 // A bin with a lid and a handle; `lines` adds the two strokes inside the bin.
-void DrawTrash(HDC dc, int size, bool lines)
+void DrawTrash(const ShapePainter& paint, bool lines)
 {
-    const double unit = size / 32.0;
-    const DesignRect handle[] = {{12.0, 3.0, 20.0, 9.0, 1.5}};
-    OutlineParts(dc, unit, handle);
-    const DesignRect body[] = {{7.5, 8.0, 24.5, 29.5, 3.0}};
-    OutlineParts(dc, unit, body);
-    const DesignRect lid[] = {{4.5, 7.5, 27.5, 7.5 + kStroke, kStroke / 2}};
-    FillParts(dc, unit, lid);
+    const PixelRect handle[] = {paint.Snap({12.0, 3.0, 20.0, 9.0, 1.5})};
+    paint.Outline(handle);
+    const PixelRect body[] = {paint.Snap({7.5, 8.0, 24.5, 29.5, 3.0})};
+    paint.Outline(body);
+    const int s = paint.Stroke();
+    PixelRect lid = paint.Snap({4.5, 7.5, 27.5, 7.5, 0});
+    lid.bottom = lid.top + s;
+    paint.Fill(lid, true);
     if (lines) {
-        const DesignRect strokes[] = {{12.6, 13.0, 12.6 + kStroke, 25.0, kStroke / 2}, {18.0, 13.0, 18.0 + kStroke, 25.0, kStroke / 2}};
-        FillParts(dc, unit, strokes);
+        for (const double x : {12.6, 18.0}) {
+            PixelRect line = paint.Snap({x, 13.0, x, 25.0, 0});
+            line.right = line.left + s;
+            line.radius = s / 2;
+            paint.Fill(line, true);
+        }
     }
 }
 
 // An original open palm: four fingers, a thumb on the right and the palm, outlined.
-void DrawRaisedHand(HDC dc, int size)
+void DrawRaisedHand(const ShapePainter& paint)
 {
-    const double unit = size / 32.0;
-    constexpr double stroke = kStroke;
-    constexpr double half = stroke / 2;
     constexpr double fingerWidth = 4.6;
     constexpr double left = 5.5;
     constexpr double fingerTops[4] = {5.0, 1.5, 2.5, 6.0};
     constexpr double fingerBottom = 18.0;
-    const DesignRect palm{left, 14.0, left + 4 * fingerWidth, 30.0, 6.5};
-    const DesignRect thumb{22.5, 14.5, 28.5, 25.0, 3.0};
-
-    SelectObjectScope pen(dc, ::GetStockObject(NULL_PEN));
-    {
-        SelectObjectScope white(dc, ::GetStockObject(WHITE_BRUSH));
-        for (int i = 0; i < 4; ++i) {
-            const double x = left + i * fingerWidth;
-            FillDesignRect(dc, unit, DesignRect{x, fingerTops[i], x + fingerWidth, fingerBottom, fingerWidth / 2});
-        }
-        FillDesignRect(dc, unit, palm);
-        FillDesignRect(dc, unit, thumb);
-    }
-    SelectObjectScope black(dc, ::GetStockObject(BLACK_BRUSH));
+    const int s = paint.Stroke();
+    PixelRect fingers[4];
     for (int i = 0; i < 4; ++i) {
         const double x = left + i * fingerWidth;
-        // Outer edges keep the full stroke; edges shared with the next finger get half of it, so the
-        // line between two fingers is as thick as the outline.
-        const double insetLeft = i == 0 ? stroke : half;
-        const double insetRight = i == 3 ? stroke : half;
-        FillDesignRect(dc, unit,
-                       DesignRect{x + insetLeft, fingerTops[i] + stroke, x + fingerWidth - insetRight, fingerBottom + stroke,
-                                  fingerWidth / 2 - stroke});
+        fingers[i] = paint.Snap({x, fingerTops[i], x + fingerWidth, fingerBottom, fingerWidth / 2});
     }
-    FillDesignRect(dc, unit, DesignRect{palm.left + stroke, palm.top + stroke, palm.right - stroke, palm.bottom - stroke,
-                                        palm.radius - stroke});
-    FillDesignRect(dc, unit, DesignRect{thumb.left + half, thumb.top + stroke, thumb.right - stroke, thumb.bottom - stroke,
-                                        thumb.radius - stroke});
+    // The first finger has a stroke on both sides; widen it by one stroke so every finger shows
+    // the same space inside.
+    fingers[0].left -= s;
+    PixelRect palm = paint.Snap({left, 14.0, left + 4 * fingerWidth, 30.0, 6.5});
+    palm.left -= s;
+    const PixelRect thumb = paint.Snap({22.5, 14.5, 28.5, 25.0, 3.0});
+    for (const PixelRect& finger : fingers) {
+        paint.Fill(finger, true);
+    }
+    paint.Fill(palm, true);
+    paint.Fill(thumb, true);
+    // Each finger keeps a stroke on its right only (and the first on its left too), so the line
+    // between two fingers is one stroke wide, like the outline. The inside runs down into the palm.
+    for (int i = 0; i < 4; ++i) {
+        PixelRect inside = ShapePainter::Inset(fingers[i], i == 0 ? s : 0, s, s, 0);
+        inside.bottom = palm.top + s + 1;
+        paint.Fill(inside, false);
+    }
+    paint.Fill(paint.Inset(palm), false);
+    paint.Fill(ShapePainter::Inset(thumb, 0, s, s, s), false);
 }
 
 void DrawLayer(HDC dc, int size, const IconLayer& layer)
 {
     LOGFONTW logFont{};
     logFont.lfHeight = -std::max(1, size * layer.scalePercent / 100);
-    logFont.lfQuality = ANTIALIASED_QUALITY;
+    logFont.lfQuality = ANTIALIASED_QUALITY;  // grayscale coverage; ClearType would tint the alpha
     logFont.lfCharSet = DEFAULT_CHARSET;
     wcsncpy_s(logFont.lfFaceName, IconFontFace(), _TRUNCATE);
     UniqueFont font(::CreateFontIndirectW(&logFont));
@@ -244,67 +269,93 @@ std::uint32_t Lerp(std::uint32_t from, std::uint32_t to, double t)
     return static_cast<std::uint32_t>(std::lround(from + (static_cast<double>(to) - from) * t));
 }
 
-Canvas RenderGradientIcon(const GradientIcon& icon, int size, bool grayed)
+// Fills `canvas` black, runs `draw` on it with white as the ink, and flushes GDI.
+template <typename Draw>
+void DrawMask(const Canvas& canvas, int size, Draw draw)
 {
-    Canvas result = CreateCanvas(size);
-    const int big = size * kSupersample;
-    Canvas mask = CreateCanvas(big);
-    if (!result.bitmap || result.pixels == nullptr || !mask.bitmap || mask.pixels == nullptr) {
-        return result;
-    }
     const HDC dc = ::CreateCompatibleDC(nullptr);
     {
-        SelectObjectScope selectBitmap(dc, mask.bitmap.get());
-        RECT all{0, 0, big, big};
+        SelectObjectScope selectBitmap(dc, canvas.bitmap.get());
+        RECT all{0, 0, size, size};
         ::FillRect(dc, &all, static_cast<HBRUSH>(::GetStockObject(BLACK_BRUSH)));
         ::SetBkMode(dc, TRANSPARENT);
         ::SetTextColor(dc, RGB(255, 255, 255));
-        switch (icon.shape) {
-        case IconShape::Glyphs:
-            break;
-        case IconShape::Ring:
-            DrawRing(dc, big);
-            break;
-        case IconShape::RaisedHand:
-            DrawRaisedHand(dc, big);
-            break;
-        case IconShape::OutlinePlus:
-            DrawOutlinePlus(dc, big);
-            break;
-        case IconShape::Trash:
-        case IconShape::EmptyTrash:
-            DrawTrash(dc, big, icon.shape == IconShape::Trash);
-            break;
-        }
-        for (const IconLayer& layer : icon.layers) {
-            if (layer.codepoint != 0) {
-                DrawLayer(dc, big, layer);
-            }
-        }
+        draw(dc);
     }
     ::DeleteDC(dc);
     ::GdiFlush();
+}
+
+Canvas RenderGradientIcon(const GradientIcon& icon, int size, bool grayed)
+{
+    Canvas result = CreateCanvas(size);
+    if (!result.bitmap || result.pixels == nullptr) {
+        return result;
+    }
+    // Glyphs at their real size keep the font's hinting; shapes are drawn supersampled.
+    Canvas glyphs = CreateCanvas(size);
+    if (!glyphs.bitmap || glyphs.pixels == nullptr) {
+        return result;
+    }
+    DrawMask(glyphs, size, [&icon, size](HDC dc) {
+        for (const IconLayer& layer : icon.layers) {
+            if (layer.codepoint != 0) {
+                DrawLayer(dc, size, layer);
+            }
+        }
+    });
+    const int big = size * kSupersample;
+    Canvas shapes;
+    if (icon.shape != IconShape::Glyphs) {
+        shapes = CreateCanvas(big);
+        if (!shapes.bitmap || shapes.pixels == nullptr) {
+            return result;
+        }
+        DrawMask(shapes, big, [&icon, size](HDC dc) {
+            const ShapePainter paint(dc, size);
+            switch (icon.shape) {
+            case IconShape::Glyphs:
+                break;
+            case IconShape::Ring:
+                DrawRing(paint);
+                break;
+            case IconShape::RaisedHand:
+                DrawRaisedHand(paint);
+                break;
+            case IconShape::OutlinePlus:
+                DrawOutlinePlus(paint);
+                break;
+            case IconShape::Trash:
+            case IconShape::EmptyTrash:
+                DrawTrash(paint, icon.shape == IconShape::Trash);
+                break;
+            }
+        });
+    }
 
     const COLORREF start = grayed ? kDisabledGradientColor : icon.start;
     const COLORREF end = grayed ? kDisabledGradientColor : icon.end;
     const double span = std::max(1, 2 * (size - 1));
     for (int y = 0; y < size; ++y) {
         for (int x = 0; x < size; ++x) {
-            std::uint32_t coverage = 0;
-            for (int sy = 0; sy < kSupersample; ++sy) {
-                const std::uint32_t* row =
-                    mask.pixels + static_cast<size_t>(y * kSupersample + sy) * static_cast<size_t>(big) + x * kSupersample;
-                for (int sx = 0; sx < kSupersample; ++sx) {
-                    coverage += row[sx] & 0xFF;  // white drawing: any channel is the coverage
+            const size_t index = static_cast<size_t>(y) * static_cast<size_t>(size) + x;
+            std::uint32_t alpha = glyphs.pixels[index] & 0xFF;  // white drawing: any channel is the coverage
+            if (shapes.pixels != nullptr) {
+                std::uint32_t coverage = 0;
+                for (int sy = 0; sy < kSupersample; ++sy) {
+                    const std::uint32_t* row =
+                        shapes.pixels + static_cast<size_t>(y * kSupersample + sy) * static_cast<size_t>(big) + x * kSupersample;
+                    for (int sx = 0; sx < kSupersample; ++sx) {
+                        coverage += row[sx] & 0xFF;
+                    }
                 }
+                alpha = std::max(alpha, coverage / (kSupersample * kSupersample));
             }
-            const std::uint32_t alpha = coverage / (kSupersample * kSupersample);
             const double t = (x + y) / span;
             const std::uint32_t red = Lerp(GetRValue(start), GetRValue(end), t);
             const std::uint32_t green = Lerp(GetGValue(start), GetGValue(end), t);
             const std::uint32_t blue = Lerp(GetBValue(start), GetBValue(end), t);
-            result.pixels[static_cast<size_t>(y) * static_cast<size_t>(size) + x] =
-                (alpha << 24) | ((red * alpha / 255) << 16) | ((green * alpha / 255) << 8) | (blue * alpha / 255);
+            result.pixels[index] = (alpha << 24) | ((red * alpha / 255) << 16) | ((green * alpha / 255) << 8) | (blue * alpha / 255);
         }
     }
     return result;
