@@ -56,8 +56,14 @@ const capture = new DownloadCapture(api, connection, {
   isEnabled: () => enabled,
   rules: () => rules,
   postFor: (url) => forms.postFor(url),
-  keyVerdict: ({ url, finalUrl, referrer, mimeType, fileName }) => downloadVerdict(
-    keySettings(rules), clicks.clickKeysFor({ url, finalUrl, referrer }), clicks.heldKeys(), mimeType, fileName),
+  keyVerdict: ({ url, finalUrl, referrer, mimeType, fileName }) => {
+    const clickKeys = clicks.clickKeysFor({ url, finalUrl, referrer });
+    const heldKeys = clicks.heldKeys();
+    const verdict = downloadVerdict(keySettings(rules), clickKeys, heldKeys, mimeType, fileName);
+    // Shown in the extension's own console only; helps answer "why did LDM (not) take this?".
+    console.info('LDM: download', url, { verdict, clickKeys, heldKeys });
+    return verdict;
+  },
   userAgent: navigator.userAgent,
   canHideDownloadUi: typeof api.downloads.setUiOptions === 'function',
 });
