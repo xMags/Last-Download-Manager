@@ -173,6 +173,9 @@ void MainWindow::OnCreate()
     ApplySnapshot(snapshot_);
     services_.bridge->Attach(window_);
     ::AddClipboardFormatListener(window_);
+    // Links dropped anywhere on the main window are added like drops on the drop target.
+    (void)linkDrop_.Register(window_, LinkDropTarget::Callbacks{
+                                          [this](std::vector<std::string> urls) { QueueDroppedUrls(std::move(urls)); }, {}});
 }
 
 void MainWindow::CreateFonts()
@@ -242,13 +245,7 @@ void MainWindow::UpdateDropTarget(const model::Settings& settings)
     DropTargetWindow::Callbacks callbacks;
     // Dropping runs inside the source program's drag loop: queue the addresses and return at once,
     // so a dialog never holds the browser's drag and drop hostage.
-    callbacks.dropped = [this](std::vector<std::string> urls) {
-        {
-            const std::lock_guard lock(externalMutex_);
-            externalInput_.emplace_back(std::move(urls));
-        }
-        ::PostMessageW(window_, kExternalInputMessage, 0, 0);
-    };
+    callbacks.dropped = [this](std::vector<std::string> urls) { QueueDroppedUrls(std::move(urls)); };
     callbacks.hideRequested = [this] {
         services_.commands->Post(core::ModifySettingsCommand{[](model::Settings& s) { s.showDropTarget = false; }});
     };
@@ -257,6 +254,17 @@ void MainWindow::UpdateDropTarget(const model::Settings& settings)
         services_.commands->Post(core::ModifySettingsCommand{[position](model::Settings& s) { s.dropTargetPosition = position; }});
     };
     dropTarget_.Create(settings.dropTargetPosition, *theme_, std::move(callbacks));
+}
+
+void MainWindow::QueueDroppedUrls(std::vector<std::string> urls)
+{
+    // Dropping runs inside the source program's drag loop: queue the addresses and return at once,
+    // so a dialog never holds the browser's drag and drop hostage.
+    {
+        const std::lock_guard lock(externalMutex_);
+        externalInput_.emplace_back(std::move(urls));
+    }
+    ::PostMessageW(window_, kExternalInputMessage, 0, 0);
 }
 
 void MainWindow::PostLaunchRequest(core::LaunchRequest request)
@@ -665,6 +673,7 @@ LRESULT MainWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
     case WM_DESTROY:
         ::RemoveClipboardFormatListener(window_);
         ::KillTimer(window_, kExternalInputRetryTimer);
+        linkDrop_.Revoke();
         dropTarget_.Destroy();
         services_.bridge->Attach(nullptr);
         ::PostQuitMessage(0);

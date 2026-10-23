@@ -1,10 +1,10 @@
 #pragma once
 
 #include "ui/Handles.h"
+#include "ui/LinkDropTarget.h"
 #include "ui/Theme.h"
 
 #include <windows.h>
-#include <oleidl.h>
 
 #include <functional>
 #include <string>
@@ -35,8 +35,6 @@ public:
     [[nodiscard]] bool IsOpen() const noexcept { return window_ != nullptr; }
 
 private:
-    class DropHandler;
-
     static LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam);
     LRESULT HandleMessage(UINT message, WPARAM wParam, LPARAM lParam);
     void Paint();
@@ -44,12 +42,9 @@ private:
     HWND window_ = nullptr;
     const Theme* theme_ = nullptr;
     Callbacks callbacks_;
-    DropHandler* handler_ = nullptr;  // COM object; one reference held by this window while registered
+    LinkDropTarget drop_;
     UniqueIcon icon_;
     bool hovering_ = false;
 };
-
-// Addresses in dragged data: the browser's URL format first, then plain text (checklist W-06).
-[[nodiscard]] std::vector<std::string> UrlsFromDataObject(IDataObject* data);
 
 }  // namespace ldm::ui

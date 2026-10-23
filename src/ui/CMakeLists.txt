@@ -34,6 +34,8 @@ add_library(ldm_ui STATIC
     Handles.h
     History.cpp
     History.h
+    LinkDropTarget.cpp
+    LinkDropTarget.h
     ImportExportFlow.cpp
     ImportExportFlow.h
     ListModel.cpp
