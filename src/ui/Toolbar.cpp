@@ -16,20 +16,28 @@ namespace {
 
 struct ButtonInfo {
     int command;
-    Glyph glyph;
+    GradientIcon icon;
     const wchar_t* label;
 };
 
-// LDM's buttons in the reference's default order (gap G-1). Scheduler and queue buttons join in M4, when
-// those features exist; "Tell a Friend" is excluded by the checklist.
+// Icon font codepoints used to build the toolbar icons.
+constexpr wchar_t kArrowDown = 0xE74B;
+constexpr wchar_t kRoundedSquare = 0xE71A;
+constexpr wchar_t kCheck = 0xE73E;
+constexpr wchar_t kGear = 0xE713;
+
+// LDM's buttons in the reference's default order (gap G-1) and the reference's look: the same symbols as thin
+// gradient outlines. The artwork is LDM's own, built from the Windows icon font. Scheduler and
+// queue buttons join in M4, when those features exist; "Tell a Friend" is excluded by the checklist.
 constexpr std::array<ButtonInfo, 7> kButtons{{
-    {ID_TASKS_ADD_URL, {0xE710, RGB(0x1E, 0x88, 0xE5)}, L"Add URL"},
-    {ID_FILE_DOWNLOAD_NOW, {0xE768, RGB(0x2E, 0xA0, 0x43)}, L"Resume"},
-    {ID_FILE_STOP, {0xE769, RGB(0xF0, 0x8C, 0x00)}, L"Stop"},
-    {ID_DOWNLOADS_STOP_ALL, {0xE71A, RGB(0xE5, 0x39, 0x35)}, L"Stop All"},
-    {ID_FILE_REMOVE, {0xE74D, RGB(0xD3, 0x2F, 0x2F)}, L"Delete"},
-    {ID_DOWNLOADS_DELETE_COMPLETED, {0xE930, RGB(0x8E, 0x44, 0xAD)}, L"Delete Completed"},
-    {ID_DOWNLOADS_OPTIONS, {0xE713, RGB(0x60, 0x7D, 0x8B)}, L"Options"},
+    {ID_TASKS_ADD_URL, {{}, RGB(0x4C, 0xB8, 0x6E), RGB(0x2F, 0x8C, 0xC4), IconShape::OutlinePlus}, L"Add URL"},
+    {ID_FILE_DOWNLOAD_NOW, {{{{kArrowDown, 46}}}, RGB(0x34, 0xA8, 0xE0), RGB(0x3A, 0x6F, 0xD8), IconShape::Ring}, L"Resume"},
+    {ID_FILE_STOP, {{{{kRoundedSquare, 34}}}, RGB(0xF5, 0xA6, 0x23), RGB(0xE0, 0x5A, 0x3A), IconShape::Ring}, L"Stop"},
+    {ID_DOWNLOADS_STOP_ALL, {{}, RGB(0xF0, 0x6A, 0x5A), RGB(0xC2, 0x3F, 0x8E), IconShape::RaisedHand}, L"Stop All"},
+    {ID_FILE_REMOVE, {{}, RGB(0xE8, 0x50, 0x60), RGB(0xA8, 0x40, 0xB8), IconShape::Trash}, L"Delete"},
+    {ID_DOWNLOADS_DELETE_COMPLETED, {{{{kCheck, 40, 0, 9}}}, RGB(0xE8, 0x3E, 0x9A), RGB(0x8A, 0x4F, 0xD8), IconShape::EmptyTrash},
+     L"Delete Completed"},
+    {ID_DOWNLOADS_OPTIONS, {{{{kGear, 86}}}, RGB(0x3F, 0x7A, 0xE8), RGB(0x9B, 0x51, 0xE0)}, L"Options"},
 }};
 
 std::vector<int> DefaultOrder()
@@ -102,12 +110,12 @@ void Toolbar::ApplyImages(const Theme& theme)
 {
     const UINT dpi = DpiOf(window_);
     const int size = Scale(large_ ? 32 : 16, dpi);
-    std::vector<Glyph> glyphs;
+    std::vector<GradientIcon> icons;
     for (const ButtonInfo& button : kButtons) {
-        glyphs.push_back(button.glyph);
+        icons.push_back(button.icon);
     }
-    images_ = CreateGlyphImageList(glyphs, size);
-    disabledImages_ = CreateGlyphImageList(glyphs, size, true);
+    images_ = CreateGradientImageList(icons, size, false);
+    disabledImages_ = CreateGradientImageList(icons, size, true);
     ::SendMessageW(window_, TB_SETIMAGELIST, 0, reinterpret_cast<LPARAM>(images_.get()));
     ::SendMessageW(window_, TB_SETDISABLEDIMAGELIST, 0, reinterpret_cast<LPARAM>(disabledImages_.get()));
     textColor_ = theme.Colors().text;
