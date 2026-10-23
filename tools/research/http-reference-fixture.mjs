@@ -245,6 +245,17 @@ export function createReferenceFixture({
         stream(response, body, 0, body.length - 1, id);
         return;
       }
+      case '/cookie.bin': {
+        // Browser capture: every connection must carry the session cookie, and a cookie that
+        // belongs to another site must never arrive.
+        const cookie = request.headers.cookie ?? '';
+        if (!cookie.split(/;\s*/).includes('sid=abc') || cookie.includes('leak=')) {
+          finish(403, { 'Content-Type': 'text/plain' }, 'cookie required');
+          return;
+        }
+        serveBody(request, response, id, data, { etag: strong, lastModified: modified, name: 'cookie.bin' });
+        return;
+      }
       case '/auth/basic.bin': {
         const expected = `Basic ${Buffer.from(`${USER}:${PASSWORD}`).toString('base64')}`;
         if (request.headers.authorization !== expected) {

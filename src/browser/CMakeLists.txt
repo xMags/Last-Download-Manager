@@ -6,5 +6,5 @@ add_library(ldm_browser STATIC
     Protocol.cpp
     Protocol.h)
 target_link_libraries(ldm_browser
-    PUBLIC ldm_base
+    PUBLIC ldm_base ldm_model
     PRIVATE nlohmann_json::nlohmann_json)

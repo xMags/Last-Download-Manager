@@ -1,10 +1,12 @@
 #include "browser/HostManifest.h"
 #include "browser/Protocol.h"
+#include "model/Cookie.h"
 
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -79,6 +81,92 @@ TEST(BrowserProtocol, HelloSaysWhetherToStartLdm)
     EXPECT_FALSE(ldm::browser::HelloAsksToStartLdm(R"({"v":1,"id":"7","type":"hello","startLdm":true})"));
     EXPECT_FALSE(ldm::browser::ParseMessage(
         R"({"v":1,"id":"7","type":"hello","browser":"Chrome","browserVersion":"1","extensionVersion":"1","incognitoAllowed":false})"));
+}
+
+std::string CaptureJson(const std::string& fields)
+{
+    return R"({"v":1,"id":"c1","type":"capture","userAgent":"Mozilla/5.0",)" + fields + "}";
+}
+
+constexpr char kCookie[] =
+    R"({"domain":"files.test","hostOnly":true,"path":"/","secure":true,"expires":0,"name":"sid","value":"abc"})";
+
+TEST(BrowserProtocol, ParsesCapture)
+{
+    const auto parsed = ldm::browser::ParseMessage(CaptureJson(
+        R"("url":"https://files.test/a.zip","finalUrl":"https://cdn.test/a.zip","referrer":"https://files.test/page",)"
+        R"("fileName":"a.zip","fileSize":1234,"mimeType":"application/zip","cookies":[)" + std::string(kCookie) + "]"));
+    ASSERT_TRUE(parsed);
+    EXPECT_EQ(parsed->id, "c1");
+    const auto& capture = std::get<ldm::browser::Capture>(parsed->message);
+    EXPECT_EQ(capture.url, "https://files.test/a.zip");
+    EXPECT_EQ(capture.finalUrl, "https://cdn.test/a.zip");
+    EXPECT_EQ(capture.referrer, "https://files.test/page");
+    EXPECT_EQ(capture.fileName, "a.zip");
+    EXPECT_EQ(capture.fileSize, 1234);
+    EXPECT_EQ(capture.userAgent, "Mozilla/5.0");
+    ASSERT_EQ(capture.cookies.size(), 1u);
+    EXPECT_EQ(capture.cookies[0].name, "sid");
+    EXPECT_TRUE(capture.cookies[0].secure);
+}
+
+TEST(BrowserProtocol, CaptureNeedsOnlyAddressUserAgentAndCookies)
+{
+    const auto parsed = ldm::browser::ParseMessage(CaptureJson(R"("url":"HTTP://files.test/a.zip","cookies":[])"));
+    ASSERT_TRUE(parsed);
+    const auto& capture = std::get<ldm::browser::Capture>(parsed->message);
+    EXPECT_FALSE(capture.finalUrl);
+    EXPECT_FALSE(capture.fileSize);
+}
+
+TEST(BrowserProtocol, RejectsInvalidCaptures)
+{
+    // Addresses LDM cannot download, or that smuggle control characters.
+    EXPECT_FALSE(ldm::browser::ParseMessage(CaptureJson(R"("url":"file:///C:/x.zip","cookies":[])")));
+    EXPECT_FALSE(ldm::browser::ParseMessage(CaptureJson(R"("url":"javascript:alert","cookies":[])")));
+    EXPECT_FALSE(ldm::browser::ParseMessage(CaptureJson(R"("url":"https://a.test/x\nHost: b","cookies":[])")));
+    EXPECT_FALSE(ldm::browser::ParseMessage(CaptureJson(R"("url":"https://a.test/x","referrer":"data:x","cookies":[])")));
+    // Sizes and names.
+    EXPECT_FALSE(ldm::browser::ParseMessage(CaptureJson(R"("url":"https://a.test/x","fileSize":-1,"cookies":[])")));
+    EXPECT_FALSE(ldm::browser::ParseMessage(CaptureJson(R"("url":"https://a.test/x","fileName":"a\tb","cookies":[])")));
+    // Cookies are required and each must be well formed.
+    EXPECT_FALSE(ldm::browser::ParseMessage(CaptureJson(R"("url":"https://a.test/x")")));
+    EXPECT_FALSE(ldm::browser::ParseMessage(CaptureJson(
+        R"("url":"https://a.test/x","cookies":[{"domain":"a.test","hostOnly":true,"path":"/","secure":false,"expires":0,"name":"n","value":"a\tb"}])")));
+    EXPECT_FALSE(ldm::browser::ParseMessage(CaptureJson(
+        R"("url":"https://a.test/x","cookies":[{"domain":".a.test","hostOnly":false,"path":"/","secure":false,"expires":0,"name":"n","value":"v"}])")));
+    EXPECT_FALSE(ldm::browser::ParseMessage(CaptureJson(
+        R"("url":"https://a.test/x","cookies":[{"domain":"a.test","hostOnly":true,"path":"x","secure":false,"expires":0,"name":"n","value":"v"}])")));
+    // No user agent.
+    EXPECT_FALSE(ldm::browser::ParseMessage(R"({"v":1,"id":"c","type":"capture","url":"https://a.test/x","cookies":[]})"));
+}
+
+TEST(BrowserProtocol, EncodesCaptureResult)
+{
+    const auto json = nlohmann::json::parse(ldm::browser::EncodeCaptureResult("c1", true));
+    EXPECT_EQ(json["type"], "capture-result");
+    EXPECT_EQ(json["id"], "c1");
+    EXPECT_EQ(json["accepted"], true);
+}
+
+TEST(BrowserCookies, NetscapeLinesMarkHostOnlyAndSecure)
+{
+    const ldm::model::Cookie hostOnly{"a.test", true, "/", false, 0, "n", "v"};
+    const ldm::model::Cookie domain{"a.test", false, "/dl", true, 1'900'000'000, "n", "v"};
+    EXPECT_EQ(ldm::model::ToNetscapeLine(hostOnly), "a.test\tFALSE\t/\tFALSE\t0\tn\tv");
+    EXPECT_EQ(ldm::model::ToNetscapeLine(domain), ".a.test\tTRUE\t/dl\tTRUE\t1900000000\tn\tv");
+    const std::vector<ldm::model::Cookie> both{hostOnly, domain};
+    EXPECT_EQ(ldm::model::CookieLines(ldm::model::CookiesToText(both)).size(), 2u);
+}
+
+TEST(BrowserCookies, ValidityRules)
+{
+    EXPECT_TRUE(ldm::model::IsValidCookie({"a.test", true, "/", false, 0, "n", ""}));
+    EXPECT_FALSE(ldm::model::IsValidCookie({"", true, "/", false, 0, "n", "v"}));
+    EXPECT_FALSE(ldm::model::IsValidCookie({"a test", true, "/", false, 0, "n", "v"}));
+    EXPECT_FALSE(ldm::model::IsValidCookie({"a.test", true, "/", false, 0, "", "v"}));
+    EXPECT_FALSE(ldm::model::IsValidCookie({"a.test", true, "/", false, -1, "n", "v"}));
+    EXPECT_FALSE(ldm::model::IsValidCookie({"a.test", true, "/", false, 0, "n", "v\r"}));
 }
 
 TEST(BrowserProtocol, RejectsUnknownTypes)

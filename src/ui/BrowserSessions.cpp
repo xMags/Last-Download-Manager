@@ -1,5 +1,7 @@
 #include "ui/BrowserSessions.h"
 
+#include "core/Url.h"
+
 #include <cctype>
 #include <sstream>
 #include <utility>
@@ -13,8 +15,9 @@ constexpr char kPushId[] = "push";
 
 }  // namespace
 
-BrowserSessions::BrowserSessions(BrowserLink& link, std::string appVersion)
-    : link_(link), appVersion_(std::move(appVersion))
+BrowserSessions::BrowserSessions(BrowserLink& link, std::string appVersion,
+                                 std::function<void(browser::Capture)> onCapture)
+    : link_(link), appVersion_(std::move(appVersion)), onCapture_(std::move(onCapture))
 {
 }
 
@@ -36,6 +39,16 @@ void BrowserSessions::OnEvent(BrowserEvent event, const model::Settings& setting
     if (auto* hello = std::get_if<browser::Hello>(&parsed.message)) {
         session->second.hello = std::move(*hello);
         link_.Send(event.connection, browser::EncodeConfig(MakeConfig(settings), parsed.id));
+        return;
+    }
+    if (auto* capture = std::get_if<browser::Capture>(&parsed.message)) {
+        // Accepting means LDM owns the download from here: the extension cancels the browser's
+        // copy. Anything LDM could not download is refused, so the browser keeps it.
+        const bool accepted = session->second.hello.has_value() && core::ParseUrl(capture->url).has_value();
+        link_.Send(event.connection, browser::EncodeCaptureResult(parsed.id, accepted));
+        if (accepted && onCapture_) {
+            onCapture_(std::move(*capture));
+        }
     }
 }
 

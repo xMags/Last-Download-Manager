@@ -1,5 +1,7 @@
 #pragma once
 
+#include "model/Cookie.h"
+
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -42,7 +44,20 @@ struct Hello {
     bool startLdm = false;
 };
 
-using Message = std::variant<HostInfo, Hello>;
+// A download the extension took over from the browser (M3 design section 5). The browser's own
+// download is paused until LDM answers with a capture-result.
+struct Capture {
+    std::string url;  // http, https, ftp or ftps
+    std::optional<std::string> finalUrl;  // after the browser followed redirects
+    std::optional<std::string> referrer;  // the page the download started from
+    std::optional<std::string> fileName;  // the name the browser chose, possibly from Content-Disposition
+    std::optional<std::int64_t> fileSize;
+    std::optional<std::string> mimeType;
+    std::string userAgent;
+    std::vector<model::Cookie> cookies;  // what the browser would send to url and finalUrl
+};
+
+using Message = std::variant<HostInfo, Hello, Capture>;
 
 struct ParsedMessage {
     std::string id;  // echoed in answers
@@ -73,5 +88,9 @@ struct Config {
 };
 
 [[nodiscard]] std::string EncodeConfig(const Config& config, std::string_view replyTo);
+
+// The answer to a capture: accepted means LDM has taken the download over and the extension
+// cancels the browser's copy; otherwise the browser continues it.
+[[nodiscard]] std::string EncodeCaptureResult(std::string_view replyTo, bool accepted);
 
 }  // namespace ldm::browser

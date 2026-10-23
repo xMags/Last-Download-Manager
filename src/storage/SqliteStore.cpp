@@ -22,7 +22,7 @@ constexpr std::string_view kSelectDownloads = R"sql(
 SELECT id, public_id, url, final_url, referer, parent_page, user_agent, file_name, save_dir,
        partial_path, category_id, description, status, epoch, total_size, resumable, etag,
        last_modified, content_type, max_connections, speed_limit_bps, login_user, login_secret,
-       completion_action, created_at, last_try_at, completed_at, last_result, sort_order
+       completion_action, created_at, last_try_at, completed_at, last_result, sort_order, cookie_secret
 FROM downloads ORDER BY sort_order, id
 )sql";
 
@@ -31,9 +31,9 @@ INSERT INTO downloads (
   public_id, url, final_url, referer, parent_page, user_agent, file_name, save_dir,
   partial_path, category_id, description, status, epoch, total_size, resumable, etag,
   last_modified, content_type, max_connections, speed_limit_bps, login_user, login_secret,
-  completion_action, created_at, last_try_at, completed_at, last_result, sort_order)
+  completion_action, created_at, last_try_at, completed_at, last_result, sort_order, cookie_secret)
 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20,
-        ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28)
+        ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29)
 )sql";
 
 constexpr std::string_view kUpdateDownload = R"sql(
@@ -43,8 +43,8 @@ UPDATE downloads SET
   status = ?12, epoch = ?13, total_size = ?14, resumable = ?15, etag = ?16, last_modified = ?17,
   content_type = ?18, max_connections = ?19, speed_limit_bps = ?20, login_user = ?21,
   login_secret = ?22, completion_action = ?23, created_at = ?24, last_try_at = ?25,
-  completed_at = ?26, last_result = ?27, sort_order = ?28
-WHERE id = ?29
+  completed_at = ?26, last_result = ?27, sort_order = ?28, cookie_secret = ?29
+WHERE id = ?30
 )sql";
 
 base::Error CorruptRow(std::string_view what)
@@ -67,7 +67,7 @@ std::optional<std::int64_t> ToOptionalBool(const std::optional<bool>& value)
     return value.has_value() ? std::optional<std::int64_t>(*value ? 1 : 0) : std::nullopt;
 }
 
-// Binds parameters ?1..?28 in the column order of kInsertDownload / kUpdateDownload.
+// Binds parameters ?1..?29 in the column order of kInsertDownload / kUpdateDownload.
 void BindDownloadColumns(Statement& statement, const model::Download& d)
 {
     statement.Bind(1, d.publicId)
@@ -102,6 +102,11 @@ void BindDownloadColumns(Statement& statement, const model::Download& d)
         .Bind(26, d.completedAtMs)
         .Bind(27, d.lastResult)
         .Bind(28, d.sortOrder);
+    if (d.cookieSecret.empty()) {
+        statement.BindNull(29);
+    } else {
+        statement.Bind(29, std::span<const std::uint8_t>(d.cookieSecret));
+    }
 }
 
 base::Result<model::Download> ReadDownload(const Statement& row)
@@ -150,6 +155,7 @@ base::Result<model::Download> ReadDownload(const Statement& row)
     d.completedAtMs = row.OptionalInt64(26);
     d.lastResult = row.OptionalText(27);
     d.sortOrder = row.Int64(28);
+    d.cookieSecret = row.Blob(29);
     return d;
 }
 
@@ -302,7 +308,7 @@ base::Status SqliteStore::SaveDownload(const model::Download& download)
         return update.GetError();
     }
     BindDownloadColumns(update.Value(), download);
-    update.Value().Bind(29, download.id.value);
+    update.Value().Bind(30, download.id.value);
     base::Status updated = update.Value().Run();
     if (!updated) {
         return updated;

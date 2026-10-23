@@ -5,9 +5,11 @@
 #include "core/FailureText.h"
 #include "core/FileNames.h"
 #include "core/Matching.h"
+#include "model/Cookie.h"
 
 #include <algorithm>
 #include <array>
+#include <iterator>
 #include <type_traits>
 #include <utility>
 
@@ -171,6 +173,7 @@ void Coordinator::RecoverAfterRestart(Entry& entry)
         if (partialGone && finalSize && d.totalSize && *finalSize == *d.totalSize) {
             d.status = DownloadStatus::Completed;
             d.partialPath.reset();
+            d.cookieSecret.clear();  // design decision 3: browser cookies are kept only until completion
             if (!d.completedAtMs) {
                 d.completedAtMs = ports_.clock->NowUnixMs();
             }
@@ -367,6 +370,7 @@ void Coordinator::Add(const AddDownloadCommand& command)
     download.url = address;
     download.referer = command.referer;
     download.parentPage = command.parentPage;
+    download.userAgent = command.userAgent;
     download.fileName = fileName;
     download.saveDir = saveDir;
     download.categoryId = categoryId;
@@ -384,6 +388,16 @@ void Coordinator::Add(const AddDownloadCommand& command)
             }
             download.loginSecret = std::move(secret).Value();
         }
+    }
+    std::vector<model::Cookie> cookies;
+    std::copy_if(command.cookies.begin(), command.cookies.end(), std::back_inserter(cookies), model::IsValidCookie);
+    if (!cookies.empty()) {
+        auto secret = ports_.secrets->Protect(model::CookiesToText(cookies));
+        if (!secret) {
+            fail("The browser cookies could not be protected: " + secret.GetError().message);
+            return;
+        }
+        download.cookieSecret = std::move(secret).Value();
     }
 
     auto inserted = ports_.store->InsertDownload(download);
@@ -1019,6 +1033,7 @@ void Coordinator::OnFinalized(Entry& entry, const FinalizeFinished& finalized)
     d.status = DownloadStatus::Completed;
     d.completedAtMs = ports_.clock->NowUnixMs();
     d.partialPath.reset();
+    d.cookieSecret.clear();  // design decision 3: browser cookies are kept only until completion
     entry.replaceFinalFile = false;
     entry.finalizeAttempts = 0;
     entry.automaticRestarts = 0;
@@ -1129,6 +1144,11 @@ TransferRequest Coordinator::BuildRequest(Entry& entry)
             if (auto password = ports_.secrets->Unprotect(login->secret)) {
                 request.credentials = TransferCredentials{login->username, std::move(password).Value()};
             }
+        }
+    }
+    if (!d.cookieSecret.empty()) {
+        if (auto cookies = ports_.secrets->Unprotect(d.cookieSecret)) {
+            request.cookieLines = model::CookieLines(cookies.Value());
         }
     }
     request.ftpActiveMode = !settings_.ftpPassive;
@@ -1516,6 +1536,7 @@ void Coordinator::PublishSnapshot()
             auto view = std::make_shared<DownloadView>();
             view->download = entry->download;
             view->download.loginSecret.clear();
+            view->download.cookieSecret.clear();
             view->hasPassword = !entry->download.loginSecret.empty();
             view->awaitingConfirmation = entry->awaitingConfirmation;
             view->bytesPerSecond = entry->bytesPerSecond;

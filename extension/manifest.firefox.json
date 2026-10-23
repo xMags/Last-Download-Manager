@@ -22,12 +22,19 @@
     "default_title": "Last Download Manager"
   },
   "background": {
-    "scripts": ["src/background.js"],
+    "scripts": [
+      "src/background.js"
+    ],
     "type": "module"
   },
   "permissions": [
     "alarms",
+    "cookies",
+    "downloads",
     "nativeMessaging",
     "storage"
+  ],
+  "host_permissions": [
+    "<all_urls>"
   ]
 }

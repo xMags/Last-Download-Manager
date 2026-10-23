@@ -1,0 +1,17 @@
+[
+  { "patterns": ["zip"], "name": "a.zip", "capture": true },
+  { "patterns": ["zip"], "name": "A.ZIP", "capture": true },
+  { "patterns": ["gz"], "name": "backup.tar.gz", "capture": true },
+  { "patterns": ["tar"], "name": "backup.tar.gz", "capture": false },
+  { "patterns": ["r0*"], "name": "archive.r01", "capture": true },
+  { "patterns": ["r0*"], "name": "archive.r1", "capture": false },
+  { "patterns": ["zi*"], "name": "a.ZiP", "capture": true },
+  { "patterns": ["*"], "name": "a.anything", "capture": true },
+  { "patterns": [".exe"], "name": "setup.exe", "capture": true },
+  { "patterns": ["zip", "exe"], "name": "setup.exe", "capture": true },
+  { "patterns": ["zip"], "name": "readme", "capture": false },
+  { "patterns": ["zip"], "name": ".zip", "capture": false },
+  { "patterns": ["zip"], "name": "file.", "capture": false },
+  { "patterns": [], "name": "a.zip", "capture": false },
+  { "patterns": ["pdf"], "name": "report.pdf.html", "capture": false }
+]

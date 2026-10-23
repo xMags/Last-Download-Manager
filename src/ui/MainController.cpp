@@ -311,6 +311,15 @@ void MainController::OnLaunchRequest(const core::LaunchRequest& request)
     adds_.AddAddress(ExternalAdd{*request.url, request.saveDir, request.fileName, request.silent, request.queueOnly});
 }
 
+void MainController::OnBrowserCapture(browser::Capture capture)
+{
+    ExternalAdd add;
+    add.url = std::move(capture.url);
+    add.fileName = std::move(capture.fileName);
+    add.browser = BrowserRequest{std::move(capture.referrer), std::move(capture.userAgent), std::move(capture.cookies)};
+    adds_.AddAddress(add);
+}
+
 void MainController::OnClipboardChanged()
 {
     // A disabled owner means a modal dialog is open: never stack an offer on top of it.

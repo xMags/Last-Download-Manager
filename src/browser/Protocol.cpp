@@ -3,6 +3,8 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <cctype>
+#include <iterator>
 
 namespace ldm::browser {
 
@@ -15,6 +17,11 @@ constexpr size_t kMaxVersionChars = 32;
 constexpr size_t kChromiumIdChars = 32;
 constexpr size_t kMaxFirefoxIdChars = 80;
 constexpr std::wstring_view kChromiumOriginPrefix = L"chrome-extension://";
+constexpr size_t kMaxUrl = 16 * 1024;
+constexpr size_t kMaxFileName = 1024;
+constexpr size_t kMaxUserAgent = 1024;
+constexpr size_t kMaxMimeType = 256;
+constexpr size_t kMaxCookies = 300;
 
 bool IsPrintableAscii(std::string_view text)
 {
@@ -114,6 +121,115 @@ std::optional<Hello> ParseHello(const nlohmann::json& object)
                  *startLdm};
 }
 
+bool HasNoControlCharacters(std::string_view text)
+{
+    return std::none_of(text.begin(), text.end(), [](char c) { return static_cast<unsigned char>(c) < 0x20 || c == 0x7F; });
+}
+
+// An address field: a non-empty string without spaces or control characters, of a scheme LDM
+// downloads. The full parse happens where the address is used.
+bool IsDownloadAddress(const std::string& url)
+{
+    constexpr std::string_view kSchemes[] = {"http://", "https://", "ftp://", "ftps://"};
+    if (url.empty() || url.size() > kMaxUrl || !HasNoControlCharacters(url) || url.find(' ') != std::string::npos) {
+        return false;
+    }
+    return std::any_of(std::begin(kSchemes), std::end(kSchemes), [&url](std::string_view scheme) {
+        return url.size() > scheme.size() && std::equal(scheme.begin(), scheme.end(), url.begin(), [](char a, char b) {
+                   return a == static_cast<char>(std::tolower(static_cast<unsigned char>(b)));
+               });
+    });
+}
+
+// An optional string member: absent or null is nothing, anything else must pass `valid`.
+template <typename Valid>
+bool OptionalField(const nlohmann::json& object, const char* key, Valid valid, std::optional<std::string>& out)
+{
+    const auto it = object.find(key);
+    if (it == object.end() || it->is_null()) {
+        return true;
+    }
+    if (!it->is_string() || !valid(it->get_ref<const std::string&>())) {
+        return false;
+    }
+    out = it->get<std::string>();
+    return true;
+}
+
+std::optional<model::Cookie> ParseCookie(const nlohmann::json& object)
+{
+    if (!object.is_object()) {
+        return std::nullopt;
+    }
+    const auto text = [&object](const char* key) -> const std::string* {
+        const auto it = object.find(key);
+        return it != object.end() && it->is_string() ? &it->get_ref<const std::string&>() : nullptr;
+    };
+    const auto flag = [&object](const char* key) -> std::optional<bool> {
+        const auto it = object.find(key);
+        return it != object.end() && it->is_boolean() ? std::optional<bool>(it->get<bool>()) : std::nullopt;
+    };
+    const auto* domain = text("domain");
+    const auto* path = text("path");
+    const auto* name = text("name");
+    const auto* value = text("value");
+    const auto hostOnly = flag("hostOnly");
+    const auto secure = flag("secure");
+    const auto expires = object.find("expires");
+    if (domain == nullptr || path == nullptr || name == nullptr || value == nullptr || !hostOnly || !secure ||
+        expires == object.end() || !expires->is_number_integer()) {
+        return std::nullopt;
+    }
+    model::Cookie cookie{*domain, *hostOnly, *path, *secure, expires->get<std::int64_t>(), *name, *value};
+    if (!model::IsValidCookie(cookie)) {
+        return std::nullopt;
+    }
+    return cookie;
+}
+
+std::optional<Capture> ParseCapture(const nlohmann::json& object)
+{
+    Capture capture;
+    const auto url = object.find("url");
+    if (url == object.end() || !url->is_string() || !IsDownloadAddress(url->get_ref<const std::string&>())) {
+        return std::nullopt;
+    }
+    capture.url = url->get<std::string>();
+    const auto plain = [](size_t max) {
+        return [max](const std::string& text) { return !text.empty() && text.size() <= max && HasNoControlCharacters(text); };
+    };
+    if (!OptionalField(object, "finalUrl", IsDownloadAddress, capture.finalUrl) ||
+        !OptionalField(object, "referrer", IsDownloadAddress, capture.referrer) ||
+        !OptionalField(object, "fileName", plain(kMaxFileName), capture.fileName) ||
+        !OptionalField(object, "mimeType", plain(kMaxMimeType), capture.mimeType)) {
+        return std::nullopt;
+    }
+    const auto size = object.find("fileSize");
+    if (size != object.end() && !size->is_null()) {
+        if (!size->is_number_integer() || size->get<std::int64_t>() < 0) {
+            return std::nullopt;
+        }
+        capture.fileSize = size->get<std::int64_t>();
+    }
+    auto userAgent = Text(object, "userAgent", kMaxUserAgent);
+    if (!userAgent || userAgent->empty()) {
+        return std::nullopt;
+    }
+    capture.userAgent = std::move(*userAgent);
+    const auto cookies = object.find("cookies");
+    if (cookies == object.end() || !cookies->is_array() || cookies->size() > kMaxCookies) {
+        return std::nullopt;
+    }
+    for (const auto& entry : *cookies) {
+        auto cookie = ParseCookie(entry);
+        if (!cookie) {
+            return std::nullopt;
+        }
+        capture.cookies.push_back(std::move(*cookie));
+    }
+    return capture;
+}
+
 nlohmann::json Envelope(std::string_view id, std::string_view type)
 {
     return {{"v", kProtocolVersion}, {"id", std::string(id)}, {"type", std::string(type)}};
@@ -161,6 +277,10 @@ std::optional<ParsedMessage> ParseMessage(std::string_view json)
         if (auto hello = ParseHello(message)) {
             return ParsedMessage{std::move(id), std::move(*hello)};
         }
+    } else if (type == "capture") {
+        if (auto capture = ParseCapture(message)) {
+            return ParsedMessage{std::move(id), std::move(*capture)};
+        }
     }
     return std::nullopt;
 }
@@ -202,6 +322,13 @@ std::string EncodeConfig(const Config& config, std::string_view replyTo)
     message["appVersion"] = config.appVersion;
     message["capturedExtensions"] = config.capturedExtensions;
     return message.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
+}
+
+std::string EncodeCaptureResult(std::string_view replyTo, bool accepted)
+{
+    nlohmann::json message = Envelope(replyTo, "capture-result");
+    message["accepted"] = accepted;
+    return message.dump();
 }
 
 }  // namespace ldm::browser

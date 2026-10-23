@@ -23,7 +23,13 @@
   },
   "permissions": [
     "alarms",
+    "cookies",
+    "downloads",
+    "downloads.ui",
     "nativeMessaging",
     "storage"
+  ],
+  "host_permissions": [
+    "<all_urls>"
   ]
 }

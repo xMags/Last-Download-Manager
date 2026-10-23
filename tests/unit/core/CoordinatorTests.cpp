@@ -545,6 +545,32 @@ TEST_F(CoordinatorTest, ServerLimitsAndSiteLoginsShapeTheRequest)
     EXPECT_NE(std::string(stored->loginSecret.begin(), stored->loginSecret.end()), "secret") << "stored protected";
 }
 
+TEST_F(CoordinatorTest, BrowserCaptureCarriesCookiesAndUserAgentUntilCompletion)
+{
+    const ldm::model::Cookie session{"files.test", true, "/", true, 0, "sid", "abc"};
+    const ldm::model::Cookie forged{"files.test", true, "/", false, 0, "bad", "x\ny"};
+    const DownloadId id = *Add("https://files.test/a.zip", AddMode::StartNow, [&](AddDownloadCommand& c) {
+        c.referer = "https://files.test/page";
+        c.userAgent = "BrowserUA/1.0";
+        c.cookies = {session, forged};
+    }).id;
+    const auto& request = engine_.starts.back();
+    EXPECT_EQ(request.userAgent, "BrowserUA/1.0");
+    EXPECT_EQ(request.referer, "https://files.test/page");
+    EXPECT_EQ(request.cookieLines, std::vector<std::string>{"files.test\tFALSE\t/\tTRUE\t0\tsid\tabc"})
+        << "a cookie with a line break would forge another cookie line; it is dropped";
+
+    const auto stored = Stored(id);
+    ASSERT_TRUE(stored);
+    EXPECT_FALSE(stored->cookieSecret.empty());
+    EXPECT_EQ(stored->cookieSecret.front(), 'P') << "stored through the secret protector (DPAPI in LDM)";
+    EXPECT_TRUE(View(id).download.cookieSecret.empty()) << "snapshots never carry secrets";
+
+    Finish(id, 1, TransferOutcome::Completed, {{0, 4, 4}}, std::nullopt, 4);
+    Send(id, 1, ldm::core::FinalizeFinished{});
+    EXPECT_TRUE(Stored(id)->cookieSecret.empty()) << "cookies are kept only until completion (decision 3)";
+}
+
 TEST_F(CoordinatorTest, SpeculativeAddFollowsServerNameUntilConfirmed)
 {
     const DownloadId id = *Add("http://x.test/download?id=1", AddMode::Speculative).id;

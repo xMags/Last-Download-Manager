@@ -1,5 +1,7 @@
 add_library(ldm_model STATIC
     Category.h
+    Cookie.cpp
+    Cookie.h
     ConnectionRules.h
     Download.cpp
     Download.h

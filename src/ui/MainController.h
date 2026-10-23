@@ -73,6 +73,8 @@ public:
 
     // A command line or a second launch (checklist A-10, W-05).
     void OnLaunchRequest(const core::LaunchRequest& request);
+    // A download the browser extension handed over (M3 design section 5).
+    void OnBrowserCapture(browser::Capture capture);
     // WM_CLIPBOARDUPDATE (checklist A-09).
     void OnClipboardChanged();
     // Addresses dropped on the drop target (checklist W-06).
