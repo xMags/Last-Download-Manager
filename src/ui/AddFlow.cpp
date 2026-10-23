@@ -12,6 +12,7 @@
 #include "ui/dialogs/ConfirmDialogs.h"
 #include "ui/dialogs/DownloadInfoDialog.h"
 #include "ui/dialogs/ListDialogs.h"
+#include "ui/dialogs/MessageDialog.h"
 
 #include <algorithm>
 #include <filesystem>
@@ -53,7 +54,7 @@ void AddFlow::ModifySettings(std::function<void(model::Settings&)> modify)
 
 void AddFlow::ShowError(const std::wstring& message) const
 {
-    ::MessageBoxW(context_.owner, message.c_str(), L"Last Download Manager", MB_OK | MB_ICONWARNING);
+    (void)ShowMessage(context_.owner, *context_.theme, MessageRequest{message, MessageKind::Warning});
 }
 
 bool AddFlow::ResolveDuplicate(const std::string& url, std::optional<model::DuplicatePolicy>& policy)

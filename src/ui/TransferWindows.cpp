@@ -2,6 +2,7 @@
 
 #include "base/Utf.h"
 #include "ui/dialogs/CompleteDialog.h"
+#include "ui/dialogs/MessageDialog.h"
 #include "ui/dialogs/ProgressWindow.h"
 
 #include <algorithm>
@@ -185,7 +186,7 @@ void TransferWindows::RunCompletionAction(model::CompletionAction action)
 
 void TransferWindows::ShowError(const std::wstring& message) const
 {
-    ::MessageBoxW(context_.owner, message.c_str(), L"Last Download Manager", MB_OK | MB_ICONWARNING);
+    (void)ShowMessage(context_.owner, *context_.theme, MessageRequest{message, MessageKind::Warning});
 }
 
 }  // namespace ldm::ui

@@ -1,5 +1,7 @@
 #include "ui/Dialog.h"
 
+#include "ui/dialogs/MessageDialog.h"
+
 #include <commctrl.h>
 
 #include <cwchar>
@@ -185,7 +187,7 @@ void Dialog::SetNumber(int id, std::int64_t value)
 
 void Dialog::Warn(const std::wstring& message) const
 {
-    ::MessageBoxW(window_, message.c_str(), L"Last Download Manager", MB_OK | MB_ICONWARNING);
+    (void)ShowMessage(window_, theme_, MessageRequest{message, MessageKind::Warning});
 }
 
 }  // namespace ldm::ui

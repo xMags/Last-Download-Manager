@@ -2,6 +2,7 @@
 
 #include "core/Snapshot.h"
 #include "ui/AddFlow.h"
+#include "ui/Theme.h"
 
 #include <windows.h>
 
@@ -17,6 +18,7 @@ class ImportExportFlow {
 public:
     struct Context {
         HWND owner = nullptr;
+        const Theme* theme = nullptr;
         AddFlow* adds = nullptr;
         std::function<std::shared_ptr<const core::Snapshot>()> snapshot;
         std::function<std::vector<const core::DownloadView*>()> selection;
