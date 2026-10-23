@@ -66,6 +66,48 @@ export class LdmConnection {
   }
 
   /**
+   * Sends one message on a connection of its own and resolves with LDM's answer (same id), or with
+   * null when there is none within `timeoutMs`. Each call starts a fresh ldm-host.exe, and LDM when
+   * it is not running. Captures use this: the browser starts that host while the user is in the
+   * browser, which is what lets the host allow LDM's dialog to come to the front.
+   */
+  async oneShot(message, timeoutMs) {
+    const hello = makeHello({ ...(await this.hooks.helloInfo()), startLdm: true });
+    return new Promise((resolve) => {
+      let port;
+      let settled = false;
+      const finish = (answer) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        clearTimeout(timer);
+        try {
+          port?.disconnect();
+        } catch {
+          // already gone
+        }
+        resolve(answer);
+      };
+      const timer = setTimeout(() => finish(null), timeoutMs);
+      try {
+        port = this.api.runtime.connectNative(HOST_NAME);
+      } catch {
+        finish(null);
+        return;
+      }
+      port.onMessage.addListener((answer) => {
+        if (answer?.id === message.id) {
+          finish(answer);
+        }
+      });
+      port.onDisconnect.addListener(() => finish(null));
+      port.postMessage(hello);
+      port.postMessage(message);
+    });
+  }
+
+  /**
    * Connects unless already connected or connecting. Resolves true once LDM sent its rules, false
    * when the connection ended first.
    * @param {{startLdm?: boolean}} options startLdm lets the host start LDM; only for real work.

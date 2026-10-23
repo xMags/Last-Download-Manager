@@ -67,6 +67,7 @@ protected:
 
 private:
     static INT_PTR CALLBACK DialogProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam);
+    static void BringToFront(HWND window);
 
     int templateId_;
     const Theme& theme_;

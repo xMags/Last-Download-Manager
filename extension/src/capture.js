@@ -5,7 +5,8 @@
 import { shouldCapture } from './capture-rules.js';
 import { isAcceptedCapture, makeCapture } from './protocol.js';
 
-// Long enough for ldm-host.exe to start LDM and for LDM to answer; LDM answers before any dialog.
+// Long enough for ldm-host.exe to start LDM (it waits up to 10 seconds) and for LDM to answer,
+// which LDM does before showing any dialog.
 const ANSWER_TIMEOUT_MS = 15000;
 
 export class DownloadCapture {
@@ -50,10 +51,6 @@ export class DownloadCapture {
       if (!(await this.pause(item.id))) {
         return false;  // finished or failed already: nothing left to take over
       }
-      if (!(await this.connection.connect({ startLdm: true }))) {
-        await this.resume(item.id);
-        return false;
-      }
       const message = makeCapture({
         url,
         finalUrl,
@@ -64,7 +61,7 @@ export class DownloadCapture {
         userAgent: this.options.userAgent,
         cookies: await this.cookiesFor([url, finalUrl]),
       });
-      const answer = await this.connection.request(message, ANSWER_TIMEOUT_MS);
+      const answer = await this.connection.oneShot(message, ANSWER_TIMEOUT_MS);
       if (!isAcceptedCapture(answer, message.id)) {
         await this.resume(item.id);
         return false;

@@ -155,3 +155,32 @@ test('an unanswered request times out', async () => {
   await ready;
   assert.equal(await connection.request({ v: 1, id: 'slow', type: 'capture' }, 20), null);
 });
+
+test('one-shot messages use a connection of their own that asks to start LDM', async () => {
+  const api = fakeApi();
+  const { connection } = newConnection(api);
+  const answered = connection.oneShot({ v: 1, id: 'c9', type: 'capture' }, 1000);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(api.ports.length, 1);
+  const port = api.ports[0];
+  port.disconnectCalls = 0;
+  port.disconnect = () => { port.disconnectCalls += 1; };
+  assert.equal(port.sent[0].type, 'hello');
+  assert.equal(port.sent[0].startLdm, true);
+  assert.equal(port.sent[1].id, 'c9');
+  port.receive(CONFIG);  // the config every hello gets is not the answer
+  port.receive({ v: 1, id: 'c9', type: 'capture-result', accepted: true });
+  assert.equal((await answered).accepted, true);
+  assert.equal(port.disconnectCalls, 1, 'closed once answered');
+  assert.equal(connection.state, State.NotRunning, 'the persistent connection is untouched');
+});
+
+test('a one-shot connection that ends without an answer gives null', async () => {
+  const api = fakeApi();
+  const { connection } = newConnection(api);
+  const answered = connection.oneShot({ v: 1, id: 'c10', type: 'capture' }, 1000);
+  await new Promise((resolve) => setImmediate(resolve));
+  api.ports[0].disconnect = () => {};
+  api.ports[0].disconnectListeners.forEach((listener) => listener(api.ports[0]));
+  assert.equal(await answered, null);
+});
