@@ -4,6 +4,7 @@
 #include "core/Url.h"
 #include "ui/ExportFormat.h"
 #include "ui/FileDialogs.h"
+#include "ui/dialogs/MessageDialog.h"
 
 #include <cstring>
 #include <filesystem>
@@ -14,8 +15,6 @@
 namespace ldm::ui {
 
 namespace {
-
-constexpr wchar_t kAppTitle[] = L"Last Download Manager";
 
 // Reads the whole file when it is at most `limit` bytes.
 std::optional<std::string> ReadSmallFile(const std::filesystem::path& path, size_t limit)
@@ -84,7 +83,7 @@ ImportExportFlow::ImportExportFlow(Context context) : context_(std::move(context
 
 void ImportExportFlow::ShowError(const std::wstring& message) const
 {
-    ::MessageBoxW(context_.owner, message.c_str(), kAppTitle, MB_OK | MB_ICONWARNING);
+    (void)ShowMessage(context_.owner, *context_.theme, MessageRequest{message, MessageKind::Warning});
 }
 
 std::vector<const core::DownloadView*> ImportExportFlow::ExportSet(std::shared_ptr<const core::Snapshot>& keepAlive) const
@@ -155,7 +154,7 @@ void ImportExportFlow::ImportLdmFile()
     context_.adds->AddImported(entries);
     const std::wstring message = std::to_wstring(entries.size()) +
                                  (entries.size() == 1 ? L" download was added, stopped." : L" downloads were added, stopped.");
-    ::MessageBoxW(context_.owner, message.c_str(), kAppTitle, MB_OK | MB_ICONINFORMATION);
+    (void)ShowMessage(context_.owner, *context_.theme, MessageRequest{message, MessageKind::Information});
 }
 
 void ImportExportFlow::ImportTextFile()

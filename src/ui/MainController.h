@@ -99,6 +99,9 @@ private:
     [[nodiscard]] const core::DownloadView* SingleSelection() const;
     [[nodiscard]] std::shared_ptr<const core::Snapshot> Snapshot() const;
     void ShowError(const std::wstring& message) const;
+    // A Yes/No question; true for Yes.
+    [[nodiscard]] bool Ask(const std::wstring& question) const;
+    void Tell(const std::wstring& message) const;
 
     Context context_;
     TransferWindows transfers_;

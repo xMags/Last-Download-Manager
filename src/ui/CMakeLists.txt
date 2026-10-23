@@ -72,6 +72,8 @@ add_library(ldm_ui STATIC
     dialogs/DownloadInfoDialog.h
     dialogs/ListDialogs.cpp
     dialogs/ListDialogs.h
+    dialogs/MessageDialog.cpp
+    dialogs/MessageDialog.h
     dialogs/LoginDialog.cpp
     dialogs/LoginDialog.h
     dialogs/OptionsDialog.cpp

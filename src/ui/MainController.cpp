@@ -10,6 +10,7 @@
 #include "core/Url.h"
 #include "ui/dialogs/ListDialogs.h"
 #include "ui/dialogs/LoginDialog.h"
+#include "ui/dialogs/MessageDialog.h"
 #include "ui/dialogs/OptionsDialog.h"
 #include "ui/dialogs/PropertiesDialog.h"
 
@@ -23,7 +24,6 @@ namespace ldm::ui {
 namespace {
 
 constexpr wchar_t kHelpUrl[] = L"https://github.com/xMags/Last-Download-Manager#readme";
-constexpr wchar_t kAppTitle[] = L"Last Download Manager";
 
 std::filesystem::path FinalPath(const model::Download& download)
 {
@@ -49,7 +49,7 @@ MainController::MainController(Context context)
       adds_(AddFlow::Context{context_.owner, context_.commands, context_.theme, context_.snapshot,
                              [this](model::DownloadId id) { transfers_.OpenProgress(id); },
                              [this](model::DownloadId id) { context_.list->SelectOnly(id); }}),
-      importExport_(ImportExportFlow::Context{context_.owner, &adds_, context_.snapshot, [this] { return Selection(); }})
+      importExport_(ImportExportFlow::Context{context_.owner, context_.theme, &adds_, context_.snapshot, [this] { return Selection(); }})
 {
 }
 
@@ -83,7 +83,18 @@ void MainController::ModifySettings(std::function<void(model::Settings&)> modify
 
 void MainController::ShowError(const std::wstring& message) const
 {
-    ::MessageBoxW(context_.owner, message.c_str(), kAppTitle, MB_OK | MB_ICONWARNING);
+    (void)ShowMessage(context_.owner, *context_.theme, MessageRequest{message, MessageKind::Warning});
+}
+
+bool MainController::Ask(const std::wstring& question) const
+{
+    return ShowMessage(context_.owner, *context_.theme, MessageRequest{question, MessageKind::Question, MessageButtons::YesNo}) ==
+           IDYES;
+}
+
+void MainController::Tell(const std::wstring& message) const
+{
+    (void)ShowMessage(context_.owner, *context_.theme, MessageRequest{message, MessageKind::Information});
 }
 
 bool MainController::PreTranslate(MSG& message)
@@ -148,10 +159,7 @@ bool MainController::OnCommand(int id)
     case ID_FILE_REDOWNLOAD:
         if (const auto* view = SingleSelection()) {
             const bool complete = view->download.status == model::DownloadStatus::Completed;
-            if (!complete || ::MessageBoxW(context_.owner,
-                                           L"Download this file again? The existing file is replaced when the new copy "
-                                           L"is complete.",
-                                           kAppTitle, MB_YESNO | MB_ICONQUESTION) == IDYES) {
+            if (!complete || Ask(L"Download this file again? The existing file is replaced when the new copy is complete.")) {
                 Post(core::RedownloadCommand{view->download.id});
             }
         }
@@ -161,8 +169,7 @@ bool MainController::OnCommand(int id)
         Post(core::StopAllCommand{});
         return true;
     case ID_DOWNLOADS_DELETE_COMPLETED:
-        if (::MessageBoxW(context_.owner, L"Remove every completed download from the list? The files stay on disk.",
-                          kAppTitle, MB_YESNO | MB_ICONQUESTION) == IDYES) {
+        if (Ask(L"Remove every completed download from the list? The files stay on disk.")) {
             Post(core::DeleteCompletedCommand{});
         }
         return true;
@@ -216,8 +223,7 @@ bool MainController::OnCommand(int id)
         return true;
     case ID_VIEW_FONT_RESET:
         ModifySettings([](model::Settings& s) { s.listFont.clear(); });
-        ::MessageBoxW(context_.owner, L"The default font is used after Last Download Manager restarts.", kAppTitle,
-                      MB_OK | MB_ICONINFORMATION);
+        Tell(L"The default font is used after Last Download Manager restarts.");
         return true;
     case ID_HELP_CONTENTS:
         if (!context_.shell->OpenUrl(context_.owner, kHelpUrl)) {
@@ -423,7 +429,8 @@ void MainController::AskAboutQuota(const core::QuotaReached& reached)
         (reached.hours == 1 ? L" hour" : L" hours") + L" is used up.\n\nStop downloading until " +
         FormatDateTime(reached.periodEndsAtUnixMs) +
         L"? The downloads continue by themselves then.\n\nChoose No to keep downloading until then.";
-    const int answer = ::MessageBoxW(context_.owner, message.c_str(), kAppTitle, MB_YESNO | MB_ICONINFORMATION | MB_SETFOREGROUND);
+    const int answer = ShowMessage(context_.owner, *context_.theme,
+                                   MessageRequest{message, MessageKind::Information, MessageButtons::YesNo, true});
     Post(core::QuotaDecisionCommand{answer == IDNO});
 }
 
@@ -610,17 +617,14 @@ void MainController::EditCategory(std::optional<model::CategoryId> id)
     const bool typesChanged = id && edited->extensions != previousExtensions && !edited->extensions.empty();
     Post(core::SaveCategoryCommand{*edited});
     // Offer to move existing downloads of the new types into the category (checklist W-03).
-    if (typesChanged && ::MessageBoxW(context_.owner,
-                                      L"Put the downloads in the list that have these file types into this category too?",
-                                      kAppTitle, MB_YESNO | MB_ICONQUESTION) == IDYES) {
+    if (typesChanged && Ask(L"Put the downloads in the list that have these file types into this category too?")) {
         Post(core::ReassignCategoryCommand{*id});
     }
 }
 
 void MainController::DeleteCategory(model::CategoryId id)
 {
-    if (::MessageBoxW(context_.owner, L"Delete this category? Its downloads stay in the list under All Downloads.",
-                      kAppTitle, MB_YESNO | MB_ICONQUESTION) == IDYES) {
+    if (Ask(L"Delete this category? Its downloads stay in the list under All Downloads.")) {
         Post(core::DeleteCategoryCommand{id});
     }
 }
@@ -724,8 +728,7 @@ void MainController::ChooseListFont()
     }
     const std::string setting = base::ToUtf8(font.lfFaceName) + ";" + std::to_string(choose.iPointSize / 10);
     ModifySettings([setting](model::Settings& s) { s.listFont = setting; });
-    ::MessageBoxW(context_.owner, L"The new font is used after Last Download Manager restarts.", kAppTitle,
-                  MB_OK | MB_ICONINFORMATION);
+    Tell(L"The new font is used after Last Download Manager restarts.");
 }
 
 void MainController::ShowRowMenu(POINT screen)

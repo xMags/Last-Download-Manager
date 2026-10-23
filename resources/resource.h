@@ -369,3 +369,8 @@
 #define IDC_LOGIN_USER 1501
 #define IDC_LOGIN_PASSWORD 1502
 #define IDC_LOGIN_SAVE 1503
+
+// Message box with dark mode (checklist V-08): the Windows one has none
+#define IDD_MESSAGE 326
+#define IDC_MESSAGE_ICON 1520
+#define IDC_MESSAGE_TEXT 1521
