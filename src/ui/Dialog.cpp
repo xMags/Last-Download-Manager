@@ -1,9 +1,23 @@
 #include "ui/Dialog.h"
 
+#include <commctrl.h>
+
 #include <cwchar>
+#include <iterator>
 #include <vector>
 
 namespace ldm::ui {
+
+namespace {
+
+bool IsLink(HWND control)
+{
+    wchar_t className[32] = {};
+    ::GetClassNameW(control, className, static_cast<int>(std::size(className)));
+    return ::CompareStringOrdinal(className, -1, WC_LINK, -1, TRUE) == CSTR_EQUAL;
+}
+
+}  // namespace
 
 Dialog::~Dialog()
 {
@@ -62,8 +76,13 @@ INT_PTR CALLBACK Dialog::DialogProc(HWND window, UINT message, WPARAM wParam, LP
             return FALSE;
         }
         const bool editable = message == WM_CTLCOLOREDIT || message == WM_CTLCOLORLISTBOX;
+        const auto dc = reinterpret_cast<HDC>(wParam);  // WM_CTLCOLOR* passes the control's DC
+        const HBRUSH brush = self->theme_.OnCtlColor(dc, editable);
+        if (message == WM_CTLCOLORSTATIC && IsLink(reinterpret_cast<HWND>(lParam))) {
+            ::SetTextColor(dc, self->theme_.Colors().accent);  // links stay recognizable as links
+        }
         // A dialog procedure returns the brush itself for WM_CTLCOLOR* messages.
-        return reinterpret_cast<INT_PTR>(self->theme_.OnCtlColor(reinterpret_cast<HDC>(wParam), editable));
+        return reinterpret_cast<INT_PTR>(brush);
     }
     case WM_DESTROY:
         if (!self->modal_) {

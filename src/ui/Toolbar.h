@@ -45,6 +45,10 @@ private:
     std::vector<int> savedOrder_;  // restored by the Customize dialog's Reset button
     COLORREF textColor_ = 0;
     COLORREF background_ = 0;
+    COLORREF hotColor_ = 0;
+    // The themed toolbar ignores custom colors and paints a light bar, so dark mode draws the
+    // background and asks for the custom colors explicitly.
+    bool dark_ = false;
 };
 
 }  // namespace ldm::ui

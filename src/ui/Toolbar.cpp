@@ -159,6 +159,11 @@ void Toolbar::ApplyImages(const Theme& theme)
     ::SendMessageW(window_, TB_SETDISABLEDIMAGELIST, 0, reinterpret_cast<LPARAM>(disabledImages_.get()));
     textColor_ = theme.Colors().text;
     background_ = theme.Colors().panel;
+    hotColor_ = theme.Colors().hot;
+    dark_ = theme.IsDark();
+    if (const auto tooltip = reinterpret_cast<HWND>(::SendMessageW(window_, TB_GETTOOLTIPS, 0, 0)); tooltip != nullptr) {  // returns the HWND
+        theme.ApplyToControl(tooltip);
+    }
 }
 
 void Toolbar::Refresh(bool largeButtons, const Theme& theme)
@@ -295,6 +300,12 @@ bool Toolbar::HandleNotify(const NMHDR& header, LRESULT& result, bool& layoutCha
     case NM_CUSTOMDRAW: {
         auto& draw = const_cast<NMTBCUSTOMDRAW&>(reinterpret_cast<const NMTBCUSTOMDRAW&>(header));  // documented in-out
         if (draw.nmcd.dwDrawStage == CDDS_PREPAINT) {
+            if (dark_) {
+                RECT client{};
+                ::GetClientRect(window_, &client);
+                UniqueBrush background(::CreateSolidBrush(background_));
+                ::FillRect(draw.nmcd.hdc, &client, background.get());
+            }
             result = CDRF_NOTIFYITEMDRAW;
             return true;
         }
@@ -302,6 +313,11 @@ bool Toolbar::HandleNotify(const NMHDR& header, LRESULT& result, bool& layoutCha
             draw.clrText = textColor_;
             draw.clrBtnFace = background_;
             result = CDRF_DODEFAULT;
+            if (dark_) {
+                draw.clrTextHighlight = textColor_;
+                draw.clrHighlightHotTrack = hotColor_;
+                result |= TBCDRF_USECDCOLORS | TBCDRF_HILITEHOTTRACK | TBCDRF_NOETCHEDEFFECT;
+            }
             return true;
         }
         result = CDRF_DODEFAULT;

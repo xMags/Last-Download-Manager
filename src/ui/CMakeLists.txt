@@ -13,6 +13,8 @@ add_library(ldm_ui STATIC
     ClipboardMonitor.h
     CommandState.cpp
     CommandState.h
+    DarkControls.cpp
+    DarkControls.h
     Dialog.cpp
     Dialog.h
     Dpi.cpp

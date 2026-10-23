@@ -1,5 +1,8 @@
 #include "ui/Theme.h"
 
+#include "ui/DarkControls.h"
+
+#include <commctrl.h>
 #include <dwmapi.h>
 #include <uxtheme.h>
 #include <vssym32.h>
@@ -208,6 +211,7 @@ void Theme::ApplyToControl(HWND control) const
     if (Api().Available()) {
         Api().allowDarkModeForWindow(control, dark_);
     }
+    AttachDarkPainting(control, *this);
     if (name == WC_HEADERW) {
         ::SetWindowTheme(control, dark_ ? L"DarkMode_ItemsView" : L"ItemsView", nullptr);
         return;
@@ -216,8 +220,47 @@ void Theme::ApplyToControl(HWND control) const
         ::SetWindowTheme(control, dark_ ? L"DarkMode_CFD" : L"CFD", nullptr);
         return;
     }
+    if (name == WC_EDITW) {
+        // The file dialog's dark edit: a quiet border with an accent line when focused. The
+        // Explorer one draws a near-white border around every unfocused edit.
+        ::SetWindowTheme(control, dark_ ? L"DarkMode_CFD" : nullptr, nullptr);
+        ::SendMessageW(control, WM_THEMECHANGED, 0, 0);
+        return;
+    }
     if (name == WC_LISTVIEWW || name == WC_TREEVIEWW) {
         ::SetWindowTheme(control, dark_ ? L"DarkMode_Explorer" : L"Explorer", nullptr);
+        const HWND tooltip = name == WC_LISTVIEWW ? ListView_GetToolTips(control) : TreeView_GetToolTips(control);
+        if (tooltip != nullptr) {
+            ApplyToControl(tooltip);
+        }
+        return;
+    }
+    if (name == PROGRESS_CLASSW) {
+        // No dark progress bar theme exists: unthemed, it takes the palette's colors.
+        if (dark_) {
+            ::SetWindowTheme(control, L"", L"");
+            ::SetWindowLongPtrW(control, GWL_STYLE, ::GetWindowLongPtrW(control, GWL_STYLE) | PBS_SMOOTH);
+            ::SendMessageW(control, PBM_SETBARCOLOR, 0, static_cast<LPARAM>(palette_.accent));
+            ::SendMessageW(control, PBM_SETBKCOLOR, 0, static_cast<LPARAM>(palette_.window));
+        } else {
+            ::SetWindowTheme(control, nullptr, nullptr);
+            ::SendMessageW(control, PBM_SETBARCOLOR, 0, static_cast<LPARAM>(CLR_DEFAULT));
+            ::SendMessageW(control, PBM_SETBKCOLOR, 0, static_cast<LPARAM>(CLR_DEFAULT));
+        }
+        ::InvalidateRect(control, nullptr, TRUE);
+        return;
+    }
+    if (name == WC_LINK) {
+        // With default colors, links take the text color set in WM_CTLCOLORSTATIC (see Dialog)
+        // instead of the system link color, which is unreadable on a dark background.
+        LITEM item{};
+        item.mask = LIF_ITEMINDEX | LIF_STATE;
+        item.stateMask = LIS_DEFAULTCOLORS;
+        item.state = dark_ ? LIS_DEFAULTCOLORS : 0;
+        while (::SendMessageW(control, LM_SETITEM, 0, reinterpret_cast<LPARAM>(&item)) != FALSE) {
+            ++item.iLink;
+        }
+        ::InvalidateRect(control, nullptr, TRUE);
         return;
     }
     ::SetWindowTheme(control, dark_ ? L"DarkMode_Explorer" : nullptr, nullptr);
