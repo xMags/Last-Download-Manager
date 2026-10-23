@@ -7,6 +7,7 @@
 #include "ui/DownloadListView.h"
 #include "ui/DropTargetWindow.h"
 #include "ui/Handles.h"
+#include "ui/LinkDropTarget.h"
 #include "ui/MainController.h"
 #include "ui/ShellActions.h"
 #include "ui/StartupRegistration.h"
@@ -91,6 +92,8 @@ private:
     void Paint();
     // Handles queued launch requests and drops one at a time, waiting while a modal dialog is open.
     void DrainExternalInput();
+    // Queues dropped addresses for DrainExternalInput; safe inside another program's drag loop.
+    void QueueDroppedUrls(std::vector<std::string> urls);
 
     // Input that arrives from outside the window and may open dialogs.
     using ExternalInput = std::variant<core::LaunchRequest, std::vector<std::string>>;
@@ -108,6 +111,7 @@ private:
     StatusBar status_;
     TrayIcon tray_;
     DropTargetWindow dropTarget_;
+    LinkDropTarget linkDrop_;  // links dropped on the main window
     std::unique_ptr<MainController> controller_;
 
     UniqueFont uiFont_;

@@ -1,16 +1,12 @@
 #include "ui/DropTargetWindow.h"
 
-#include "base/Utf.h"
-#include "core/Url.h"
 #include "resource.h"
 #include "ui/Dpi.h"
 
 #include <shellscalingapi.h>
-#include <shlobj.h>
 #include <windowsx.h>
 
 #include <algorithm>
-#include <atomic>
 #include <cstdio>
 
 namespace ldm::ui {
@@ -21,111 +17,8 @@ constexpr wchar_t kClassName[] = L"LdmDropTarget";
 constexpr int kSize96 = 56;
 constexpr UINT kHideCommand = 1;
 constexpr UINT kOpenCommand = 2;
-// Larger drops are not addresses anyone dragged on purpose.
-constexpr size_t kMaxDroppedText = 1024 * 1024;
-
-std::wstring ReadText(IDataObject* data, CLIPFORMAT format)
-{
-    FORMATETC request{format, nullptr, DVASPECT_CONTENT, -1, TYMED_HGLOBAL};
-    STGMEDIUM medium{};
-    if (FAILED(data->GetData(&request, &medium))) {
-        return {};
-    }
-    std::wstring text;
-    if (const auto* chars = static_cast<const wchar_t*>(::GlobalLock(medium.hGlobal)); chars != nullptr) {
-        const size_t capacity = ::GlobalSize(medium.hGlobal) / sizeof(wchar_t);
-        const size_t length = ::wcsnlen(chars, std::min(capacity, kMaxDroppedText));
-        text.assign(chars, length);
-        ::GlobalUnlock(medium.hGlobal);
-    }
-    ::ReleaseStgMedium(&medium);
-    return text;
-}
 
 }  // namespace
-
-std::vector<std::string> UrlsFromDataObject(IDataObject* data)
-{
-    static const auto urlFormat = static_cast<CLIPFORMAT>(::RegisterClipboardFormatW(CFSTR_INETURLW));
-    std::vector<std::string> urls = core::ExtractUrls(base::ToUtf8(ReadText(data, urlFormat)));
-    if (urls.empty()) {
-        urls = core::ExtractUrls(base::ToUtf8(ReadText(data, CF_UNICODETEXT)));
-    }
-    return urls;
-}
-
-// The OLE drop target. Reference counted as COM requires; the window keeps one reference while
-// registered and clears `owner` before releasing it, so a late call never reaches a destroyed window.
-class DropTargetWindow::DropHandler final : public IDropTarget {
-public:
-    explicit DropHandler(DropTargetWindow* owner) : owner_(owner) {}
-
-    void Detach() { owner_ = nullptr; }
-
-    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID id, void** object) override
-    {
-        if (object == nullptr) {
-            return E_POINTER;
-        }
-        if (id == IID_IUnknown || id == IID_IDropTarget) {
-            *object = static_cast<IDropTarget*>(this);
-            AddRef();
-            return S_OK;
-        }
-        *object = nullptr;
-        return E_NOINTERFACE;
-    }
-    ULONG STDMETHODCALLTYPE AddRef() override { return ++references_; }
-    ULONG STDMETHODCALLTYPE Release() override
-    {
-        const ULONG remaining = --references_;
-        if (remaining == 0) {
-            delete this;
-        }
-        return remaining;
-    }
-
-    HRESULT STDMETHODCALLTYPE DragEnter(IDataObject* data, DWORD, POINTL, DWORD* effect) override
-    {
-        accept_ = !UrlsFromDataObject(data).empty();
-        *effect = accept_ ? DROPEFFECT_LINK : DROPEFFECT_NONE;
-        SetHover(accept_);
-        return S_OK;
-    }
-    HRESULT STDMETHODCALLTYPE DragOver(DWORD, POINTL, DWORD* effect) override
-    {
-        *effect = accept_ ? DROPEFFECT_LINK : DROPEFFECT_NONE;
-        return S_OK;
-    }
-    HRESULT STDMETHODCALLTYPE DragLeave() override
-    {
-        SetHover(false);
-        return S_OK;
-    }
-    HRESULT STDMETHODCALLTYPE Drop(IDataObject* data, DWORD, POINTL, DWORD* effect) override
-    {
-        SetHover(false);
-        std::vector<std::string> urls = UrlsFromDataObject(data);
-        *effect = urls.empty() ? DROPEFFECT_NONE : DROPEFFECT_LINK;
-        if (!urls.empty() && owner_ != nullptr && owner_->callbacks_.dropped) {
-            owner_->callbacks_.dropped(std::move(urls));
-        }
-        return S_OK;
-    }
-
-private:
-    void SetHover(bool hovering)
-    {
-        if (owner_ != nullptr && owner_->window_ != nullptr) {
-            owner_->hovering_ = hovering;
-            ::InvalidateRect(owner_->window_, nullptr, FALSE);
-        }
-    }
-
-    DropTargetWindow* owner_;
-    std::atomic<ULONG> references_{1};
-    bool accept_ = false;
-};
 
 DropTargetWindow::~DropTargetWindow()
 {
@@ -180,12 +73,10 @@ void DropTargetWindow::Create(const std::string& position, const Theme& theme, C
     HICON icon = nullptr;
     ::LoadIconWithScaleDown(::GetModuleHandleW(nullptr), MAKEINTRESOURCEW(IDI_LDM), size * 2 / 3, size * 2 / 3, &icon);
     icon_.reset(icon);
-    handler_ = new DropHandler(this);  // COM object; released through Release()
-    if (FAILED(::RegisterDragDrop(window_, handler_))) {
-        handler_->Detach();
-        handler_->Release();
-        handler_ = nullptr;
-    }
+    drop_.Register(window_, LinkDropTarget::Callbacks{callbacks_.dropped, [this](bool hovering) {
+                       hovering_ = hovering;
+                       ::InvalidateRect(window_, nullptr, FALSE);
+                   }});
     ::ShowWindow(window_, SW_SHOWNOACTIVATE);
 }
 
@@ -194,12 +85,7 @@ void DropTargetWindow::Destroy()
     if (window_ == nullptr) {
         return;
     }
-    if (handler_ != nullptr) {
-        ::RevokeDragDrop(window_);
-        handler_->Detach();
-        handler_->Release();
-        handler_ = nullptr;
-    }
+    drop_.Revoke();
     const HWND window = window_;
     window_ = nullptr;
     ::SetWindowLongPtrW(window, GWLP_USERDATA, 0);
