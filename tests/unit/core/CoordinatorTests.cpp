@@ -62,12 +62,19 @@ public:
         removed.push_back(path);
         return {};
     }
+    ldm::base::Status Recycle(const fs::path& path) override
+    {
+        files.erase(ldm::base::PathComparisonKey(path));
+        recycled.push_back(path);
+        return {};
+    }
     ldm::base::Status CreateDirectories(const fs::path&) override { return {}; }
 
     void Put(const fs::path& path, std::int64_t size) { files[ldm::base::PathComparisonKey(path)] = size; }
 
     std::map<std::wstring, std::int64_t> files;
     std::vector<fs::path> removed;
+    std::vector<fs::path> recycled;
 };
 
 class FakeClock final : public ldm::core::Clock {
@@ -458,6 +465,8 @@ TEST_F(CoordinatorTest, DeleteCompletedKeepsOrRemovesTheFile)
     coordinator_->Handle(ldm::core::DeleteCommand{{removed}, true});
     EXPECT_TRUE(files_.Exists(kRoot / L"keep.dat"));
     EXPECT_FALSE(files_.Exists(kRoot / L"remove.dat"));
+    ASSERT_EQ(files_.recycled.size(), 1u) << "a deleted completed file goes to the Recycle Bin";
+    EXPECT_EQ(files_.recycled[0], kRoot / L"remove.dat");
     EXPECT_FALSE(InSnapshot(kept));
     EXPECT_FALSE(InSnapshot(removed));
 }

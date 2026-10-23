@@ -199,7 +199,7 @@ FONT 9, "Segoe UI", 400, 0, 0x1
 BEGIN
     ICON "", IDC_DELETE_ICON, 10, 10, 20, 20
     LTEXT "", IDC_DELETE_TEXT, 40, 10, 233, 24
-    AUTOCHECKBOX "Also delete the &files from disk", IDC_DELETE_FILES, 40, 40, 233, 10, WS_TABSTOP
+    AUTOCHECKBOX "Also move the &files to the Recycle Bin", IDC_DELETE_FILES, 40, 40, 233, 10, WS_TABSTOP
     AUTOCHECKBOX "&Don't ask me again", IDC_DELETE_DONT_ASK, 40, 54, 233, 10, WS_TABSTOP
     DEFPUSHBUTTON "OK", IDOK, 169, 71, 50, 14
     PUSHBUTTON "Cancel", IDCANCEL, 223, 71, 50, 14
