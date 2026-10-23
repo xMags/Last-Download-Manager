@@ -57,6 +57,26 @@ private:
     std::optional<model::CaptureKeys> result_;
 };
 
+// The browser right-click menu items, per browser family (checklist O-01, the reference's dialogs 334, 335).
+struct BrowserMenus {
+    model::BrowserMenu chromium;
+    model::BrowserMenu firefox;
+};
+
+// Options > General > Context menu.
+class BrowserMenuDialog final : public Dialog {
+public:
+    BrowserMenuDialog(const Theme& theme, BrowserMenus menus);
+    [[nodiscard]] std::optional<BrowserMenus> Run(HWND owner);
+
+private:
+    bool OnInit() override;
+    bool OnCommand(int id, int code, HWND control) override;
+
+    BrowserMenus menus_;
+    std::optional<BrowserMenus> result_;
+};
+
 // A typed address pattern made acceptable for the list: trimmed; nothing when it is empty or
 // holds spaces or control characters (patterns are matched against whole addresses).
 [[nodiscard]] std::optional<std::wstring> CleanAddressPattern(const std::wstring& text);

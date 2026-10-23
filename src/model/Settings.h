@@ -111,6 +111,15 @@ struct CaptureKeys {
     auto operator<=>(const CaptureKeys&) const = default;
 };
 
+// The items the extension adds to a browser's right-click menu (checklist B-04, O-01).
+struct BrowserMenu {
+    // "Download with LDM" on links, pictures, videos and pages, and "Download selected links with LDM"
+    bool downloadLink = true;
+    bool downloadAll = true;  // "Download all links with LDM"
+
+    auto operator<=>(const BrowserMenu&) const = default;
+};
+
 // Every user setting, with its default. Keys, ranges and fallbacks live in Settings.cpp only.
 struct Settings {
     // Options > General
@@ -122,6 +131,14 @@ struct Settings {
     std::string captureSiteExceptions = DefaultCaptureSiteExceptions();
     std::string captureAddressExceptions;  // one address pattern per line, '*' wildcards
     CaptureKeys captureKeys;               // Options > General > Keys
+    BrowserMenu chromiumMenu;              // Options > General > Context menu: Chrome and Edge
+    BrowserMenu firefoxMenu;               // ... and Firefox
+
+    // Download All Links dialog (checklist B-05): the choices last made there
+    bool allLinksUseLinkText = false;  // link texts become download descriptions
+    bool allLinksHideHtml = true;
+    bool allLinksHideImages = false;   // pictures shown on the page, as opposed to links to pictures
+    bool allLinksHideRepeated = true;
 
     // Options > Save to
     std::string temporaryDirectory;  // empty = keep partial files next to the destination

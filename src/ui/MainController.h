@@ -6,6 +6,7 @@
 #include "core/Ports.h"
 #include "core/Snapshot.h"
 #include "ui/AddFlow.h"
+#include "ui/BrowserSessions.h"
 #include "ui/ClipboardMonitor.h"
 #include "ui/DownloadListView.h"
 #include "ui/ImportExportFlow.h"
@@ -52,6 +53,8 @@ public:
         std::function<void(const std::vector<ColumnState>&)> columnsChanged;
         // Extensions connected right now, for Options > General; empty without browser integration.
         std::function<std::vector<browser::Hello>()> connectedBrowsers;
+        // The Download All Links dialog of a browser request closed.
+        std::function<void(BrowserConnectionId, const std::string&)> linksDone;
     };
 
     explicit MainController(Context context);
@@ -75,6 +78,8 @@ public:
     void OnLaunchRequest(const core::LaunchRequest& request);
     // A download the browser extension handed over (M3 design section 5).
     void OnBrowserCapture(browser::Capture capture);
+    // "Download all links" or "Download selected links" from the browser (checklist B-05).
+    void OnBrowserLinks(BrowserSessions::LinksRequest request);
     // WM_CLIPBOARDUPDATE (checklist A-09).
     void OnClipboardChanged();
     // Addresses dropped on the drop target (checklist W-06).

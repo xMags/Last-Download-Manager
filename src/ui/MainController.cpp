@@ -48,7 +48,7 @@ MainController::MainController(Context context)
                                           context_.theme, context_.snapshot, context_.exit}),
       adds_(AddFlow::Context{context_.owner, context_.commands, context_.theme, context_.snapshot,
                              [this](model::DownloadId id) { transfers_.OpenProgress(id); },
-                             [this](model::DownloadId id) { context_.list->SelectOnly(id); }}),
+                             [this](model::DownloadId id) { context_.list->SelectOnly(id); }, context_.linksDone}),
       importExport_(ImportExportFlow::Context{context_.owner, context_.theme, &adds_, context_.snapshot, [this] { return Selection(); }})
 {
 }
@@ -323,6 +323,11 @@ void MainController::OnBrowserCapture(browser::Capture capture)
     add.browser = BrowserRequest{std::move(capture.referrer), std::move(capture.userAgent), std::move(capture.cookies),
                                  std::move(post)};
     adds_.AddAddress(add);
+}
+
+void MainController::OnBrowserLinks(BrowserSessions::LinksRequest request)
+{
+    adds_.AddPageLinks(std::move(request.links), request.connection, request.requestId);
 }
 
 void MainController::OnClipboardChanged()

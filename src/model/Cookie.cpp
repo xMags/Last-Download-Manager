@@ -1,6 +1,7 @@
 #include "model/Cookie.h"
 
 #include <algorithm>
+#include <cctype>
 
 namespace ldm::model {
 
@@ -33,6 +34,31 @@ bool IsValidCookie(const Cookie& cookie) noexcept
            cookie.path.size() <= kMaxPath && HasNoControlCharacters(cookie.path) && !cookie.name.empty() &&
            cookie.name.size() <= kMaxName && HasNoControlCharacters(cookie.name) && cookie.value.size() <= kMaxValue &&
            HasNoControlCharacters(cookie.value) && cookie.expires >= 0;
+}
+
+bool CookieApplies(const Cookie& cookie, std::string_view scheme, std::string_view host, std::string_view path) noexcept
+{
+    if (cookie.secure && scheme != "https" && scheme != "ftps") {
+        return false;
+    }
+    const auto sameText = [](std::string_view a, std::string_view b) {
+        return a.size() == b.size() && std::equal(a.begin(), a.end(), b.begin(), [](char x, char y) {
+                   return std::tolower(static_cast<unsigned char>(x)) == std::tolower(static_cast<unsigned char>(y));
+               });
+    };
+    const std::string_view domain = cookie.domain;
+    const bool domainMatches =
+        sameText(host, domain) || (!cookie.hostOnly && host.size() > domain.size() &&
+                                   host[host.size() - domain.size() - 1] == '.' &&
+                                   sameText(host.substr(host.size() - domain.size()), domain));
+    if (!domainMatches) {
+        return false;
+    }
+    const std::string_view cookiePath = cookie.path;
+    if (!path.starts_with(cookiePath)) {
+        return false;
+    }
+    return path.size() == cookiePath.size() || cookiePath.back() == '/' || path[cookiePath.size()] == '/';
 }
 
 std::string ToNetscapeLine(const Cookie& cookie)

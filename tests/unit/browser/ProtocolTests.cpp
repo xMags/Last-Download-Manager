@@ -203,6 +203,105 @@ TEST(BrowserCookies, ValidityRules)
     EXPECT_FALSE(ldm::model::IsValidCookie({"a.test", true, "/", false, 0, "n", "v\r"}));
 }
 
+std::string LinksJson(const std::string& fields)
+{
+    return R"({"v":1,"id":"l1","type":"links","selection":false,"userAgent":"Mozilla/5.0",)" + fields + "}";
+}
+
+TEST(BrowserProtocol, ParsesLinks)
+{
+    const auto parsed = ldm::browser::ParseMessage(LinksJson(
+        R"("referrer":"https://site.test/page","links":[)"
+        R"({"url":"https://site.test/a.zip","text":"Caf\u00e9 \u2013 setup","kind":"link","fileName":"setup.zip"},)"
+        R"({"url":"https://site.test/p.jpg","kind":"image"}],"cookies":[)" + std::string(kCookie) + "]"));
+    ASSERT_TRUE(parsed);
+    const auto& links = std::get<ldm::browser::Links>(parsed->message);
+    EXPECT_FALSE(links.selection);
+    EXPECT_EQ(links.referrer, "https://site.test/page");
+    ASSERT_EQ(links.links.size(), 2u);
+    EXPECT_EQ(links.links[0].text, "Caf\xC3\xA9 \xE2\x80\x93 setup");
+    EXPECT_EQ(links.links[0].fileName, "setup.zip");
+    EXPECT_EQ(links.links[0].kind, ldm::browser::LinkKind::Link);
+    EXPECT_EQ(links.links[1].text, "");
+    EXPECT_EQ(links.links[1].kind, ldm::browser::LinkKind::Image);
+    EXPECT_EQ(links.cookies.size(), 1u);
+}
+
+TEST(BrowserProtocol, RejectsInvalidLinks)
+{
+    const auto one = [](const std::string& link) { return LinksJson(R"("links":[)" + link + R"(],"cookies":[])"); };
+    EXPECT_TRUE(ldm::browser::ParseMessage(one(R"({"url":"https://a.test/x","kind":"text"})")));
+    EXPECT_FALSE(ldm::browser::ParseMessage(LinksJson(R"("links":[],"cookies":[])"))) << "no links";
+    EXPECT_FALSE(ldm::browser::ParseMessage(one(R"j({"url":"javascript:alert(1)","kind":"link"})j")));
+    EXPECT_FALSE(ldm::browser::ParseMessage(one(R"({"url":"https://a.test/x","kind":"script"})")));
+    EXPECT_FALSE(ldm::browser::ParseMessage(one(R"({"url":"https://a.test/x","kind":"link","text":"a\nb"})")));
+    EXPECT_FALSE(ldm::browser::ParseMessage(one(R"({"url":"https://a.test/x","kind":"link","text":")" +
+                                                std::string(ldm::browser::kMaxLinkText + 1, 'x') + R"("})")));
+    EXPECT_FALSE(ldm::browser::ParseMessage(LinksJson(R"("links":[{"url":"https://a.test/x","kind":"link"}])")))
+        << "cookies are required";
+    std::string many;
+    for (size_t i = 0; i <= ldm::browser::kMaxPageLinks; ++i) {
+        many += std::string(i == 0 ? "" : ",") + R"({"url":"https://a.test/x","kind":"link"})";
+    }
+    EXPECT_FALSE(ldm::browser::ParseMessage(LinksJson(R"("links":[)" + many + R"(],"cookies":[])")));
+}
+
+TEST(BrowserProtocol, ParsesLinkInfo)
+{
+    const auto parsed = ldm::browser::ParseMessage(
+        R"({"v":1,"id":"i1","type":"link-info","items":[{"index":0,"fileSize":5,"mimeType":"application/zip","fileName":"a.zip"},{"index":3,"failed":true}]})");
+    ASSERT_TRUE(parsed);
+    const auto& info = std::get<ldm::browser::LinkInfo>(parsed->message);
+    ASSERT_EQ(info.items.size(), 2u);
+    EXPECT_EQ(info.items[0].fileSize, 5);
+    EXPECT_EQ(info.items[0].mimeType, "application/zip");
+    EXPECT_EQ(info.items[0].fileName, "a.zip");
+    EXPECT_FALSE(info.items[0].failed);
+    EXPECT_EQ(info.items[1].index, 3u);
+    EXPECT_TRUE(info.items[1].failed);
+}
+
+TEST(BrowserProtocol, RejectsInvalidLinkInfo)
+{
+    const auto item = [](const std::string& fields) {
+        return R"({"v":1,"id":"i1","type":"link-info","items":[{)" + fields + "}]}";
+    };
+    EXPECT_FALSE(ldm::browser::ParseMessage(item(R"("index":-1)")));
+    EXPECT_FALSE(ldm::browser::ParseMessage(item(R"("index":1.5)")));
+    EXPECT_FALSE(ldm::browser::ParseMessage(item(R"("index":5000)")));
+    EXPECT_FALSE(ldm::browser::ParseMessage(item(R"("index":0,"fileSize":-3)")));
+    EXPECT_FALSE(ldm::browser::ParseMessage(item(R"("index":0,"mimeType":"text/html\r\nX: y")")));
+    EXPECT_FALSE(ldm::browser::ParseMessage(item(R"("index":0,"failed":"yes")")));
+    EXPECT_FALSE(ldm::browser::ParseMessage(R"({"v":1,"id":"i1","type":"link-info"})"));
+}
+
+TEST(BrowserProtocol, EncodesLinksAnswers)
+{
+    const auto result = nlohmann::json::parse(ldm::browser::EncodeLinksResult("l1", false));
+    EXPECT_EQ(result["type"], "links-result");
+    EXPECT_EQ(result["id"], "l1");
+    EXPECT_EQ(result["accepted"], false);
+    const auto done = nlohmann::json::parse(ldm::browser::EncodeLinksDone("l1"));
+    EXPECT_EQ(done["type"], "links-done");
+    EXPECT_EQ(done["id"], "l1");
+}
+
+TEST(BrowserCookies, AppliesByDomainPathAndScheme)
+{
+    const ldm::model::Cookie hostOnly{"a.test", true, "/", false, 0, "n", "v"};
+    EXPECT_TRUE(ldm::model::CookieApplies(hostOnly, "https", "a.test", "/x"));
+    EXPECT_FALSE(ldm::model::CookieApplies(hostOnly, "https", "sub.a.test", "/x"));
+    const ldm::model::Cookie domain{"A.test", false, "/dl", true, 0, "n", "v"};
+    EXPECT_TRUE(ldm::model::CookieApplies(domain, "https", "sub.a.test", "/dl"));
+    EXPECT_TRUE(ldm::model::CookieApplies(domain, "https", "a.test", "/dl/f.zip"));
+    EXPECT_FALSE(ldm::model::CookieApplies(domain, "https", "a.test", "/dlx")) << "path boundary";
+    EXPECT_FALSE(ldm::model::CookieApplies(domain, "http", "a.test", "/dl")) << "secure needs https";
+    EXPECT_FALSE(ldm::model::CookieApplies(domain, "https", "evila.test", "/dl")) << "not a subdomain";
+    const ldm::model::Cookie slash{"a.test", true, "/dl/", false, 0, "n", "v"};
+    EXPECT_TRUE(ldm::model::CookieApplies(slash, "http", "a.test", "/dl/f"));
+    EXPECT_FALSE(ldm::model::CookieApplies(slash, "http", "a.test", "/dl"));
+}
+
 TEST(BrowserProtocol, RejectsUnknownTypes)
 {
     EXPECT_FALSE(ldm::browser::ParseMessage(R"({"v":1,"id":"7","type":"launch-missiles"})"));
@@ -265,6 +364,7 @@ TEST(BrowserProtocol, EncodesConfig)
     EXPECT_EQ(json["type"], "config");
     EXPECT_EQ(json["appVersion"], "5.0.0");
     EXPECT_EQ(json["capturedExtensions"], nlohmann::json({"zip", "exe"}));
+    EXPECT_EQ(json["menu"], nlohmann::json({{"downloadLink", true}, {"downloadAll", true}}));
 }
 
 TEST(BrowserHostManifest, ChromiumManifestAllowsOnlyLdmExtension)

@@ -6,6 +6,7 @@
 #include "core/Snapshot.h"
 #include "ui/Dialog.h"
 #include "ui/SystemActions.h"
+#include "ui/dialogs/CaptureDialogs.h"
 
 #include <array>
 #include <optional>
@@ -86,6 +87,7 @@ private:
     Input input_;
     std::vector<std::wstring> addressExceptions_;  // edited in their own dialog
     model::CaptureKeys captureKeys_;               // edited in their own dialog
+    BrowserMenus browserMenus_;                    // likewise
     HHOOK pageKeyHook_ = nullptr;
     core::SecretProtector& secrets_;
     SystemActions& system_;

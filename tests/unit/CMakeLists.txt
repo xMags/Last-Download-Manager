@@ -19,7 +19,8 @@ add_executable(ldm_unit_tests
     ui/BatchAndHistoryTests.cpp
     ui/BrowserSessionsTests.cpp
     ui/ExportAndLaunchTests.cpp
-    ui/ListModelTests.cpp)
+    ui/ListModelTests.cpp
+    ui/PageLinksTests.cpp)
 target_link_libraries(ldm_unit_tests PRIVATE
     ldm_browser
     ldm_engine
