@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <array>
 #include <charconv>
+#include <stdexcept>
 
 namespace ldm::ui {
 
@@ -27,7 +28,7 @@ constexpr wchar_t kCheck = 0xE73E;
 constexpr wchar_t kGear = 0xE713;
 
 // LDM's buttons in the reference's default order (gap G-1) and the reference's look: the same symbols as thin
-// gradient outlines. The artwork is LDM's own, built from the Windows icon font. Scheduler and
+// gradient outlines. Five download actions use embedded the reference artwork; other icons use local drawings. Scheduler and
 // queue buttons join in M4, when those features exist; "Tell a Friend" is excluded by the checklist.
 constexpr std::array<ButtonInfo, 7> kButtons{{
     {ID_TASKS_ADD_URL, {{}, RGB(0x4C, 0xB8, 0x6E), RGB(0x2F, 0x8C, 0xC4), IconShape::OutlinePlus}, L"Add URL"},
@@ -39,6 +40,39 @@ constexpr std::array<ButtonInfo, 7> kButtons{{
      L"Delete Completed"},
     {ID_DOWNLOADS_OPTIONS, {{{{kGear, 86}}}, RGB(0x3F, 0x7A, 0xE8), RGB(0x9B, 0x51, 0xE0)}, L"Options"},
 }};
+
+struct ResourceIcon {
+    int command;
+    int normal;
+    int disabled;
+};
+
+constexpr std::array<ResourceIcon, 5> kResourceIcons{{
+    {ID_FILE_DOWNLOAD_NOW, IDI_TOOLBAR_RESUME, IDI_TOOLBAR_RESUME_DISABLED},
+    {ID_FILE_STOP, IDI_TOOLBAR_STOP, IDI_TOOLBAR_STOP_DISABLED},
+    {ID_DOWNLOADS_STOP_ALL, IDI_TOOLBAR_STOP_ALL, IDI_TOOLBAR_STOP_ALL_DISABLED},
+    {ID_FILE_REMOVE, IDI_TOOLBAR_DELETE, IDI_TOOLBAR_DELETE_DISABLED},
+    {ID_DOWNLOADS_DELETE_COMPLETED, IDI_TOOLBAR_DELETE_COMPLETED, IDI_TOOLBAR_DELETE_COMPLETED_DISABLED},
+}};
+
+void ApplyResourceIcons(HIMAGELIST images, int size, bool disabled)
+{
+    for (const ResourceIcon& resource : kResourceIcons) {
+        const auto button = std::find_if(
+            kButtons.begin(), kButtons.end(),
+            [&resource](const ButtonInfo& candidate) { return candidate.command == resource.command; });
+        if (button == kButtons.end()) {
+            throw std::logic_error("Toolbar icon has no matching command");
+        }
+        const int resourceId = disabled ? resource.disabled : resource.normal;
+        UniqueIcon icon(static_cast<HICON>(::LoadImageW(
+            ::GetModuleHandleW(nullptr), MAKEINTRESOURCEW(resourceId), IMAGE_ICON, size, size, 0)));
+        if (!icon ||
+            ::ImageList_ReplaceIcon(images, static_cast<int>(button - kButtons.begin()), icon.get()) == -1) {
+            throw std::runtime_error("Could not load an embedded toolbar icon");
+        }
+    }
+}
 
 std::vector<int> DefaultOrder()
 {
@@ -119,6 +153,8 @@ void Toolbar::ApplyImages(const Theme& theme)
     }
     images_ = CreateGradientImageList(icons, size, false);
     disabledImages_ = CreateGradientImageList(icons, size, true);
+    ApplyResourceIcons(images_.get(), size, false);
+    ApplyResourceIcons(disabledImages_.get(), size, true);
     ::SendMessageW(window_, TB_SETIMAGELIST, 0, reinterpret_cast<LPARAM>(images_.get()));
     ::SendMessageW(window_, TB_SETDISABLEDIMAGELIST, 0, reinterpret_cast<LPARAM>(disabledImages_.get()));
     textColor_ = theme.Colors().text;
