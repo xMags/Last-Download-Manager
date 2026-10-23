@@ -80,7 +80,7 @@ test('capture messages drop duplicate cookies and empty fields', () => {
 });
 
 // A browser downloads API that records what the capture did.
-function fakeBrowser({ stateAfterPause = 'in_progress' } = {}) {
+function fakeBrowser({ stateAfterPause = 'in_progress', pausedAfterPause = true } = {}) {
   const calls = [];
   const api = {
     runtime: { id: 'self' },
@@ -89,7 +89,7 @@ function fakeBrowser({ stateAfterPause = 'in_progress' } = {}) {
       resume: async (id) => { calls.push(['resume', id]); },
       cancel: async (id) => { calls.push(['cancel', id]); },
       erase: async (query) => { calls.push(['erase', query.id]); },
-      search: async ({ id }) => [{ id, state: stateAfterPause }],
+      search: async ({ id }) => [{ id, state: stateAfterPause, paused: pausedAfterPause }],
       setUiOptions: async ({ enabled }) => { calls.push(['ui', enabled]); },
     },
     cookies: { getAll: async ({ url }) => [{ domain: new URL(url).hostname, hostOnly: true, path: '/', session: true, name: 'sid', value: '1' }] },
@@ -147,12 +147,25 @@ test('a refused or unanswered capture lets the browser continue', async () => {
   }
 });
 
-test('a download that already finished is left alone', async () => {
-  const { api, calls } = fakeBrowser({ stateAfterPause: 'complete' });
-  const connection = fakeConnection();
-  assert.equal(await newCapture(api, connection).take(ITEM, 'x.zip'), false);
-  assert.deepEqual(calls, [['ui', false], ['pause', 7], ['ui', true]]);
-  assert.equal(connection.sent.length, 0);
+test('a download that already finished or failed is left alone', async () => {
+  for (const stateAfterPause of ['complete', 'interrupted']) {
+    const { api, calls } = fakeBrowser({ stateAfterPause, pausedAfterPause: false });
+    const connection = fakeConnection();
+    assert.equal(await newCapture(api, connection).take(ITEM, 'x.zip'), false, stateAfterPause);
+    assert.deepEqual(calls, [['ui', false], ['pause', 7], ['ui', true]], stateAfterPause);
+    assert.equal(connection.sent.length, 0, stateAfterPause);
+  }
+});
+
+test('Firefox reports a paused download as interrupted, and it is still taken over', async () => {
+  for (const answer of ['accept', 'refuse']) {
+    const { api, calls } = fakeBrowser({ stateAfterPause: 'interrupted', pausedAfterPause: true });
+    const connection = fakeConnection({ answer });
+    assert.equal(await newCapture(api, connection).take(ITEM, 'x.zip'), answer === 'accept', answer);
+    assert.equal(connection.sent.length, 1, answer);
+    const ending = answer === 'accept' ? [['cancel', 7], ['erase', 7]] : [['resume', 7]];
+    assert.deepEqual(calls, [['ui', false], ['pause', 7], ...ending, ['ui', true]], answer);
+  }
 });
 
 test('Chrome settles the name only after LDM refused, so it asks where to save only for downloads it keeps', async () => {
