@@ -34,7 +34,7 @@ namespace fs = std::filesystem;
 class NoProxy final : public ldm::core::ProxyResolver {
 public:
     void Configure(const ldm::model::Settings&) override {}
-    std::optional<std::string> ProxyFor(const std::string&) override { return std::nullopt; }
+    ldm::core::ProxyLookup Resolve(ldm::model::DownloadId, std::int64_t, const std::string&) override { return {}; }
 };
 
 class WaitingObserver final : public ldm::core::CoreObserver {

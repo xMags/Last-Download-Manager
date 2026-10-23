@@ -96,6 +96,7 @@ private:
         std::int64_t receivedBytes = 0;
         std::vector<ConnectionView> connections;
         std::optional<TransferFailure> retrying;
+        bool awaitingProxy = false;          // running, but the engine starts once the proxy is known
         bool quotaHeld = false;              // paused by the quota; started again when it allows
         std::int64_t quotaCountedBytes = 0;  // received bytes of this run already counted
 
@@ -129,9 +130,11 @@ private:
     void OnProgress(Entry& entry, const ProgressInfo& progress);
     void OnFinished(Entry& entry, const TransferFinished& finished);
     void OnFinalized(Entry& entry, const FinalizeFinished& finalized);
+    void OnProxyResolved(Entry& entry, const ProxyResolved& resolved);
 
     // Lifecycle helpers.
     void Start(Entry& entry);
+    void StartEngine(Entry& entry, std::optional<std::string> proxy);
     void RequestStop(Entry& entry);
     void ResetProgress(Entry& entry);
     void RemoveEntry(model::DownloadId id, bool deleteFinalFile);

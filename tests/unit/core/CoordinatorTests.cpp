@@ -109,10 +109,20 @@ public:
     bool active = false;
 };
 
-class NoProxy final : public ldm::core::ProxyResolver {
+// Answers at once unless `pending` is set; then it records the lookup and answers nothing.
+class FakeProxy final : public ldm::core::ProxyResolver {
 public:
     void Configure(const ldm::model::Settings&) override {}
-    std::optional<std::string> ProxyFor(const std::string&) override { return std::nullopt; }
+    ldm::core::ProxyLookup Resolve(DownloadId id, std::int64_t epoch, const std::string&) override
+    {
+        if (pending) {
+            lookups.emplace_back(id, epoch);
+            return ldm::core::ProxyLookup{true, std::nullopt};
+        }
+        return ldm::core::ProxyLookup{false, std::nullopt};
+    }
+    bool pending = false;
+    std::vector<std::pair<DownloadId, std::int64_t>> lookups;
 };
 
 class RecordingObserver final : public ldm::core::CoreObserver {
@@ -241,7 +251,7 @@ protected:
     FakeSecrets secrets_;
     CountingIds ids_;
     FakePower power_;
-    NoProxy proxy_;
+    FakeProxy proxy_;
     RecordingObserver observer_;
     std::unique_ptr<Coordinator> coordinator_;
     std::uint64_t token_ = 0;
@@ -615,6 +625,37 @@ TEST_F(CoordinatorTest, RedownloadReplacesTheCompletedFile)
     Finish(id, 2, TransferOutcome::Completed, {{0, 4, 4}}, std::nullopt, 4);
     EXPECT_FALSE(files_.Exists(kRoot / L"a.dat")) << "replaced only after the new copy is complete";
     EXPECT_EQ(engine_.finalizes.back().finalPath, kRoot / L"a.dat");
+}
+
+TEST_F(CoordinatorTest, SlowProxyLookupDelaysTheEngineWithoutBlocking)
+{
+    proxy_.pending = true;
+    const DownloadId id = *Add("http://x.test/a.dat").id;
+    EXPECT_TRUE(engine_.starts.empty()) << "the engine waits for the proxy";
+    EXPECT_EQ(View(id).download.status, DownloadStatus::Downloading);
+    ASSERT_EQ(proxy_.lookups.size(), 1u);
+
+    Send(id, 0, ldm::core::ProxyResolved{"http://stale.test:1"});
+    EXPECT_TRUE(engine_.starts.empty()) << "an answer for another run is ignored";
+    Send(id, 1, ldm::core::ProxyResolved{"http://proxy.test:3128"});
+    ASSERT_EQ(engine_.starts.size(), 1u);
+    EXPECT_EQ(engine_.starts.back().proxy, "http://proxy.test:3128");
+}
+
+TEST_F(CoordinatorTest, StopAndDeleteWhileTheProxyIsLookedUp)
+{
+    proxy_.pending = true;
+    const DownloadId stopped = *Add("http://x.test/a.dat").id;
+    coordinator_->Handle(ldm::core::StopCommand{{stopped}});
+    EXPECT_TRUE(engine_.stops.empty()) << "nothing to stop in the engine";
+    EXPECT_EQ(View(stopped).download.status, DownloadStatus::Paused);
+    Send(stopped, 1, ldm::core::ProxyResolved{std::nullopt});
+    EXPECT_TRUE(engine_.starts.empty()) << "a late answer must not start a stopped run";
+
+    const DownloadId deleted = *Add("http://x.test/b.dat").id;
+    coordinator_->Handle(ldm::core::DeleteCommand{{deleted}, true});
+    EXPECT_FALSE(InSnapshot(deleted));
+    EXPECT_FALSE(Stored(deleted).has_value());
 }
 
 void EnableQuota(Coordinator& coordinator, bool warn)

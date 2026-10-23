@@ -517,11 +517,11 @@ void Coordinator::Delete(const std::vector<model::DownloadId>& ids, bool deleteF
             entry->deleteWhenStopped = true;
             entry->deleteFilesWhenStopped = deleteFiles;
             entry->download.status = DownloadStatus::Deleting;
-            if (entry->running) {
-                RequestStop(*entry);
-            }
             Save(*entry);
             MarkChanged(*entry);
+            if (entry->running) {
+                RequestStop(*entry);  // last: a run that never reached the engine is removed here
+            }
             continue;
         }
         RemoveEntry(id, deleteFiles && entry->download.status == DownloadStatus::Completed);
@@ -846,8 +846,12 @@ void Coordinator::OnEngineEvent(EngineEvent event)
                 OnProgress(*entry, payload);
             } else if constexpr (std::is_same_v<T, TransferFinished>) {
                 OnFinished(*entry, payload);
-            } else {
+            } else if constexpr (std::is_same_v<T, FinalizeFinished>) {
                 OnFinalized(*entry, payload);
+            } else if constexpr (std::is_same_v<T, ProxyResolved>) {
+                OnProxyResolved(*entry, payload);
+            } else {
+                static_assert(sizeof(T) == 0, "unhandled engine event");
             }
         },
         event.payload);
@@ -1076,8 +1080,29 @@ void Coordinator::Start(Entry& entry)
     entry.running = true;
     entry.stopRequested = false;
     MarkChanged(entry);
-    ports_.engine->Start(BuildRequest(entry));
     UpdatePowerRequest();
+    const ProxyLookup lookup = ports_.proxy->Resolve(d.id, d.epoch, d.url);
+    if (lookup.pending) {
+        entry.awaitingProxy = true;  // shows as connecting; OnProxyResolved starts the engine
+        return;
+    }
+    StartEngine(entry, lookup.proxy);
+}
+
+void Coordinator::StartEngine(Entry& entry, std::optional<std::string> proxy)
+{
+    TransferRequest request = BuildRequest(entry);
+    request.proxy = std::move(proxy);
+    ports_.engine->Start(std::move(request));
+}
+
+void Coordinator::OnProxyResolved(Entry& entry, const ProxyResolved& resolved)
+{
+    if (!entry.awaitingProxy || !entry.running) {
+        return;
+    }
+    entry.awaitingProxy = false;
+    StartEngine(entry, resolved.proxy);
 }
 
 TransferRequest Coordinator::BuildRequest(Entry& entry)
@@ -1106,7 +1131,6 @@ TransferRequest Coordinator::BuildRequest(Entry& entry)
             }
         }
     }
-    request.proxy = ports_.proxy->ProxyFor(d.url);
     request.ftpActiveMode = !settings_.ftpPassive;
     request.partialPath = PathFromUtf8(d.partialPath.value_or(std::string()));
     request.knownSize = d.totalSize;
@@ -1134,6 +1158,17 @@ TransferRequest Coordinator::BuildRequest(Entry& entry)
 void Coordinator::RequestStop(Entry& entry)
 {
     if (!entry.running || entry.stopRequested) {
+        return;
+    }
+    if (entry.awaitingProxy) {
+        // The engine never started this run: finish it here, as the engine would have, so delete,
+        // restart and shutdown follow their usual path. `entry` may be removed by this call.
+        entry.awaitingProxy = false;
+        TransferFinished stopped;
+        stopped.outcome = TransferOutcome::Stopped;
+        stopped.segments = entry.download.segments;
+        stopped.totalSize = entry.download.totalSize;
+        OnFinished(entry, stopped);
         return;
     }
     entry.stopRequested = true;

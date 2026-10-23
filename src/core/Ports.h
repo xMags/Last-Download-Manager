@@ -1,6 +1,7 @@
 #pragma once
 
 #include "base/Result.h"
+#include "model/Ids.h"
 #include "model/Settings.h"
 
 #include <chrono>
@@ -61,12 +62,20 @@ public:
 
 // Chooses the proxy for one address according to Options > Proxy (checklist O-06). Returns a
 // libcurl proxy URL, or nothing for a direct connection.
+// What a proxy lookup knows at once.
+struct ProxyLookup {
+    bool pending = false;              // a lookup runs; its answer arrives as a ProxyResolved event
+    std::optional<std::string> proxy;  // when not pending; nothing: connect directly
+};
+
+// Picks the proxy for each run. Lookups that may take long (PAC scripts, WPAD detection) must not
+// block the caller, which is the core thread: they answer later through the engine listener.
 class ProxyResolver {
 public:
     virtual ~ProxyResolver() = default;
     // Called at startup and whenever settings change.
     virtual void Configure(const model::Settings& settings) = 0;
-    [[nodiscard]] virtual std::optional<std::string> ProxyFor(const std::string& url) = 0;
+    [[nodiscard]] virtual ProxyLookup Resolve(model::DownloadId id, std::int64_t epoch, const std::string& url) = 0;
 };
 
 }  // namespace ldm::core

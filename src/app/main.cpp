@@ -155,7 +155,7 @@ int WINAPI wWinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int sho
     ldm::storage::DpapiSecretProtector secrets;
     ldm::platform::RandomIdGenerator ids;
     ldm::platform::PowerRequest power;
-    ldm::platform::WinHttpProxyResolver proxy(secrets);
+    ldm::platform::WinHttpProxyResolver proxy(secrets, core);  // answers slow lookups through the core thread
     ldm::platform::WinShellActions shell;
     ldm::platform::WinSystemActions system;
     ldm::platform::RunKeyStartup startup;
