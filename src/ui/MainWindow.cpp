@@ -26,6 +26,7 @@ constexpr int kMinimumTreeWidth96 = 120;
 constexpr int kMinimumListWidth96 = 200;
 constexpr UINT kSaveLayoutMessage = WM_APP + 10;
 constexpr UINT kExternalInputMessage = WM_APP + 11;
+constexpr UINT kBrowserEventMessage = WM_APP + 12;
 constexpr UINT_PTR kExternalInputRetryTimer = 1;
 constexpr UINT kExternalInputRetryMs = 500;
 
@@ -66,7 +67,12 @@ bool ParsePlacement(const std::string& text, RECT& rect, UINT& showCommand, int&
 
 }  // namespace
 
-MainWindow::MainWindow(const Services& services) : services_(services) {}
+MainWindow::MainWindow(const Services& services) : services_(services)
+{
+    if (services_.browser != nullptr) {
+        browserSessions_ = std::make_unique<BrowserSessions>(*services_.browser, base::ToUtf8(LDM_VERSION_WIDE));
+    }
+}
 
 MainWindow::~MainWindow()
 {
@@ -276,6 +282,30 @@ void MainWindow::PostLaunchRequest(core::LaunchRequest request)
     ::PostMessageW(window_, kExternalInputMessage, 0, 0);
 }
 
+void MainWindow::PostBrowserEvent(BrowserEvent event)
+{
+    {
+        const std::lock_guard lock(browserMutex_);
+        browserEvents_.push_back(std::move(event));
+    }
+    ::PostMessageW(window_, kBrowserEventMessage, 0, 0);
+}
+
+void MainWindow::DrainBrowserEvents()
+{
+    std::deque<BrowserEvent> events;
+    {
+        const std::lock_guard lock(browserMutex_);
+        events.swap(browserEvents_);
+    }
+    if (!browserSessions_ || !snapshot_) {
+        return;
+    }
+    for (BrowserEvent& event : events) {
+        browserSessions_->OnEvent(std::move(event), snapshot_->settings);
+    }
+}
+
 void MainWindow::DrainExternalInput()
 {
     if (draining_ || !controller_) {
@@ -429,6 +459,9 @@ void MainWindow::ApplySnapshot(std::shared_ptr<const core::Snapshot> snapshot)
     list_.SetSnapshot(snapshot_);
     ApplyViewSettings(snapshot_->settings, false);
     controller_->OnSnapshot(*snapshot_);
+    if (browserSessions_) {
+        browserSessions_->OnSettingsChanged(snapshot_->settings);
+    }
     UpdateStatus();
 }
 
@@ -630,6 +663,9 @@ LRESULT MainWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         return 0;
     case kExternalInputMessage:
         DrainExternalInput();
+        return 0;
+    case kBrowserEventMessage:
+        DrainBrowserEvents();
         return 0;
     case WM_TIMER:
         if (wParam == kExternalInputRetryTimer) {

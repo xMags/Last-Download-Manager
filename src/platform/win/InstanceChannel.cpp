@@ -3,165 +3,26 @@
 #include "base/Utf.h"
 #include "core/FileNames.h"
 #include "core/Url.h"
+#include "platform/win/PipeIo.h"
 
 #include <nlohmann/json.hpp>
-#include <sddl.h>
 
-#include <array>
 #include <filesystem>
-#include <vector>
 
 namespace ldm::platform {
 
 namespace {
 
-constexpr DWORD kIoTimeoutMs = 3000;
 constexpr size_t kMaxFieldBytes = 32 * 1024;
-
-class Handle {
-public:
-    Handle() = default;
-    explicit Handle(HANDLE handle) noexcept : handle_(handle) {}
-    Handle(const Handle&) = delete;
-    Handle& operator=(const Handle&) = delete;
-    ~Handle()
-    {
-        if (handle_ != nullptr && handle_ != INVALID_HANDLE_VALUE) {
-            ::CloseHandle(handle_);
-        }
-    }
-    [[nodiscard]] HANDLE Get() const noexcept { return handle_; }
-    [[nodiscard]] bool Valid() const noexcept { return handle_ != nullptr && handle_ != INVALID_HANDLE_VALUE; }
-
-private:
-    HANDLE handle_ = INVALID_HANDLE_VALUE;
-};
-
-std::wstring UserSid()
-{
-    HANDLE rawToken = nullptr;
-    if (!::OpenProcessToken(::GetCurrentProcess(), TOKEN_QUERY, &rawToken)) {
-        return {};
-    }
-    Handle token(rawToken);
-    DWORD size = 0;
-    ::GetTokenInformation(token.Get(), TokenUser, nullptr, 0, &size);
-    std::vector<std::byte> buffer(size);
-    if (!::GetTokenInformation(token.Get(), TokenUser, buffer.data(), size, &size)) {
-        return {};
-    }
-    const auto* user = reinterpret_cast<const TOKEN_USER*>(buffer.data());  // the buffer holds a TOKEN_USER
-    wchar_t* text = nullptr;
-    if (!::ConvertSidToStringSidW(user->User.Sid, &text)) {
-        return {};
-    }
-    std::wstring sid(text);
-    ::LocalFree(text);
-    return sid;
-}
-
-std::wstring SessionSuffix()
-{
-    DWORD session = 0;
-    ::ProcessIdToSessionId(::GetCurrentProcessId(), &session);
-    return std::to_wstring(session) + L"-" + UserSid();
-}
-
-std::wstring PipeName()
-{
-    return L"\\\\.\\pipe\\LastDownloadManager-" + SessionSuffix();
-}
-
-// Only the current user may open the pipe.
-struct OwnerOnlySecurity {
-    OwnerOnlySecurity()
-    {
-        const std::wstring sddl = L"D:P(A;;GA;;;" + UserSid() + L")";
-        ::ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl.c_str(), SDDL_REVISION_1, &descriptor, nullptr);
-        attributes.nLength = sizeof(attributes);
-        attributes.lpSecurityDescriptor = descriptor;
-        attributes.bInheritHandle = FALSE;
-    }
-    ~OwnerOnlySecurity()
-    {
-        if (descriptor != nullptr) {
-            ::LocalFree(descriptor);
-        }
-    }
-    OwnerOnlySecurity(const OwnerOnlySecurity&) = delete;
-    OwnerOnlySecurity& operator=(const OwnerOnlySecurity&) = delete;
-
-    PSECURITY_DESCRIPTOR descriptor = nullptr;
-    SECURITY_ATTRIBUTES attributes{};
-};
-
-// Overlapped read or write of exactly `size` bytes, giving up at the timeout or the stop event.
-bool TransferAll(HANDLE pipe, void* data, DWORD size, bool write, HANDLE stopEvent)
-{
-    auto* bytes = static_cast<std::byte*>(data);
-    DWORD done = 0;
-    Handle event(::CreateEventW(nullptr, TRUE, FALSE, nullptr));
-    while (done < size) {
-        OVERLAPPED overlapped{};
-        overlapped.hEvent = event.Get();
-        DWORD chunk = 0;
-        const BOOL started = write ? ::WriteFile(pipe, bytes + done, size - done, &chunk, &overlapped)
-                                   : ::ReadFile(pipe, bytes + done, size - done, &chunk, &overlapped);
-        if (!started && ::GetLastError() != ERROR_IO_PENDING) {
-            return false;
-        }
-        if (!started) {
-            const HANDLE waits[2] = {event.Get(), stopEvent};
-            const DWORD count = stopEvent != nullptr ? 2 : 1;
-            if (::WaitForMultipleObjects(count, waits, FALSE, kIoTimeoutMs) != WAIT_OBJECT_0) {
-                ::CancelIoEx(pipe, &overlapped);
-                ::GetOverlappedResult(pipe, &overlapped, &chunk, TRUE);
-                return false;
-            }
-            if (!::GetOverlappedResult(pipe, &overlapped, &chunk, FALSE)) {
-                return false;
-            }
-        }
-        if (chunk == 0) {
-            return false;
-        }
-        done += chunk;
-    }
-    return true;
-}
 
 bool WriteMessage(HANDLE pipe, const std::string& payload, HANDLE stopEvent)
 {
-    if (payload.size() > kMaxMessageBytes) {
-        return false;
-    }
-    std::array<std::byte, 4> header{};
-    const auto length = static_cast<std::uint32_t>(payload.size());
-    for (int i = 0; i < 4; ++i) {
-        header[static_cast<size_t>(i)] = static_cast<std::byte>((length >> (8 * i)) & 0xFF);
-    }
-    return TransferAll(pipe, header.data(), 4, true, stopEvent) &&
-           TransferAll(pipe, const_cast<char*>(payload.data()), length, true, stopEvent);  // WriteFile does not modify it
+    return WriteFrame(pipe, payload, kMaxMessageBytes, stopEvent);
 }
 
 std::optional<std::string> ReadMessage(HANDLE pipe, HANDLE stopEvent)
 {
-    std::array<std::byte, 4> header{};
-    if (!TransferAll(pipe, header.data(), 4, false, stopEvent)) {
-        return std::nullopt;
-    }
-    std::uint32_t length = 0;
-    for (int i = 0; i < 4; ++i) {
-        length |= static_cast<std::uint32_t>(header[static_cast<size_t>(i)]) << (8 * i);
-    }
-    if (length == 0 || length > kMaxMessageBytes) {
-        return std::nullopt;
-    }
-    std::string payload(length, '\0');
-    if (!TransferAll(pipe, payload.data(), length, false, stopEvent)) {
-        return std::nullopt;
-    }
-    return payload;
+    return ReadFrame(pipe, kMaxMessageBytes, stopEvent);
 }
 
 std::optional<std::string> OptionalString(const nlohmann::json& object, const char* key, bool& valid)
@@ -256,7 +117,7 @@ std::optional<core::LaunchRequest> DecodeLaunchRequest(std::string_view json)
 
 std::unique_ptr<InstanceLock> InstanceLock::TryAcquire()
 {
-    const std::wstring name = L"Local\\LastDownloadManager.Instance-" + SessionSuffix();
+    const std::wstring name = L"Local\\LastDownloadManager.Instance-" + SessionAndUserSuffix();
     HANDLE mutex = ::CreateMutexW(nullptr, TRUE, name.c_str());
     if (mutex == nullptr) {
         return nullptr;
@@ -298,15 +159,15 @@ bool InstanceServer::Start()
 {
     stopEvent_ = ::CreateEventW(nullptr, TRUE, FALSE, nullptr);
     OwnerOnlySecurity security;
-    if (stopEvent_ == nullptr || security.descriptor == nullptr) {
+    if (stopEvent_ == nullptr || !security.Valid()) {
         return false;
     }
     // FILE_FLAG_FIRST_PIPE_INSTANCE fails if anyone created the name first, so another program
     // cannot pose as LDM and receive the commands.
-    firstPipe_ = ::CreateNamedPipeW(PipeName().c_str(),
+    firstPipe_ = ::CreateNamedPipeW(InstancePipeName().c_str(),
                                     PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED | FILE_FLAG_FIRST_PIPE_INSTANCE,
                                     PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS, 1,
-                                    kMaxMessageBytes, kMaxMessageBytes, 0, &security.attributes);
+                                    kMaxMessageBytes, kMaxMessageBytes, 0, security.Attributes());
     if (firstPipe_ == INVALID_HANDLE_VALUE) {
         return false;
     }
@@ -316,7 +177,7 @@ bool InstanceServer::Start()
 
 void InstanceServer::Run()
 {
-    Handle connected(::CreateEventW(nullptr, TRUE, FALSE, nullptr));
+    OwnedHandle connected(::CreateEventW(nullptr, TRUE, FALSE, nullptr));
     const HANDLE pipe = firstPipe_;
     while (true) {
         OVERLAPPED overlapped{};
@@ -362,9 +223,9 @@ void InstanceServer::Run()
 
 bool ForwardToRunningInstance(const core::LaunchRequest& request)
 {
-    const std::wstring name = PipeName();
+    const std::wstring name = InstancePipeName();
     for (int attempt = 0; attempt < 10; ++attempt) {
-        Handle pipe(::CreateFileW(name.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING,
+        OwnedHandle pipe(::CreateFileW(name.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING,
                                   FILE_FLAG_OVERLAPPED | SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION, nullptr));
         if (!pipe.Valid()) {
             if (::GetLastError() != ERROR_PIPE_BUSY && ::GetLastError() != ERROR_FILE_NOT_FOUND) {

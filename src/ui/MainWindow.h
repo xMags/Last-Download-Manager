@@ -3,6 +3,8 @@
 #include "core/Commands.h"
 #include "core/LaunchRequest.h"
 #include "core/Snapshot.h"
+#include "ui/BrowserLink.h"
+#include "ui/BrowserSessions.h"
 #include "ui/CategoryPane.h"
 #include "ui/DownloadListView.h"
 #include "ui/DropTargetWindow.h"
@@ -41,6 +43,7 @@ public:
         SystemActions* system = nullptr;
         core::SecretProtector* secrets = nullptr;
         StartupRegistration* startup = nullptr;
+        BrowserLink* browser = nullptr;  // optional: no browser integration without it
     };
 
     explicit MainWindow(const Services& services);
@@ -62,6 +65,9 @@ public:
 
     // Queues a launch request for the UI thread. Safe to call from any thread.
     void PostLaunchRequest(core::LaunchRequest request);
+    // Queues a browser connection event for the UI thread. Safe to call from any thread; never
+    // waits for dialogs, so extensions get their answers while a dialog is open.
+    void PostBrowserEvent(BrowserEvent event);
 
 private:
     static LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam);
@@ -94,6 +100,7 @@ private:
     void DrainExternalInput();
     // Queues dropped addresses for DrainExternalInput; safe inside another program's drag loop.
     void QueueDroppedUrls(std::vector<std::string> urls);
+    void DrainBrowserEvents();
 
     // Input that arrives from outside the window and may open dialogs.
     using ExternalInput = std::variant<core::LaunchRequest, std::vector<std::string>>;
@@ -113,6 +120,7 @@ private:
     DropTargetWindow dropTarget_;
     LinkDropTarget linkDrop_;  // links dropped on the main window
     std::unique_ptr<MainController> controller_;
+    std::unique_ptr<BrowserSessions> browserSessions_;
 
     UniqueFont uiFont_;
     UniqueFont listFont_;
@@ -125,6 +133,9 @@ private:
 
     std::mutex externalMutex_;  // guards externalInput_; launch requests arrive on the pipe thread
     std::deque<ExternalInput> externalInput_;
+
+    std::mutex browserMutex_;  // guards browserEvents_; they arrive on the browser pipe thread
+    std::deque<BrowserEvent> browserEvents_;
 };
 
 }  // namespace ldm::ui
