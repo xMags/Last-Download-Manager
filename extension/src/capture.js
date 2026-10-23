@@ -2,7 +2,7 @@
 // paused, not cancelled, until LDM has accepted it: if LDM cannot be reached or refuses, the
 // browser simply continues, so a download is never lost.
 
-import { isCapturableAddress, nameFromUrl, shouldCapture } from './capture-rules.js';
+import { baseName, isCapturableAddress, nameFromUrl, shouldCapture } from './capture-rules.js';
 import { cookieStoreFor } from './cookie-stores.js';
 import { isAcceptedCapture, makeCapture } from './protocol.js';
 
@@ -82,6 +82,28 @@ export class DownloadCapture {
       return true;
     } finally {
       this.showDownloadUi();
+    }
+  }
+
+  /**
+   * Chrome and Edge: decides before the browser settles the download's name, then lets it go on.
+   * A browser that asks where to save (Chrome always does in private windows) shows that dialog
+   * once the name is settled, so it then asks only about downloads LDM left to it.
+   * @param {object} item the DownloadItem of onDeterminingFilename
+   * @param {function(): void} suggest that event's callback; called once for every download the
+   *   browser keeps, also on errors. A download LDM took is erased already, and Chrome reports
+   *   suggesting a name for it as an error.
+   * @returns {Promise<boolean>} true when LDM took the download over
+   */
+  async takeBeforeNaming(item, suggest) {
+    let taken = false;
+    try {
+      taken = await this.take(item, baseName(item.filename));
+      return taken;
+    } finally {
+      if (!taken) {
+        suggest();  // keep the browser's own name
+      }
     }
   }
 
