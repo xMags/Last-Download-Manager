@@ -71,6 +71,7 @@ export class DownloadCapture {
         userAgent: this.options.userAgent,
         cookies: await this.cookiesFor([url, finalUrl], storeId),
         post: this.options.postFor?.(url) ?? undefined,
+        chosen: verdict === 'force',
       });
       const answer = await this.connection.oneShot(message, ANSWER_TIMEOUT_MS);
       if (!isAcceptedCapture(answer, message.id)) {
@@ -128,6 +129,7 @@ export class DownloadCapture {
       fileName: nameFromUrl(href),
       userAgent: this.options.userAgent,
       cookies: await this.cookiesFor([href], storeId),
+      chosen: true,  // the menu or the force keys: never an automatic capture
     });
     return isAcceptedCapture(await this.connection.oneShot(message, ANSWER_TIMEOUT_MS), message.id);
   }

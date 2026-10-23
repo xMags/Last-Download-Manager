@@ -262,6 +262,13 @@ std::optional<Capture> ParseCapture(const nlohmann::json& object)
     if (!ParsePost(object, capture.post) || !ParseCookies(object, kMaxCookies, capture.cookies)) {
         return std::nullopt;
     }
+    const auto chosen = object.find("chosen");
+    if (chosen != object.end() && !chosen->is_null()) {
+        if (!chosen->is_boolean()) {
+            return std::nullopt;
+        }
+        capture.chosen = chosen->get<bool>();
+    }
     return capture;
 }
 

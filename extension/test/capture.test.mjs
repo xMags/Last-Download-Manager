@@ -205,6 +205,13 @@ test('the force keys take a type that is not in the list', async () => {
   const connection = fakeConnection();
   assert.equal(await newCapture(api, connection, { verdict: 'force' }).take(ITEM, 'notes.txt'), true);
   assert.deepEqual(calls, [['ui', false], ['pause', 7], ['cancel', 7], ['erase', 7], ['ui', true]]);
+  assert.equal(connection.sent[0][1].chosen, true, 'the user picked LDM');
+});
+
+test('a download taken by the rules alone is not marked as chosen by the user', async () => {
+  const connection = fakeConnection();
+  await newCapture(fakeBrowser().api, connection).take(ITEM, 'x.zip');
+  assert.equal(connection.sent[0][1].chosen, undefined);
 });
 
 test('a forced link goes to LDM with its page as referrer', async () => {
@@ -215,6 +222,7 @@ test('a forced link goes to LDM with its page as referrer', async () => {
   assert.equal(message.url, 'https://a.test/get.php?id=3');
   assert.equal(message.referrer, 'https://a.test/list');
   assert.equal(message.fileName, 'get.php');
+  assert.equal(message.chosen, true);
   assert.equal(await newCapture(api, fakeConnection()).sendLink('javascript:void(0)', 'https://a.test/'), false);
   assert.equal(await newCapture(api, fakeConnection(), { enabled: false }).sendLink('https://a.test/x', 'https://a.test/'), false);
 });

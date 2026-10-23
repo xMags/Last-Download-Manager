@@ -267,7 +267,9 @@ void AddFlow::AddWithInfoDialog(InfoDialogInput input)
     pendingAdds_[token].dialog = &dialog;
     const DownloadInfoDialog::Choice choice = dialog.Run(context_.owner);
     categoryToSelect_.reset();
-    if (choice.action == DownloadInfoDialog::Action::Cancel && input.browser && context_.captureCancelled) {
+    // Only downloads LDM took on its own count toward offering an exception (checklist B-06).
+    if (choice.action == DownloadInfoDialog::Action::Cancel && input.browser && !input.browser->chosen &&
+        context_.captureCancelled) {
         context_.captureCancelled(url);
     }
 
