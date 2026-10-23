@@ -40,7 +40,7 @@ test('config is parsed and bad patterns are dropped', () => {
     v: 1, id: 'push', type: 'config', appVersion: '5.0.0',
     capturedExtensions: ['zip', 'r0*', 'BAD', 'a b', 7, '', 'x'.repeat(33)],
   });
-  assert.deepEqual(config, { appVersion: '5.0.0', capturedExtensions: ['zip', 'r0*'] });
+  assert.deepEqual(config, { appVersion: '5.0.0', capturedExtensions: ['zip', 'r0*'], siteExceptions: [], addressExceptions: [] });
 });
 
 test('anything that is not a config is refused', () => {
@@ -49,4 +49,14 @@ test('anything that is not a config is refused', () => {
   assert.equal(parseConfig({ v: 2, type: 'config', appVersion: '1', capturedExtensions: [] }), null);
   assert.equal(parseConfig({ v: 1, type: 'hello', appVersion: '1', capturedExtensions: [] }), null);
   assert.equal(parseConfig({ v: 1, type: 'config', appVersion: '1', capturedExtensions: 'zip' }), null);
+});
+
+test('exception lists keep only patterns without spaces or control characters', () => {
+  const config = parseConfig({
+    v: 1, id: 'push', type: 'config', appVersion: '5.0.0', capturedExtensions: [],
+    siteExceptions: ['*.a.test', 'b.test/x/*', 'bad site', 7, ''],
+    addressExceptions: ['https://a.test/*', 'x' + String.fromCharCode(10) + 'y'],
+  });
+  assert.deepEqual(config.siteExceptions, ['*.a.test', 'b.test/x/*']);
+  assert.deepEqual(config.addressExceptions, ['https://a.test/*']);
 });

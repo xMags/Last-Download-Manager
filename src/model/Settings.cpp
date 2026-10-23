@@ -244,6 +244,8 @@ void VisitSettings(Visitor& v, SettingsType& s)
     v.Bool("general.monitorClipboard", s.monitorClipboard);
 
     v.String("fileTypes.captured", s.capturedExtensions);
+    v.String("fileTypes.siteExceptions", s.captureSiteExceptions);
+    v.String("fileTypes.addressExceptions", s.captureAddressExceptions);
 
     v.String("saveTo.temporaryDirectory", s.temporaryDirectory);
     v.Bool("saveTo.setFileDateFromServer", s.setFileDateFromServer);
@@ -325,6 +327,12 @@ std::string DefaultCapturedExtensions()
     return "3GP 7Z AAC ACE AIF APK ARJ ASF AVI BIN BZ2 DMG DOC DOCX EXE FLAC FLV GZ GZIP IMG ISO LZH "
            "M4A M4V MKV MOV MP3 MP4 MPA MPE MPEG MPG MSI MSU OGG OGV OPUS PDF PPS PPT PPTX QT R0* R1* RA "
            "RAR RM RMVB SEA SIT SITX TAR TIF TIFF TORRENT WAV WEBM WMA WMV XLS XLSX XZ Z ZIP ZST";
+}
+
+std::string DefaultCaptureSiteExceptions()
+{
+    // Windows Update fetches its packages through the browser download machinery on some systems.
+    return "*.update.microsoft.com download.windowsupdate.com";
 }
 
 SettingsLoadResult SettingsFromMap(const SettingsMap& values)

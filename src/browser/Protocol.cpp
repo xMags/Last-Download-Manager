@@ -321,6 +321,8 @@ std::string EncodeConfig(const Config& config, std::string_view replyTo)
     nlohmann::json message = Envelope(replyTo, "config");
     message["appVersion"] = config.appVersion;
     message["capturedExtensions"] = config.capturedExtensions;
+    message["siteExceptions"] = config.siteExceptions;
+    message["addressExceptions"] = config.addressExceptions;
     return message.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
 }
 

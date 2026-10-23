@@ -13,7 +13,7 @@ export class DownloadCapture {
   /**
    * @param {object} api the extension API object
    * @param {import('./connection.js').LdmConnection} connection
-   * @param {{ready: Promise, isEnabled: function(): boolean, patterns: function(): string[],
+   * @param {{ready: Promise, isEnabled: function(): boolean, rules: function(): object,
    *          userAgent: string, canHideDownloadUi: boolean}} options
    *   ready settles once the stored settings are loaded; a download can wake the extension first.
    */
@@ -42,7 +42,7 @@ export class DownloadCapture {
     }
     const url = item.url;
     const finalUrl = item.finalUrl || item.url;
-    if (!shouldCapture({ url: finalUrl, fileName }, this.options.patterns())) {
+    if (!shouldCapture({ url, finalUrl, fileName }, this.options.rules())) {
       return false;
     }
 

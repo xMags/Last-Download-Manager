@@ -17,6 +17,7 @@ add_executable(ldm_unit_tests
     model/SettingsTests.cpp
     storage/SqliteStoreTests.cpp
     ui/BatchAndHistoryTests.cpp
+    ui/BrowserSessionsTests.cpp
     ui/ExportAndLaunchTests.cpp
     ui/ListModelTests.cpp)
 target_link_libraries(ldm_unit_tests PRIVATE
