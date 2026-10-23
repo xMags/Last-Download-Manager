@@ -65,6 +65,17 @@ test('a press on a link reports it with the keys held, before the browser acts',
   });
 });
 
+test('the right Alt key counts as Alt where it is AltGr, as Firefox reports it', async () => {
+  const page = await loadPage();
+  const altGraph = (name) => name === 'AltGraph';
+  page.fire('keydown', { key: 'AltGraph', getModifierState: altGraph });
+  assert.equal(page.sent.at(-1).keys.alt, true, 'held');
+  page.fire('mousedown', { href: 'https://site.test/a.zip', getModifierState: altGraph });
+  assert.equal(page.sent.at(-1).keys.alt, true, 'clicked');
+  page.fire('keyup', { key: 'AltGraph', getModifierState: () => false });
+  assert.equal(page.sent.at(-1).keys.alt, false, 'released');
+});
+
 test('held keys are reported as they change', async () => {
   const page = await loadPage();
   page.fire('keydown', { key: 'Insert' });
