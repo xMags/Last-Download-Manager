@@ -44,10 +44,15 @@ private:
 // to get a private name while the user's LDM keeps running; anything else in it is ignored.
 [[nodiscard]] std::wstring BrowserPipeName();
 
+// Whether processes of the same user but a lower integrity level may open the object. Windows
+// gives a pipe no integrity label of its own, so without one an LDM running as administrator
+// accepts connections from any program at normal level (M3 design section 5).
+enum class LowerIntegrity { Allowed, Refused };
+
 // Security attributes that let only the current user open the object.
 class OwnerOnlySecurity {
 public:
-    OwnerOnlySecurity();
+    explicit OwnerOnlySecurity(LowerIntegrity lower = LowerIntegrity::Allowed);
     ~OwnerOnlySecurity();
     OwnerOnlySecurity(const OwnerOnlySecurity&) = delete;
     OwnerOnlySecurity& operator=(const OwnerOnlySecurity&) = delete;
