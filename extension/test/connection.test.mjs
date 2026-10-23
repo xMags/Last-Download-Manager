@@ -230,3 +230,20 @@ test('a conversation without an answer gives null and closes', async () => {
   assert.equal(await opened, null);
   assert.equal(ends, 0, 'onEnd is only for a conversation that was answered');
 });
+
+test('messages LDM sends unasked on the lasting connection reach onMessage', async () => {
+  const api = fakeApi();
+  const received = [];
+  const connection = new LdmConnection(api, {
+    helloInfo: async () => ({ browser: 'Chrome', browserVersion: '141', extensionVersion: '5.0.0', incognitoAllowed: false }),
+    onConfig: () => {},
+    onState: () => {},
+    onMessage: (message) => received.push(message.type),
+  });
+  const ready = connection.connect();
+  await new Promise((resolve) => setImmediate(resolve));
+  api.ports[0].receive(CONFIG);
+  await ready;
+  api.ports[0].receive({ v: 1, id: 'open-page', type: 'open-page', url: 'https://a.test/page' });
+  assert.deepEqual(received, ['open-page']);
+});

@@ -155,7 +155,7 @@ test('a download that already finished is left alone', async () => {
   assert.equal(connection.sent.length, 0);
 });
 
-test('nothing happens when integration is off, the type is not captured, or the window is private', async () => {
+test('nothing happens when integration is off, the type is not captured, or a private window has no cookie store', async () => {
   for (const [item, name, enabled] of [[ITEM, 'x.zip', false], [ITEM, 'x.txt', true], [{ ...ITEM, incognito: true }, 'x.zip', true]]) {
     const { api, calls } = fakeBrowser();
     const connection = fakeConnection();
@@ -196,4 +196,20 @@ test('a forced link goes to LDM with its page as referrer', async () => {
   assert.equal(message.fileName, 'get.php');
   assert.equal(await newCapture(api, fakeConnection()).sendLink('javascript:void(0)', 'https://a.test/'), false);
   assert.equal(await newCapture(api, fakeConnection(), { enabled: false }).sendLink('https://a.test/x', 'https://a.test/'), false);
+});
+
+test('a private window download is taken with the cookies of that window', async () => {
+  const { api, calls } = fakeBrowser();
+  const stores = [];
+  api.cookies.getAllCookieStores = async () => [{ id: '0', tabIds: [1] }, { id: '1', tabIds: [9] }];
+  api.tabs = { get: async (id) => ({ id, incognito: id === 9 }) };
+  const getAll = api.cookies.getAll;
+  api.cookies.getAll = async (details) => {
+    stores.push(details.storeId);
+    return getAll(details);
+  };
+  const connection = fakeConnection();
+  assert.equal(await newCapture(api, connection).take({ ...ITEM, incognito: true }, 'x.zip'), true);
+  assert.ok(calls.some(([kind]) => kind === 'cancel'));
+  assert.deepEqual([...new Set(stores)], ['1'], 'only the private store is read');
 });

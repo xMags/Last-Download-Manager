@@ -3,6 +3,7 @@
 // browser simply continues, so a download is never lost.
 
 import { isCapturableAddress, nameFromUrl, shouldCapture } from './capture-rules.js';
+import { cookieStoreFor } from './cookie-stores.js';
 import { isAcceptedCapture, makeCapture } from './protocol.js';
 
 // Long enough for ldm-host.exe to start LDM (it waits up to 10 seconds) and for LDM to answer,
@@ -38,11 +39,6 @@ export class DownloadCapture {
     if (!this.options.isEnabled() || item.state !== 'in_progress' || item.byExtensionId === this.api.runtime.id) {
       return false;
     }
-    // Private windows come with their own cookie store and need the user's permission: handled
-    // separately (checklist B-11).
-    if (item.incognito) {
-      return false;
-    }
     const url = item.url;
     const finalUrl = item.finalUrl || item.url;
     const verdict = this.options.keyVerdict({ url, finalUrl, referrer: item.referrer, mimeType: item.mime, fileName });
@@ -52,6 +48,11 @@ export class DownloadCapture {
     // Forced downloads skip the type list and the exceptions (checklist B-03).
     const wanted = verdict === 'force' ? isCapturableAddress(url) : shouldCapture({ url, finalUrl, fileName }, this.options.rules());
     if (!wanted) {
+      return false;
+    }
+    // Private windows have their own cookies (checklist B-11); without them, leave it to the browser.
+    const storeId = await cookieStoreFor(this.api, item);
+    if (storeId === null) {
       return false;
     }
 
@@ -68,7 +69,7 @@ export class DownloadCapture {
         fileSize: item.totalBytes > 0 ? item.totalBytes : item.fileSize,
         mimeType: item.mime,
         userAgent: this.options.userAgent,
-        cookies: await this.cookiesFor([url, finalUrl]),
+        cookies: await this.cookiesFor([url, finalUrl], storeId),
         post: this.options.postFor?.(url) ?? undefined,
       });
       const answer = await this.connection.oneShot(message, ANSWER_TIMEOUT_MS);
@@ -87,12 +88,16 @@ export class DownloadCapture {
   /**
    * Gives a link clicked with the force keys straight to LDM (the browser does not load it).
    * `chosen`: the user picked LDM for this link in the right-click menu, which works also while
-   * the toolbar button has integration turned off.
+   * the toolbar button has integration turned off. `tab`: where the link is, for its cookies.
    * @returns {Promise<boolean>} true when LDM accepted it
    */
-  async sendLink(href, pageUrl, { chosen = false } = {}) {
+  async sendLink(href, pageUrl, { chosen = false, tab } = {}) {
     await this.options.ready;
     if ((!chosen && !this.options.isEnabled()) || !isCapturableAddress(href)) {
+      return false;
+    }
+    const storeId = await cookieStoreFor(this.api, tab);
+    if (storeId === null) {
       return false;
     }
     const message = makeCapture({
@@ -100,7 +105,7 @@ export class DownloadCapture {
       referrer: pageUrl,
       fileName: nameFromUrl(href),
       userAgent: this.options.userAgent,
-      cookies: await this.cookiesFor([href]),
+      cookies: await this.cookiesFor([href], storeId),
     });
     return isAcceptedCapture(await this.connection.oneShot(message, ANSWER_TIMEOUT_MS), message.id);
   }
@@ -117,9 +122,10 @@ export class DownloadCapture {
     await this.api.downloads.resume(id).catch(() => {});
   }
 
-  /** @private The cookies the browser would send to these addresses (ENG-14). */
-  async cookiesFor(urls) {
-    const lists = await Promise.all([...new Set(urls)].map((url) => this.api.cookies.getAll({ url }).catch(() => [])));
+  /** @private The cookies the browser would send to these addresses (ENG-14), from `storeId` or the normal store. */
+  async cookiesFor(urls, storeId) {
+    const details = (url) => (storeId ? { url, storeId } : { url });
+    const lists = await Promise.all([...new Set(urls)].map((url) => this.api.cookies.getAll(details(url)).catch(() => [])));
     return lists.flat();
   }
 

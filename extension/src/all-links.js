@@ -2,6 +2,7 @@
 // collects the page's links, sends them to LDM, which opens its Download All Links dialog, and
 // then checks the links' types and sizes for that dialog until it closes.
 
+import { cookieStoreFor } from './cookie-stores.js';
 import { LinkChecker } from './link-check.js';
 import { collectPageLinks } from './page-links.js';
 import { isLinksDone, linksAccepted, makeLinkInfo, makeLinks, MAX_PAGE_LINKS } from './protocol.js';
@@ -15,7 +16,6 @@ export const LinksMessage = Object.freeze({
   NoLinks: 'Last Download Manager cannot find any links on this page.\n\nIf the page does have links, ' +
     'reload it and try again.',
   NoSelectedLinks: 'Last Download Manager cannot find any links in the selected part of the page.',
-  Private: 'Last Download Manager does not take links from private windows yet.',
   NoContact: 'The browser cannot reach Last Download Manager.\n\nMake sure LDM is installed and has been ' +
     'started at least once, so it can register itself with this browser.',
 });
@@ -39,10 +39,7 @@ export class AllLinks {
    * @param {boolean} selection only the selected links
    */
   async start(tab, frameId, selection) {
-    if (tab.incognito) {
-      this.options.tell(tab, LinksMessage.Private);
-      return;
-    }
+    const storeId = await cookieStoreFor(this.api, tab);
     const links = await this.collect(tab, frameId, selection);
     const noLinks = selection ? LinksMessage.NoSelectedLinks : LinksMessage.NoLinks;
     if (links.length === 0) {
@@ -54,7 +51,7 @@ export class AllLinks {
       referrer: tab.url,
       userAgent: this.options.userAgent,
       links,
-      cookies: await this.cookiesFor(links.map((link) => link.url), tab.cookieStoreId),
+      cookies: storeId === null ? [] : await this.cookiesFor(links.map((link) => link.url), storeId),
     });
     if (!message) {
       this.options.tell(tab, noLinks);
