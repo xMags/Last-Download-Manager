@@ -78,6 +78,9 @@ struct Download {
 
     DownloadStatus status = DownloadStatus::Queued;
     std::int64_t epoch = 0;
+    // A speculative add whose Download File Info dialog has not been answered (checklist A-03).
+    // Stored so that a row left by a crash while the dialog was open is removed at the next start.
+    bool awaitingConfirmation = false;
 
     std::optional<std::int64_t> totalSize;
     std::optional<bool> resumable;
