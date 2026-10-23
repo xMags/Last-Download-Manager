@@ -7,7 +7,7 @@ import { DownloadCapture } from './capture.js';
 import { baseName } from './capture-rules.js';
 import { LdmConnection, State } from './connection.js';
 import { FormPosts } from './form-posts.js';
-import { downloadVerdict, keySettings } from './key-rules.js';
+import { downloadVerdict, keySettings, sendsForcedLinkToLdm } from './key-rules.js';
 import { cleanKeys, LinkClicks } from './link-clicks.js';
 import { isDownloadAddress } from './protocol.js';
 import { applyToolbar, toolbarAppearance } from './toolbar.js';
@@ -100,15 +100,26 @@ api.alarms.onAlarm.addListener((alarm) => {
   }
 });
 
+// Pages opened before the extension was installed or updated have no page script; give them one,
+// so the special keys work there without reloading every tab.
+async function addPageScriptToOpenTabs() {
+  const tabs = await api.tabs.query({ url: ['http://*/*', 'https://*/*'] });
+  await Promise.all(tabs.map((tab) => api.scripting.executeScript({
+    target: { tabId: tab.id, allFrames: true },
+    files: ['src/page-keys.js'],
+  }).catch(() => {})));  // pages the browser protects refuse; nothing to do there
+}
+
 api.runtime.onInstalled.addListener((details) => {
   if (details.reason === 'install') {
     api.tabs.create({ url: api.runtime.getURL('pages/welcome.html') });
   }
+  addPageScriptToOpenTabs().catch((error) => console.warn('LDM: could not prepare open tabs', error));
 });
 
 // Reports from src/page-keys.js in web pages. Page code runs beside that script, so every field
-// is checked here.
-function onPageMessage(message, sender) {
+// is checked here. Returns true when `reply` will be called later.
+function onPageMessage(message, sender, reply) {
   const pageUrl = typeof message.pageUrl === 'string' ? message.pageUrl : undefined;
   switch (message.type) {
     case 'keys':
@@ -119,13 +130,20 @@ function onPageMessage(message, sender) {
         clicks.recordClick({ href: message.href, pageUrl, keys: cleanKeys(message.keys) });
       }
       break;
-    case 'force-link':
-      // Only from a top-level user click, and only when the settings ask for it.
-      if (isDownloadAddress(message.href) && sender.tab && keySettings(rules).skipWebContent === false) {
-        capture.sendLink(message.href, isDownloadAddress(pageUrl) ? pageUrl : undefined)
-          .catch((error) => console.warn('LDM: link hand-over failed', error));
+    case 'force-link': {
+      // A link clicked with the force keys. Links that load in the browser instead (web pages and
+      // links without a file extension, unless the settings say otherwise) are answered at once;
+      // their download, if any, is forced when it starts.
+      const settings = keySettings(rules);
+      if (!enabled || !settings.force.enabled || !isDownloadAddress(message.href) || !sendsForcedLinkToLdm(settings, message.href)) {
+        reply({ handled: false });
+        return false;
       }
-      break;
+      capture.sendLink(message.href, isDownloadAddress(pageUrl) ? pageUrl : undefined)
+        .then((accepted) => reply({ handled: accepted }))
+        .catch(() => reply({ handled: false }));
+      return true;
+    }
     default:
       break;
   }
@@ -136,8 +154,7 @@ api.runtime.onMessage.addListener((message, sender, reply) => {
     return false;
   }
   if (sender.tab) {
-    onPageMessage(message, sender);
-    return false;
+    return onPageMessage(message, sender, reply) === true;
   }
   // Status for the extension's own pages.
   if (!String(sender.url ?? '').startsWith(api.runtime.getURL(''))) {

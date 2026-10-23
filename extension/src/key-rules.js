@@ -75,10 +75,33 @@ export function downloadVerdict(settings, clickKeys, heldKeys, mimeType, fileNam
   return verdict;
 }
 
-const WEB_TYPES = /^(text\/(html|css|javascript|plain|xml)|application\/(xhtml\+xml|javascript|json|xml)|image\/)/i;
-const WEB_EXTENSIONS = /\.(html?|xhtml|php\d?|aspx?|jsp|cgi|js|mjs|css|json|xml|txt|jpe?g|png|gif|webp|avif|bmp|ico|svg)$/i;
+// Web pages, pictures and scripts (the reference's wording for what forcing can leave alone). Plain text,
+// JSON and XML files are files people download, so they are not on the list.
+const WEB_TYPES = /^(text\/(html|css|javascript)|application\/(xhtml\+xml|javascript)|image\/)/i;
+const WEB_EXTENSIONS = /\.(html?|xhtml|shtml|php\d?|aspx?|jsp|cgi|pl|js|mjs|css|jpe?g|png|gif|webp|avif|bmp|ico|svg)$/i;
 
 /** True for web pages, pictures and scripts, which forcing leaves to the browser when asked to. */
 export function isWebContent(mimeType, fileName) {
   return WEB_TYPES.test(mimeType ?? '') || WEB_EXTENSIONS.test(fileName ?? '');
+}
+
+/**
+ * For a link clicked with the force keys: true when it should go straight to LDM. With
+ * skipWebContent, links to web pages, pictures and scripts, and links without a file extension
+ * (which may be a page or a download), load in the browser instead; if they turn out to be a
+ * download, the download itself is forced.
+ */
+export function sendsForcedLinkToLdm(settings, href) {
+  if (!settings.skipWebContent) {
+    return true;
+  }
+  let path;
+  try {
+    path = new URL(href).pathname;
+  } catch {
+    return false;
+  }
+  const name = path.slice(path.lastIndexOf('/') + 1);
+  const dot = name.lastIndexOf('.');
+  return dot > 0 && dot < name.length - 1 && !isWebContent('', name);
 }

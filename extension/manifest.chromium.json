@@ -27,7 +27,9 @@
     "downloads",
     "downloads.ui",
     "nativeMessaging",
+    "scripting",
     "storage",
+    "tabs",
     "webRequest"
   ],
   "host_permissions": [
