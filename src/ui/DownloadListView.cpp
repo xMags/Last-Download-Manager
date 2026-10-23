@@ -42,11 +42,13 @@ void DownloadListView::ApplyColumns()
     while (ListView_DeleteColumn(list_, 0)) {
     }
     shown_.clear();
+    chosenWidths96_.clear();
     const UINT dpi = DpiOf(list_);
     for (const ColumnState& column : columns_) {
         if (!column.visible) {
             continue;
         }
+        chosenWidths96_[column.id] = column.width;
         std::wstring title(ColumnTitle(column.id));
         LVCOLUMNW data{};
         data.mask = LVCF_TEXT | LVCF_WIDTH | LVCF_FMT;
@@ -57,6 +59,33 @@ void DownloadListView::ApplyColumns()
         shown_.push_back(column.id);
     }
     UpdateSortArrow();
+    FitLastColumn();
+}
+
+void DownloadListView::FitLastColumn()
+{
+    const int count = static_cast<int>(shown_.size());
+    if (list_ == nullptr || count == 0 || fitting_) {
+        return;
+    }
+    std::vector<int> order(static_cast<size_t>(count));
+    ListView_GetColumnOrderArray(list_, count, order.data());
+    const UINT dpi = DpiOf(list_);
+    int others = 0;
+    for (int i = 0; i + 1 < count; ++i) {
+        others += ListView_GetColumnWidth(list_, order[static_cast<size_t>(i)]);
+    }
+    const int last = order.back();
+    const auto chosen = chosenWidths96_.find(shown_[static_cast<size_t>(last)]);
+    const int chosenWidth = Scale(chosen != chosenWidths96_.end() ? chosen->second : 100, dpi);
+    RECT client{};
+    ::GetClientRect(list_, &client);  // excludes a visible vertical scroll bar
+    const int width = std::max(chosenWidth, static_cast<int>(client.right) - others);
+    if (width != ListView_GetColumnWidth(list_, last)) {
+        fitting_ = true;
+        ListView_SetColumnWidth(list_, last, width);
+        fitting_ = false;
+    }
 }
 
 std::vector<ColumnState> DownloadListView::Columns() const
@@ -68,7 +97,9 @@ std::vector<ColumnState> DownloadListView::Columns() const
     std::vector<ColumnState> result;
     for (const int position : order) {
         const Column id = shown_[static_cast<size_t>(position)];
-        result.push_back(ColumnState{id, Unscale(ListView_GetColumnWidth(list_, position), dpi), true});
+        const auto chosen = chosenWidths96_.find(id);
+        const int width = chosen != chosenWidths96_.end() ? chosen->second : Unscale(ListView_GetColumnWidth(list_, position), dpi);
+        result.push_back(ColumnState{id, width, true});
     }
     for (const ColumnState& column : columns_) {
         if (!column.visible) {
@@ -131,6 +162,7 @@ void DownloadListView::Reindex()
     index_ = BuildIndex(*snapshot_, filter_, sort_);
     ListView_SetItemCountEx(list_, static_cast<int>(index_.size()), LVSICF_NOINVALIDATEALL | LVSICF_NOSCROLL);
     ::InvalidateRect(list_, nullptr, FALSE);
+    FitLastColumn();  // the vertical scroll bar may have come or gone
 }
 
 void DownloadListView::SetFilter(const ListFilter& filter)
@@ -286,6 +318,15 @@ bool DownloadListView::HandleNotify(const NMHDR& header, LRESULT& result)
 {
     const HWND listHeader = ListView_GetHeader(list_);
     if (header.hwndFrom == listHeader) {
+        if (header.code == HDN_ITEMCHANGEDW && !fitting_) {
+            // A width the user dragged becomes the chosen width; then the last column refits.
+            const auto& change = reinterpret_cast<const NMHEADERW&>(header);
+            if (change.pitem != nullptr && (change.pitem->mask & HDI_WIDTH) != 0 && change.iItem >= 0 &&
+                change.iItem < static_cast<int>(shown_.size())) {
+                chosenWidths96_[shown_[static_cast<size_t>(change.iItem)]] = Unscale(change.pitem->cxy, DpiOf(list_));
+                FitLastColumn();
+            }
+        }
         if (header.code == HDN_ENDTRACKW || header.code == HDN_ENDDRAG) {
             if (callbacks_.layoutChanged) {
                 callbacks_.layoutChanged();

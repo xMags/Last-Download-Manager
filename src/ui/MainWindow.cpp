@@ -381,6 +381,7 @@ void MainWindow::Layout()
     ::InflateRect(&list, -kDividerPx, -kDividerPx);
     ::MoveWindow(list_.Handle(), list.left, list.top, std::max(0L, list.right - list.left), std::max(0L, list.bottom - list.top),
                  TRUE);
+    list_.FitLastColumn();
     if (panes.categoriesVisible) {
         RECT inner = panes.categoryFrame;
         ::InflateRect(&inner, -2 * kDividerPx, -2 * kDividerPx);
@@ -610,6 +611,8 @@ LRESULT MainWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         }
         return 0;
     case kSaveLayoutMessage:
+        // Posted after a column drag, once the list has applied the new order.
+        list_.FitLastColumn();
         SaveViewState();
         return 0;
     case kExternalInputMessage:
