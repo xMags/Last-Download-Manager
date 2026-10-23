@@ -786,14 +786,26 @@ void MainController::ShowCategoryMenu(std::optional<model::CategoryId> category,
 
 void MainController::ShowTrayMenu(POINT screen)
 {
+    // the reference's tray menu, in its order (gap G-2), without its registration and ordering items.
     const auto snapshot = Snapshot();
     const bool limiterOn = snapshot && snapshot->speedLimiterOn;
+    const bool dropTargetShown = snapshot && snapshot->settings.showDropTarget;
     UniqueMenu menu(::CreatePopupMenu());
     UniqueMenu limiter(::CreatePopupMenu());
-    AppendItem(limiter.get(), ID_DOWNLOADS_LIMITER_ON, L"Turn o&n", !limiterOn);
-    AppendItem(limiter.get(), ID_DOWNLOADS_LIMITER_OFF, L"Turn o&ff", limiterOn);
-    AppendItem(menu.get(), ID_TRAY_RESTORE, L"&Open Last Download Manager");
-    ::SetMenuDefaultItem(menu.get(), ID_TRAY_RESTORE, FALSE);
+    AppendItem(limiter.get(), ID_DOWNLOADS_LIMITER_ON, L"Turn &on");
+    AppendItem(limiter.get(), ID_DOWNLOADS_LIMITER_OFF, L"Turn o&ff");
+    ::CheckMenuRadioItem(limiter.get(), ID_DOWNLOADS_LIMITER_ON, ID_DOWNLOADS_LIMITER_OFF,
+                         limiterOn ? ID_DOWNLOADS_LIMITER_ON : ID_DOWNLOADS_LIMITER_OFF, MF_BYCOMMAND);
+    AppendSeparator(limiter.get());
+    AppendItem(limiter.get(), ID_DOWNLOADS_LIMITER_SETTINGS, L"&Settings...");
+
+    AppendItem(menu.get(), ID_HELP_CONTENTS, L"&Help");
+    AppendItem(menu.get(), ID_HELP_ABOUT, L"&About Last Download Manager");
+    AppendSeparator(menu.get());
+    ::AppendMenuW(menu.get(), MF_POPUP, reinterpret_cast<UINT_PTR>(limiter.release()), L"Speed &Limiter");  // owned by `menu` now
+    AppendSeparator(menu.get());
+    AppendItem(menu.get(), ID_TASKS_DROP_TARGET, L"Show &drop target", true, dropTargetShown);
+    AppendItem(menu.get(), ID_TRAY_RESTORE, L"&Restore");  // not bold: double-clicking the icon restores anyway
     // Download windows, so a hidden or minimized progress window can be brought back (V-01).
     trayWindows_.clear();
     const auto windows = transfers_.Windows();
@@ -807,10 +819,6 @@ void MainController::ShowTrayMenu(POINT screen)
             trayWindows_.push_back(window);
         }
     }
-    AppendSeparator(menu.get());
-    AppendItem(menu.get(), ID_TASKS_ADD_URL, L"&Add new download...");
-    ::AppendMenuW(menu.get(), MF_POPUP, reinterpret_cast<UINT_PTR>(limiter.release()), L"Speed &limiter");  // owned by `menu` now
-    AppendItem(menu.get(), ID_DOWNLOADS_STOP_ALL, L"&Stop all downloads", snapshot && snapshot->activeDownloads > 0);
     AppendSeparator(menu.get());
     AppendItem(menu.get(), ID_TASKS_EXIT, L"E&xit");
     // A tray menu must belong to the foreground window, or it will not close when clicking away.
