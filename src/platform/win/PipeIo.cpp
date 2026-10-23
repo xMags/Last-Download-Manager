@@ -66,6 +66,30 @@ bool TransferAll(HANDLE pipe, void* data, DWORD size, bool write, HANDLE stopEve
     return true;
 }
 
+// This process's integrity level as a SID string ("S-1-16-8192" at normal level), or empty.
+std::wstring CurrentIntegritySid()
+{
+    HANDLE rawToken = nullptr;
+    if (!::OpenProcessToken(::GetCurrentProcess(), TOKEN_QUERY, &rawToken)) {
+        return {};
+    }
+    OwnedHandle token(rawToken);
+    DWORD size = 0;
+    ::GetTokenInformation(token.Get(), TokenIntegrityLevel, nullptr, 0, &size);
+    std::vector<std::byte> buffer(size);
+    if (size == 0 || !::GetTokenInformation(token.Get(), TokenIntegrityLevel, buffer.data(), size, &size)) {
+        return {};
+    }
+    const auto* label = reinterpret_cast<const TOKEN_MANDATORY_LABEL*>(buffer.data());  // the buffer holds one
+    wchar_t* text = nullptr;
+    if (!::ConvertSidToStringSidW(label->Label.Sid, &text)) {
+        return {};
+    }
+    std::wstring sid(text);
+    ::LocalFree(text);
+    return sid;
+}
+
 }  // namespace
 
 OwnedHandle& OwnedHandle::operator=(OwnedHandle&& other) noexcept
@@ -132,13 +156,22 @@ std::wstring BrowserPipeName()
     return InstancePipeName() + L"-browser" + TestPipeSuffix();
 }
 
-OwnerOnlySecurity::OwnerOnlySecurity()
+OwnerOnlySecurity::OwnerOnlySecurity(LowerIntegrity lower)
 {
     const std::wstring sid = CurrentUserSid();
     if (sid.empty()) {
         return;
     }
-    const std::wstring sddl = L"D:P(A;;GA;;;" + sid + L")";
+    std::wstring sddl = L"D:P(A;;GA;;;" + sid + L")";
+    if (lower == LowerIntegrity::Refused) {
+        // Labelled with this process's own level: no write up, no read up. Fails closed when the
+        // level cannot be read, so the object is never created unprotected.
+        const std::wstring level = CurrentIntegritySid();
+        if (level.empty()) {
+            return;
+        }
+        sddl += L"S:(ML;;NWNR;;;" + level + L")";
+    }
     if (!::ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl.c_str(), SDDL_REVISION_1, &descriptor_, nullptr)) {
         descriptor_ = nullptr;
         return;

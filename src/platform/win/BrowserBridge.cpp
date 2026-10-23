@@ -52,7 +52,10 @@ bool BrowserBridge::Start()
 {
     stopEvent_ = ::CreateEventW(nullptr, TRUE, FALSE, nullptr);
     wakeEvent_ = ::CreateEventW(nullptr, FALSE, FALSE, nullptr);
-    OwnerOnlySecurity security;
+    // A host below LDM's level cannot connect: an LDM running as administrator then refuses the
+    // browsers, as its elevation warning tells the user, instead of taking commands from any
+    // program at normal level.
+    OwnerOnlySecurity security(LowerIntegrity::Refused);
     if (stopEvent_ == nullptr || wakeEvent_ == nullptr || !security.Valid()) {
         return false;
     }

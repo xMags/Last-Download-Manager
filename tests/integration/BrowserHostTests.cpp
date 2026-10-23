@@ -10,14 +10,18 @@
 
 #include <windows.h>
 
+#include <aclapi.h>
+
 #include <algorithm>
 #include <chrono>
 #include <condition_variable>
+#include <cstddef>
 #include <deque>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -289,6 +293,48 @@ TEST_F(BrowserHostTest, HostDoesNotStartLdmUnlessAsked)
     StartHost(ChromiumOrigin());
     SendToHost(kHello);
     EXPECT_EQ(WaitForHostExit(), static_cast<DWORD>(HostExit::NoLdm));
+}
+
+// LDM's browser pipe carries LDM's own integrity level with no write up and no read up, so an LDM
+// running as administrator cannot be reached by a host at normal level (M3 design section 5).
+// Windows treats an unlabelled pipe as normal level whoever created it, so the label is what
+// keeps the browsers out; this test checks it rather than a process at a lower level, which
+// Windows would refuse even without the label.
+TEST_F(BrowserHostTest, BrowserPipeCarriesLdmsIntegrityLevel)
+{
+    PACL sacl = nullptr;
+    PSECURITY_DESCRIPTOR rawDescriptor = nullptr;
+    std::wstring name = ldm::platform::BrowserPipeName();
+    ASSERT_EQ(::GetNamedSecurityInfoW(name.data(), SE_FILE_OBJECT, LABEL_SECURITY_INFORMATION, nullptr, nullptr,
+                                      nullptr, &sacl, &rawDescriptor),
+              static_cast<DWORD>(ERROR_SUCCESS));
+    const std::unique_ptr<void, decltype(&::LocalFree)> descriptor(rawDescriptor, &::LocalFree);
+    ASSERT_NE(sacl, nullptr) << "the pipe has no integrity label";
+
+    HANDLE rawToken = nullptr;
+    ASSERT_TRUE(::OpenProcessToken(::GetCurrentProcess(), TOKEN_QUERY, &rawToken));
+    const OwnedHandle token(rawToken);
+    DWORD size = 0;
+    ::GetTokenInformation(token.Get(), TokenIntegrityLevel, nullptr, 0, &size);
+    std::vector<std::byte> level(size);
+    ASSERT_TRUE(::GetTokenInformation(token.Get(), TokenIntegrityLevel, level.data(), size, &size));
+    const PSID ownLevel = reinterpret_cast<const TOKEN_MANDATORY_LABEL*>(level.data())->Label.Sid;
+
+    bool found = false;
+    for (DWORD i = 0; i < sacl->AceCount; ++i) {
+        void* rawAce = nullptr;
+        ASSERT_TRUE(::GetAce(sacl, i, &rawAce));
+        const auto* header = static_cast<const ACE_HEADER*>(rawAce);
+        if (header->AceType != SYSTEM_MANDATORY_LABEL_ACE_TYPE) {
+            continue;
+        }
+        auto* ace = static_cast<SYSTEM_MANDATORY_LABEL_ACE*>(rawAce);
+        found = true;
+        EXPECT_TRUE(::EqualSid(&ace->SidStart, ownLevel)) << "labelled with another integrity level";
+        EXPECT_EQ(ace->Mask & (SYSTEM_MANDATORY_LABEL_NO_WRITE_UP | SYSTEM_MANDATORY_LABEL_NO_READ_UP),
+                  static_cast<ACCESS_MASK>(SYSTEM_MANDATORY_LABEL_NO_WRITE_UP | SYSTEM_MANDATORY_LABEL_NO_READ_UP));
+    }
+    EXPECT_TRUE(found) << "the pipe has no integrity label";
 }
 
 TEST_F(BrowserHostTest, ConnectionsAreNumberedAndKeptApart)
