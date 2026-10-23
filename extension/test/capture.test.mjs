@@ -113,10 +113,11 @@ function fakeConnection({ answer = 'accept' } = {}) {
   };
 }
 
-function newCapture(api, connection, { enabled = true } = {}) {
+function newCapture(api, connection, { enabled = true, verdict = 'none' } = {}) {
   return new DownloadCapture(api, connection, {
     ready: Promise.resolve(),
     isEnabled: () => enabled,
+    keyVerdict: () => verdict,
     rules: () => ({ capturedExtensions: ['zip'], siteExceptions: [], addressExceptions: [] }),
     userAgent: 'TestUA',
     canHideDownloadUi: true,
@@ -169,4 +170,30 @@ test('the download bubble stays hidden until the last capture ends', async () =>
   const capture = newCapture(api, fakeConnection());
   await Promise.all([capture.take({ ...ITEM, id: 1 }, 'a.zip'), capture.take({ ...ITEM, id: 2 }, 'b.zip')]);
   assert.deepEqual(calls.filter(([kind]) => kind === 'ui'), [['ui', false], ['ui', true]]);
+});
+
+test('the prevent keys keep even a captured type in the browser', async () => {
+  const { api, calls } = fakeBrowser();
+  const connection = fakeConnection();
+  assert.equal(await newCapture(api, connection, { verdict: 'prevent' }).take(ITEM, 'x.zip'), false);
+  assert.deepEqual(calls, []);
+});
+
+test('the force keys take a type that is not in the list', async () => {
+  const { api, calls } = fakeBrowser();
+  const connection = fakeConnection();
+  assert.equal(await newCapture(api, connection, { verdict: 'force' }).take(ITEM, 'notes.txt'), true);
+  assert.deepEqual(calls, [['ui', false], ['pause', 7], ['cancel', 7], ['erase', 7], ['ui', true]]);
+});
+
+test('a forced link goes to LDM with its page as referrer', async () => {
+  const { api } = fakeBrowser();
+  const connection = fakeConnection();
+  assert.equal(await newCapture(api, connection).sendLink('https://a.test/get.php?id=3', 'https://a.test/list'), true);
+  const message = connection.sent[0][1];
+  assert.equal(message.url, 'https://a.test/get.php?id=3');
+  assert.equal(message.referrer, 'https://a.test/list');
+  assert.equal(message.fileName, 'get.php');
+  assert.equal(await newCapture(api, fakeConnection()).sendLink('javascript:void(0)', 'https://a.test/'), false);
+  assert.equal(await newCapture(api, fakeConnection(), { enabled: false }).sendLink('https://a.test/x', 'https://a.test/'), false);
 });

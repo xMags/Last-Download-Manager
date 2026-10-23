@@ -18,8 +18,15 @@ constexpr char kPushId[] = "push";
 std::string ConfigInputs(const model::Settings& settings)
 {
     constexpr char kSeparator = '\x1f';
+    const model::CaptureKeys& k = settings.captureKeys;
+    std::string keys;
+    for (const bool flag : {k.preventEnabled, k.preventAlt, k.preventShift, k.preventCtrl, k.forceEnabled, k.forceAlt,
+                            k.forceShift, k.forceCtrl, k.forceInsert, k.forceDelete, k.forceNeedsLinkClick,
+                            k.skipWebContent}) {
+        keys += flag ? '1' : '0';
+    }
     return settings.capturedExtensions + kSeparator + settings.captureSiteExceptions + kSeparator +
-           settings.captureAddressExceptions;
+           settings.captureAddressExceptions + kSeparator + keys;
 }
 
 std::vector<std::string> Words(const std::string& text)
@@ -105,6 +112,7 @@ browser::Config BrowserSessions::MakeConfig(const model::Settings& settings) con
     config.siteExceptions = Words(settings.captureSiteExceptions);
     // Address patterns hold no spaces, so whitespace separates them as well as line breaks do.
     config.addressExceptions = Words(settings.captureAddressExceptions);
+    config.keys = settings.captureKeys;
     return config;
 }
 

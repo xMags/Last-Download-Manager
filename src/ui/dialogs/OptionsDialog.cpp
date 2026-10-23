@@ -345,6 +345,7 @@ void OptionsDialog::Load()
     Check(IDC_OPT_STARTUP, input_.launchOnStartup);
     Check(IDC_OPT_CLIPBOARD, s.monitorClipboard);
 
+    captureKeys_ = s.captureKeys;
     Put(IDC_OPT_TYPES, base::ToUtf16(s.capturedExtensions));
     Put(IDC_OPT_SITES, base::ToUtf16(s.captureSiteExceptions));
     addressExceptions_ = SplitWords(base::ToUtf16(s.captureAddressExceptions));
@@ -554,6 +555,13 @@ void OptionsDialog::ShowAddressExceptionCount()
 void OptionsDialog::OnPageCommand(int id, int code)
 {
     switch (id) {
+    case IDC_OPT_KEYS: {
+        CaptureKeysDialog dialog(CurrentTheme(), captureKeys_);
+        if (auto keys = dialog.Run(Handle())) {
+            captureKeys_ = *keys;
+        }
+        break;
+    }
     case IDC_OPT_TYPES_DEFAULT:
         Put(IDC_OPT_TYPES, base::ToUtf16(model::DefaultCapturedExtensions()));
         break;
@@ -725,6 +733,7 @@ bool OptionsDialog::Store()
     s.capturedExtensions = base::ToUtf8(JoinWords(types, L" "));
     s.captureSiteExceptions = base::ToUtf8(JoinWords(SplitWords(Get(IDC_OPT_SITES)), L" "));
     s.captureAddressExceptions = base::ToUtf8(JoinWords(addressExceptions_, L"\n"));
+    s.captureKeys = captureKeys_;
 
     StoreCategory(currentCategory_);
     for (const model::Category& category : categories_) {
@@ -848,6 +857,7 @@ void OptionsDialog::ApplyEditedFields(const model::Settings& edited, model::Sett
     current.capturedExtensions = edited.capturedExtensions;
     current.captureSiteExceptions = edited.captureSiteExceptions;
     current.captureAddressExceptions = edited.captureAddressExceptions;
+    current.captureKeys = edited.captureKeys;
     current.temporaryDirectory = edited.temporaryDirectory;
     current.setFileDateFromServer = edited.setFileDateFromServer;
     current.showStartDialog = edited.showStartDialog;

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "model/Settings.h"
 #include "ui/Dialog.h"
 
 #include <optional>
@@ -38,6 +39,22 @@ private:
     bool OnCommand(int id, int code, HWND control) override;
 
     std::optional<std::wstring> address_;
+};
+
+// Options > General > Keys (checklist B-03): keys that keep a clicked link in the browser or give
+// it to LDM.
+class CaptureKeysDialog final : public Dialog {
+public:
+    CaptureKeysDialog(const Theme& theme, model::CaptureKeys keys);
+    [[nodiscard]] std::optional<model::CaptureKeys> Run(HWND owner);
+
+private:
+    bool OnInit() override;
+    bool OnCommand(int id, int code, HWND control) override;
+    void UpdateControls();
+
+    model::CaptureKeys keys_;
+    std::optional<model::CaptureKeys> result_;
 };
 
 // A typed address pattern made acceptable for the list: trimmed; nothing when it is empty or

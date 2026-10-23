@@ -2,7 +2,7 @@
 // paused, not cancelled, until LDM has accepted it: if LDM cannot be reached or refuses, the
 // browser simply continues, so a download is never lost.
 
-import { shouldCapture } from './capture-rules.js';
+import { isCapturableAddress, nameFromUrl, shouldCapture } from './capture-rules.js';
 import { isAcceptedCapture, makeCapture } from './protocol.js';
 
 // Long enough for ldm-host.exe to start LDM (it waits up to 10 seconds) and for LDM to answer,
@@ -14,8 +14,10 @@ export class DownloadCapture {
    * @param {object} api the extension API object
    * @param {import('./connection.js').LdmConnection} connection
    * @param {{ready: Promise, isEnabled: function(): boolean, rules: function(): object,
+   *          keyVerdict: function(object): string,
    *          userAgent: string, canHideDownloadUi: boolean}} options
    *   ready settles once the stored settings are loaded; a download can wake the extension first.
+   *   keyVerdict gives 'prevent', 'force' or 'none' for {url, finalUrl, referrer, mimeType, fileName}.
    */
   constructor(api, connection, options) {
     this.api = api;
@@ -42,7 +44,13 @@ export class DownloadCapture {
     }
     const url = item.url;
     const finalUrl = item.finalUrl || item.url;
-    if (!shouldCapture({ url, finalUrl, fileName }, this.options.rules())) {
+    const verdict = this.options.keyVerdict({ url, finalUrl, referrer: item.referrer, mimeType: item.mime, fileName });
+    if (verdict === 'prevent') {
+      return false;
+    }
+    // Forced downloads skip the type list and the exceptions (checklist B-03).
+    const wanted = verdict === 'force' ? isCapturableAddress(url) : shouldCapture({ url, finalUrl, fileName }, this.options.rules());
+    if (!wanted) {
       return false;
     }
 
@@ -72,6 +80,25 @@ export class DownloadCapture {
     } finally {
       this.showDownloadUi();
     }
+  }
+
+  /**
+   * Gives a link clicked with the force keys straight to LDM (the browser does not load it).
+   * @returns {Promise<boolean>} true when LDM accepted it
+   */
+  async sendLink(href, pageUrl) {
+    await this.options.ready;
+    if (!this.options.isEnabled() || !isCapturableAddress(href)) {
+      return false;
+    }
+    const message = makeCapture({
+      url: href,
+      referrer: pageUrl,
+      fileName: nameFromUrl(href),
+      userAgent: this.options.userAgent,
+      cookies: await this.cookiesFor([href]),
+    });
+    return isAcceptedCapture(await this.connection.oneShot(message, ANSWER_TIMEOUT_MS), message.id);
   }
 
   /** @private Pauses the download; false when it is no longer running. */

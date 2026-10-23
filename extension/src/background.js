@@ -6,6 +6,9 @@ import { browserInfo } from './browser-info.js';
 import { DownloadCapture } from './capture.js';
 import { baseName } from './capture-rules.js';
 import { LdmConnection, State } from './connection.js';
+import { downloadVerdict, keySettings } from './key-rules.js';
+import { cleanKeys, LinkClicks } from './link-clicks.js';
+import { isDownloadAddress } from './protocol.js';
 import { applyToolbar, toolbarAppearance } from './toolbar.js';
 
 const api = globalThis.browser ?? globalThis.chrome;
@@ -44,10 +47,14 @@ const settingsLoaded = api.storage.local.get(['enabled', 'config']).then((stored
   rules = { ...rules, ...(stored.config ?? {}) };
 });
 
+const clicks = new LinkClicks();
+
 const capture = new DownloadCapture(api, connection, {
   ready: settingsLoaded,
   isEnabled: () => enabled,
   rules: () => rules,
+  keyVerdict: ({ url, finalUrl, referrer, mimeType, fileName }) => downloadVerdict(
+    keySettings(rules), clicks.clickKeysFor({ url, finalUrl, referrer }), clicks.heldKeys(), mimeType, fileName),
   userAgent: navigator.userAgent,
   canHideDownloadUi: typeof api.downloads.setUiOptions === 'function',
 });
@@ -91,9 +98,41 @@ api.runtime.onInstalled.addListener((details) => {
   }
 });
 
-// Status for the extension's own pages; nothing else may ask.
+// Reports from src/page-keys.js in web pages. Page code runs beside that script, so every field
+// is checked here.
+function onPageMessage(message, sender) {
+  const pageUrl = typeof message.pageUrl === 'string' ? message.pageUrl : undefined;
+  switch (message.type) {
+    case 'keys':
+      clicks.recordKeys(cleanKeys(message.keys));
+      break;
+    case 'link-click':
+      if (isDownloadAddress(message.href)) {
+        clicks.recordClick({ href: message.href, pageUrl, keys: cleanKeys(message.keys) });
+      }
+      break;
+    case 'force-link':
+      // Only from a top-level user click, and only when the settings ask for it.
+      if (isDownloadAddress(message.href) && sender.tab && keySettings(rules).skipWebContent === false) {
+        capture.sendLink(message.href, isDownloadAddress(pageUrl) ? pageUrl : undefined)
+          .catch((error) => console.warn('LDM: link hand-over failed', error));
+      }
+      break;
+    default:
+      break;
+  }
+}
+
 api.runtime.onMessage.addListener((message, sender, reply) => {
-  if (sender.id !== api.runtime.id || !String(sender.url ?? '').startsWith(api.runtime.getURL(''))) {
+  if (sender.id !== api.runtime.id || message === null || typeof message !== 'object') {
+    return false;
+  }
+  if (sender.tab) {
+    onPageMessage(message, sender);
+    return false;
+  }
+  // Status for the extension's own pages.
+  if (!String(sender.url ?? '').startsWith(api.runtime.getURL(''))) {
     return false;
   }
   if (message?.type === 'status') {
