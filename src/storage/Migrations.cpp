@@ -99,6 +99,11 @@ ALTER TABLE downloads ADD COLUMN cookie_secret BLOB;
 ALTER TABLE downloads ADD COLUMN post_secret BLOB;
 ALTER TABLE downloads ADD COLUMN post_content_type TEXT;
 )sql"},
+    // Speculative adds whose info dialog was still open, removed at startup after a crash.
+    Migration{4, R"sql(
+ALTER TABLE downloads ADD COLUMN awaiting_confirmation INTEGER NOT NULL DEFAULT 0
+  CHECK (awaiting_confirmation IN (0, 1));
+)sql"},
 };
 
 base::Result<int> CurrentVersion(Connection& connection)

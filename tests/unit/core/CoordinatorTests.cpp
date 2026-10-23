@@ -619,6 +619,38 @@ TEST_F(CoordinatorTest, SpeculativeAddFollowsServerNameUntilConfirmed)
     EXPECT_FALSE(View(id).awaitingConfirmation);
 }
 
+TEST_F(CoordinatorTest, UnconfirmedSpeculativeAddIsRemovedAfterACrash)
+{
+    const DownloadId id = *Add("http://x.test/a.iso", AddMode::Speculative).id;
+    ASSERT_EQ(engine_.starts.size(), 1u);
+    const fs::path partial = engine_.starts.back().partialPath;
+    Send(id, 1, ProgressInfo{true, {{0, 100, 30}}, 100, 30, 0, {}, std::nullopt});
+    coordinator_->FinalCheckpoint();
+    files_.Put(partial, 30);
+    ASSERT_TRUE(Stored(id)->awaitingConfirmation);
+
+    Recreate();  // LDM was killed while the info dialog was open
+    EXPECT_FALSE(Stored(id));
+    EXPECT_FALSE(InSnapshot(id));
+    EXPECT_FALSE(files_.Exists(partial));
+    EXPECT_TRUE(files_.recycled.empty());
+}
+
+TEST_F(CoordinatorTest, ConfirmedSpeculativeAddSurvivesARestart)
+{
+    const DownloadId id = *Add("http://x.test/a.iso", AddMode::Speculative).id;
+    ldm::core::ConfirmDownloadCommand confirm;
+    confirm.id = id;
+    confirm.fileName = "a.iso";
+    confirm.saveDir = View(id).download.saveDir;
+    coordinator_->Handle(confirm);
+    EXPECT_FALSE(Stored(id)->awaitingConfirmation);
+
+    Recreate();
+    ASSERT_TRUE(Stored(id));
+    EXPECT_EQ(Stored(id)->status, DownloadStatus::Paused);
+}
+
 TEST_F(CoordinatorTest, DownloadLaterAfterSpeculativeStartKeepsBytes)
 {
     const DownloadId id = *Add("http://x.test/a.iso", AddMode::Speculative).id;

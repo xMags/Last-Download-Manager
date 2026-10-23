@@ -176,6 +176,12 @@ base::Status Coordinator::SeedCategories()
 void Coordinator::RecoverAfterRestart(Entry& entry)
 {
     model::Download& d = entry.download;
+    if (d.awaitingConfirmation) {
+        // LDM ended while the info dialog was open: the user never accepted this download (A-03).
+        // Its partial file goes with it; a final file cannot exist, completion waits for the answer.
+        RemoveEntry(d.id, false);
+        return;
+    }
     bool changed = false;
     switch (d.status) {
     case DownloadStatus::Downloading:
@@ -402,6 +408,7 @@ void Coordinator::Add(const AddDownloadCommand& command)
         download.contentType = command.contentType;
     }
     download.status = DownloadStatus::Queued;
+    download.awaitingConfirmation = command.mode == AddMode::Speculative;
     download.createdAtMs = ports_.clock->NowUnixMs();
     download.sortOrder = nextSortOrder_++;
     if (command.loginUser && !command.loginUser->empty()) {
@@ -445,7 +452,6 @@ void Coordinator::Add(const AddDownloadCommand& command)
     entry.download = std::move(download);
     entry.userNamed = command.fileName.has_value() || overwriteName.has_value();
     entry.userChoseCategory = command.categoryId.has_value();
-    entry.awaitingConfirmation = command.mode == AddMode::Speculative;
     entry.replaceFinalFile = replaceFinal;
     entry.lastCheckpoint = ports_.clock->Steady();
     const model::DownloadId id = entry.download.id;
@@ -461,7 +467,7 @@ void Coordinator::Add(const AddDownloadCommand& command)
 void Coordinator::Confirm(const ConfirmDownloadCommand& command)
 {
     Entry* entry = Find(command.id);
-    if (entry == nullptr || !entry->awaitingConfirmation) {
+    if (entry == nullptr || !entry->download.awaitingConfirmation) {
         return;
     }
     model::Download& d = entry->download;
@@ -487,7 +493,7 @@ void Coordinator::Confirm(const ConfirmDownloadCommand& command)
     d.categoryId = category;
     d.description = command.description;
     entry->userNamed = true;
-    entry->awaitingConfirmation = false;
+    d.awaitingConfirmation = false;
 
     if (command.rememberFolderForCategory && category) {
         const auto it = std::find_if(categories_.begin(), categories_.end(),
@@ -1014,7 +1020,7 @@ void Coordinator::OnResponseInfo(Entry& entry, const ResponseInfo& info)
         // The server's name wins over the address's when the user did not choose one (ENG-06).
         const std::string name = SanitizeFileName(*info.fileName);
         if (name != d.fileName) {
-            if (entry.awaitingConfirmation && !entry.userChoseCategory) {
+            if (d.awaitingConfirmation && !entry.userChoseCategory) {
                 if (const auto url = ParseUrl(d.url)) {
                     const model::CategoryId category = CategoryFor(name, *url);
                     d.categoryId = category;
@@ -1100,7 +1106,7 @@ void Coordinator::OnFinished(Entry& entry, const TransferFinished& finished)
     switch (finished.outcome) {
     case TransferOutcome::Completed:
         StopWaitingForAddress(d.id);
-        if (entry.awaitingConfirmation) {
+        if (d.awaitingConfirmation) {
             entry.holdFinalize = true;  // the user may still rename it in the open info dialog
             d.status = DownloadStatus::Finalizing;
             Save(entry);
@@ -1695,7 +1701,7 @@ void Coordinator::PublishSnapshot()
             view->download.cookieSecret.clear();
             view->download.postSecret.clear();
             view->hasPassword = !entry->download.loginSecret.empty();
-            view->awaitingConfirmation = entry->awaitingConfirmation;
+            view->awaitingConfirmation = entry->download.awaitingConfirmation;
             view->bytesPerSecond = entry->bytesPerSecond;
             view->receivedBytes = entry->running ? entry->receivedBytes : entry->download.DownloadedBytes();
             view->connections = entry->connections;

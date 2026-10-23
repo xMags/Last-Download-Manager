@@ -90,6 +90,19 @@ TEST(SqliteStore, SaveReplacesSegments)
     EXPECT_EQ(loaded.segments[0].done, 42);
 }
 
+TEST(SqliteStore, AwaitingConfirmationRoundTrips)
+{
+    SqliteStore store = OpenMemoryStore();
+    Download d = SampleDownload("a");
+    d.awaitingConfirmation = true;
+    d.id = store.InsertDownload(d).Value();
+    EXPECT_TRUE(store.LoadDownloads().Value().front().awaitingConfirmation);
+
+    d.awaitingConfirmation = false;
+    ASSERT_TRUE(store.SaveDownload(d).Ok());
+    EXPECT_FALSE(store.LoadDownloads().Value().front().awaitingConfirmation);
+}
+
 TEST(SqliteStore, SavingMissingDownloadFailsWithoutSideEffects)
 {
     SqliteStore store = OpenMemoryStore();

@@ -77,7 +77,6 @@ private:
         bool running = false;           // an engine run for download.epoch has not finished
         bool stopRequested = false;     // Stop() was sent for the current run
         bool finalizing = false;        // a Finalize for download.epoch has not answered
-        bool awaitingConfirmation = false;
         bool userNamed = false;         // the user chose the name; server names do not replace it
         bool userChoseCategory = false;
         bool deleteWhenStopped = false;
