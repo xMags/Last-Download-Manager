@@ -194,6 +194,26 @@ protected:
         return result;
     }
 
+    // FTP transfers the fixture logged (ENG-13): one entry per RETR, with its REST offset.
+    std::vector<nlohmann::json> FtpRetrievals()
+    {
+        std::vector<nlohmann::json> result;
+        const nlohmann::json log = server_->Log();
+        for (const auto& entry : log.at("entries")) {
+            if (entry.value("event", "") == "ftp-retr") {
+                result.push_back(entry);
+            }
+        }
+        return result;
+    }
+
+    TransferRequest FtpRequest(const std::string& user = {}, std::int64_t epoch = 1)
+    {
+        TransferRequest request = Request("/range.bin", epoch);
+        request.url = server_->FtpUrl("/range.bin", user);
+        return request;
+    }
+
     static FixtureServer* server_;
     std::filesystem::path directory_;
     RecordingListener listener_;
@@ -311,6 +331,68 @@ TEST_F(EngineTest, PauseAndResumeProducesIdenticalFile)
         EXPECT_TRUE(request.at("range").is_string()) << "a resumed run must never fetch from zero";
         EXPECT_TRUE(request.at("ifRange").is_string());
     }
+}
+
+TEST_F(EngineTest, FtpSegmentedDownloadMatchesPayload)
+{
+    const auto finished = Run(FtpRequest());
+    ASSERT_EQ(finished.outcome, TransferOutcome::Completed) << (finished.failure ? finished.failure->message : "");
+    EXPECT_EQ(finished.totalSize, server_->Size()) << "the size comes from SIZE";
+    ExpectCovers(finished.segments, server_->Size());
+    EXPECT_TRUE(HoldsPayload(PartialPath(), server_->Size()));
+    const auto retrievals = FtpRetrievals();
+    ASSERT_GT(retrievals.size(), 1u) << "extra connections use REST";
+    EXPECT_EQ(retrievals.front().at("start"), 0);
+    const auto info = listener_.WaitFor<ResponseInfo>(DownloadId{1}, 1, 1s);
+    ASSERT_TRUE(info);
+    EXPECT_TRUE(info->resumable);
+}
+
+TEST_F(EngineTest, FtpActiveModeDownloads)
+{
+    auto request = FtpRequest();
+    request.ftpActiveMode = true;
+    request.maxConnections = 2;
+    const auto finished = Run(std::move(request));
+    ASSERT_EQ(finished.outcome, TransferOutcome::Completed) << (finished.failure ? finished.failure->message : "");
+    EXPECT_TRUE(HoldsPayload(PartialPath(), server_->Size()));
+}
+
+TEST_F(EngineTest, FtpPauseAndResume)
+{
+    engine_->Start(FtpRequest({}, 1));
+    ASSERT_TRUE(listener_.WaitFor<ProgressInfo>(DownloadId{1}, 1, 30s, [](const ProgressInfo& progress) {
+        return progress.receivedBytes > 1024 * 1024;
+    }));
+    engine_->Stop(DownloadId{1}, 1);
+    const auto stopped = listener_.Finished(DownloadId{1}, 1);
+    ASSERT_TRUE(stopped);
+    ASSERT_EQ(stopped->outcome, TransferOutcome::Stopped);
+    const auto info = listener_.WaitFor<ResponseInfo>(DownloadId{1}, 1, 1s);
+    ASSERT_TRUE(info);
+
+    server_->Reset();
+    auto resume = FtpRequest({}, 2);
+    resume.segments = stopped->segments;
+    resume.knownSize = stopped->totalSize;
+    resume.resumable = info->resumable;
+    const auto finished = Run(std::move(resume));
+    ASSERT_EQ(finished.outcome, TransferOutcome::Completed) << (finished.failure ? finished.failure->message : "");
+    EXPECT_TRUE(HoldsPayload(PartialPath(), server_->Size()));
+    for (const auto& retrieval : FtpRetrievals()) {
+        EXPECT_GT(retrieval.at("start").get<std::int64_t>(), 0) << "a resumed run must never fetch from zero";
+    }
+}
+
+TEST_F(EngineTest, FtpServerWithoutRestGetsOneConnection)
+{
+    const auto finished = Run(FtpRequest("norest"));
+    ASSERT_EQ(finished.outcome, TransferOutcome::Completed) << (finished.failure ? finished.failure->message : "");
+    EXPECT_TRUE(HoldsPayload(PartialPath(), server_->Size()));
+    const auto info = listener_.WaitFor<ResponseInfo>(DownloadId{1}, 1, 1s, [](const ResponseInfo& response) {
+        return !response.resumable;
+    });
+    EXPECT_TRUE(info) << "the download must be reported as not resumable";
 }
 
 TEST_F(EngineTest, ChangedResourceRefusesToResume)

@@ -29,6 +29,8 @@ public:
     FixtureServer& operator=(const FixtureServer&) = delete;
 
     [[nodiscard]] std::string Url(const std::string& path) const;
+    // The same payload over FTP. `user` "norest" makes the server refuse REST.
+    [[nodiscard]] std::string FtpUrl(const std::string& path, const std::string& user = {}) const;
     [[nodiscard]] std::int64_t Size() const noexcept { return size_; }
 
     // Control endpoints.
@@ -43,6 +45,7 @@ private:
     void* process_ = nullptr;
     void* stdinWrite_ = nullptr;
     int port_ = 0;
+    int ftpPort_ = 0;
     std::int64_t size_ = 0;
 };
 
