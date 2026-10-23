@@ -132,4 +132,30 @@ std::string NumberedFileName(std::string_view name, int number)
     return std::string(name.substr(0, dot)) + suffix + std::string(name.substr(dot));
 }
 
+NumberedName SplitNumberedFileName(std::string_view name)
+{
+    const size_t dot = name.rfind('.');
+    const bool hasExtension = dot != std::string_view::npos && dot != 0;
+    const std::string_view stem = hasExtension ? name.substr(0, dot) : name;
+    const std::string_view extension = hasExtension ? name.substr(dot) : std::string_view{};
+    // Looks for " (digits)" at the end of the stem.
+    if (stem.size() < 4 || stem.back() != ')') {
+        return NumberedName{std::string(name), 1};
+    }
+    const size_t open = stem.rfind(" (");
+    if (open == std::string_view::npos || open == 0) {
+        return NumberedName{std::string(name), 1};
+    }
+    const std::string_view digits = stem.substr(open + 2, stem.size() - open - 3);
+    if (digits.empty() || digits.size() > 3 || digits.front() == '0' ||
+        !std::all_of(digits.begin(), digits.end(), [](char c) { return c >= '0' && c <= '9'; })) {
+        return NumberedName{std::string(name), 1};
+    }
+    const int number = std::stoi(std::string(digits));
+    if (number < 2) {
+        return NumberedName{std::string(name), 1};
+    }
+    return NumberedName{std::string(stem.substr(0, open)) + std::string(extension), number};
+}
+
 }  // namespace ldm::core

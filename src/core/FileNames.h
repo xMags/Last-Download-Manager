@@ -21,4 +21,13 @@ namespace ldm::core {
 // "name.ext" -> "name (n).ext", used to avoid existing files (checklist A-05, A-06).
 [[nodiscard]] std::string NumberedFileName(std::string_view name, int number);
 
+struct NumberedName {
+    std::string base;  // the name without its counter
+    int number = 1;    // 1 when the name has no counter
+};
+
+// "name (3).ext" -> {"name.ext", 3}, so numbering continues at 4 instead of stacking a second
+// counter. Only 2 to 999 count as a counter: "Report (2019).pdf" keeps its year.
+[[nodiscard]] NumberedName SplitNumberedFileName(std::string_view name);
+
 }  // namespace ldm::core

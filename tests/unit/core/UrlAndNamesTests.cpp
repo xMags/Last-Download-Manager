@@ -94,6 +94,19 @@ TEST(FileNames, ExtensionAndNumbering)
     EXPECT_EQ(NumberedFileName("a.zip", 2), "a (2).zip");
     EXPECT_EQ(NumberedFileName("README", 3), "README (3)");
     EXPECT_EQ(NumberedFileName(".hidden", 2), ".hidden (2)");
+
+    using ldm::core::SplitNumberedFileName;
+    EXPECT_EQ(SplitNumberedFileName("range (2).bin").base, "range.bin");
+    EXPECT_EQ(SplitNumberedFileName("range (2).bin").number, 2);
+    EXPECT_EQ(SplitNumberedFileName("README (12)").base, "README");
+    EXPECT_EQ(SplitNumberedFileName("README (12)").number, 12);
+    EXPECT_EQ(SplitNumberedFileName("a.zip").number, 1);
+    EXPECT_EQ(SplitNumberedFileName("Report (2019).pdf").number, 1);  // a year, not a counter
+    EXPECT_EQ(SplitNumberedFileName("x (1).zip").number, 1);
+    EXPECT_EQ(SplitNumberedFileName("x (02).zip").number, 1);
+    EXPECT_EQ(SplitNumberedFileName("x(3).zip").number, 1);
+    EXPECT_EQ(SplitNumberedFileName(" (3).zip").number, 1);
+    EXPECT_EQ(SplitNumberedFileName("x ().zip").number, 1);
 }
 
 TEST(Matching, Wildcards)
