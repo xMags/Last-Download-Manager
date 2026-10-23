@@ -187,6 +187,31 @@ std::optional<model::Cookie> ParseCookie(const nlohmann::json& object)
     return cookie;
 }
 
+// The "post" member of a capture: absent or null for none; otherwise the content type (one header
+// value, so no line breaks) and the base64 body.
+bool ParsePost(const nlohmann::json& object, std::optional<PostBody>& out)
+{
+    const auto post = object.find("post");
+    if (post == object.end() || post->is_null()) {
+        return true;
+    }
+    if (!post->is_object()) {
+        return false;
+    }
+    const auto type = Text(*post, "contentType", kMaxMimeType);
+    const auto body = post->find("body");
+    if (!type || type->empty() || body == post->end() || !body->is_string() ||
+        body->get_ref<const std::string&>().size() > (kMaxPostBytes / 3 + 1) * 4) {
+        return false;
+    }
+    auto bytes = DecodeBase64(body->get_ref<const std::string&>());
+    if (!bytes || bytes->size() > kMaxPostBytes) {
+        return false;
+    }
+    out = PostBody{*type, std::move(*bytes)};
+    return true;
+}
+
 std::optional<Capture> ParseCapture(const nlohmann::json& object)
 {
     Capture capture;
@@ -216,6 +241,9 @@ std::optional<Capture> ParseCapture(const nlohmann::json& object)
         return std::nullopt;
     }
     capture.userAgent = std::move(*userAgent);
+    if (!ParsePost(object, capture.post)) {
+        return std::nullopt;
+    }
     const auto cookies = object.find("cookies");
     if (cookies == object.end() || !cookies->is_array() || cookies->size() > kMaxCookies) {
         return std::nullopt;
@@ -340,6 +368,54 @@ std::string EncodeCaptureResult(std::string_view replyTo, bool accepted)
     nlohmann::json message = Envelope(replyTo, "capture-result");
     message["accepted"] = accepted;
     return message.dump();
+}
+
+std::optional<std::string> DecodeBase64(std::string_view text)
+{
+    if (text.size() % 4 != 0) {
+        return std::nullopt;
+    }
+    const auto value = [](char c) -> int {
+        if (c >= 'A' && c <= 'Z') {
+            return c - 'A';
+        }
+        if (c >= 'a' && c <= 'z') {
+            return c - 'a' + 26;
+        }
+        if (c >= '0' && c <= '9') {
+            return c - '0' + 52;
+        }
+        if (c == '+') {
+            return 62;
+        }
+        if (c == '/') {
+            return 63;
+        }
+        return -1;
+    };
+    std::string bytes;
+    bytes.reserve(text.size() / 4 * 3);
+    for (size_t i = 0; i < text.size(); i += 4) {
+        const bool last = i + 4 == text.size();
+        const size_t padding = last ? (text[i + 3] == '=' ? (text[i + 2] == '=' ? 2 : 1) : 0) : 0;
+        std::uint32_t group = 0;
+        for (size_t j = 0; j < 4; ++j) {
+            const char c = text[i + j];
+            const int v = j >= 4 - padding ? 0 : value(c);
+            if (v < 0 || (j < 4 - padding && c == '=')) {
+                return std::nullopt;
+            }
+            group = (group << 6) | static_cast<std::uint32_t>(v);
+        }
+        bytes.push_back(static_cast<char>((group >> 16) & 0xFF));
+        if (padding < 2) {
+            bytes.push_back(static_cast<char>((group >> 8) & 0xFF));
+        }
+        if (padding < 1) {
+            bytes.push_back(static_cast<char>(group & 0xFF));
+        }
+    }
+    return bytes;
 }
 
 }  // namespace ldm::browser

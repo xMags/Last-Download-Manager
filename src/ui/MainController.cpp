@@ -316,7 +316,12 @@ void MainController::OnBrowserCapture(browser::Capture capture)
     ExternalAdd add;
     add.url = std::move(capture.url);
     add.fileName = std::move(capture.fileName);
-    add.browser = BrowserRequest{std::move(capture.referrer), std::move(capture.userAgent), std::move(capture.cookies)};
+    std::optional<core::PostData> post;
+    if (capture.post) {
+        post = core::PostData{std::move(capture.post->contentType), std::move(capture.post->body)};
+    }
+    add.browser = BrowserRequest{std::move(capture.referrer), std::move(capture.userAgent), std::move(capture.cookies),
+                                 std::move(post)};
     adds_.AddAddress(add);
 }
 

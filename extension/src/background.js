@@ -6,6 +6,7 @@ import { browserInfo } from './browser-info.js';
 import { DownloadCapture } from './capture.js';
 import { baseName } from './capture-rules.js';
 import { LdmConnection, State } from './connection.js';
+import { FormPosts } from './form-posts.js';
 import { downloadVerdict, keySettings } from './key-rules.js';
 import { cleanKeys, LinkClicks } from './link-clicks.js';
 import { isDownloadAddress } from './protocol.js';
@@ -48,11 +49,13 @@ const settingsLoaded = api.storage.local.get(['enabled', 'config']).then((stored
 });
 
 const clicks = new LinkClicks();
+const forms = new FormPosts();
 
 const capture = new DownloadCapture(api, connection, {
   ready: settingsLoaded,
   isEnabled: () => enabled,
   rules: () => rules,
+  postFor: (url) => forms.postFor(url),
   keyVerdict: ({ url, finalUrl, referrer, mimeType, fileName }) => downloadVerdict(
     keySettings(rules), clicks.clickKeysFor({ url, finalUrl, referrer }), clicks.heldKeys(), mimeType, fileName),
   userAgent: navigator.userAgent,
@@ -85,6 +88,11 @@ if (api.downloads.onDeterminingFilename) {
     capture.take(item, baseName(item.filename)).catch((error) => console.warn('LDM: capture failed', error));
   });
 }
+
+// Form submissions of pages and frames, for downloads that answer them.
+const FORM_FILTER = { urls: ['<all_urls>'], types: ['main_frame', 'sub_frame'] };
+api.webRequest.onBeforeRequest.addListener((details) => forms.onBeforeRequest(details), FORM_FILTER, ['requestBody']);
+api.webRequest.onSendHeaders.addListener((details) => forms.onSendHeaders(details), FORM_FILTER, ['requestHeaders']);
 
 api.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === RECONNECT_ALARM) {

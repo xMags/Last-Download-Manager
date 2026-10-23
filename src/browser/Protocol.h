@@ -21,6 +21,8 @@ inline constexpr int kProtocolVersion = 1;
 inline constexpr std::uint32_t kMaxInboundBytes = 4 * 1024 * 1024;
 // LDM to browser: Chrome's limit for messages from a native host.
 inline constexpr std::uint32_t kMaxOutboundBytes = 1024 * 1024;
+// A form body handed over with a capture, after base64 decoding.
+inline constexpr size_t kMaxPostBytes = 1024 * 1024;
 
 enum class BrowserFamily {
     Chromium,  // Chrome and Edge: same extension, same host manifest format
@@ -45,6 +47,12 @@ struct Hello {
     bool startLdm = false;
 };
 
+// The form submission a captured download came from.
+struct PostBody {
+    std::string contentType;
+    std::string body;  // bytes
+};
+
 // A download the extension took over from the browser (M3 design section 5). The browser's own
 // download is paused until LDM answers with a capture-result.
 struct Capture {
@@ -56,6 +64,7 @@ struct Capture {
     std::optional<std::string> mimeType;
     std::string userAgent;
     std::vector<model::Cookie> cookies;  // what the browser would send to url and finalUrl
+    std::optional<PostBody> post;        // set when the download answered a form submission
 };
 
 using Message = std::variant<HostInfo, Hello, Capture>;
@@ -80,6 +89,9 @@ struct ParsedMessage {
 [[nodiscard]] std::optional<HostInfo> HostInfoFromArguments(const std::vector<std::wstring>& arguments);
 
 [[nodiscard]] std::string EncodeHostInfo(const HostInfo& info);
+
+// Standard base64 (RFC 4648, with padding). Nothing for anything else, including whitespace.
+[[nodiscard]] std::optional<std::string> DecodeBase64(std::string_view text);
 
 // Capture rules LDM pushes to the extension; the extension decides locally from them (M3 design
 // decision 2). Grows with each capture feature.

@@ -27,7 +27,8 @@
     "downloads",
     "downloads.ui",
     "nativeMessaging",
-    "storage"
+    "storage",
+    "webRequest"
   ],
   "host_permissions": [
     "<all_urls>"

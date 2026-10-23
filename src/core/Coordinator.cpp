@@ -173,7 +173,9 @@ void Coordinator::RecoverAfterRestart(Entry& entry)
         if (partialGone && finalSize && d.totalSize && *finalSize == *d.totalSize) {
             d.status = DownloadStatus::Completed;
             d.partialPath.reset();
-            d.cookieSecret.clear();  // design decision 3: browser cookies are kept only until completion
+            d.cookieSecret.clear();  // design decision 3: browser cookies and form data are kept only until completion
+            d.postSecret.clear();
+            d.postContentType.reset();
             if (!d.completedAtMs) {
                 d.completedAtMs = ports_.clock->NowUnixMs();
             }
@@ -398,6 +400,15 @@ void Coordinator::Add(const AddDownloadCommand& command)
             return;
         }
         download.cookieSecret = std::move(secret).Value();
+    }
+    if (command.post) {
+        auto secret = ports_.secrets->Protect(command.post->body);
+        if (!secret) {
+            fail("The form data could not be protected: " + secret.GetError().message);
+            return;
+        }
+        download.postSecret = std::move(secret).Value();
+        download.postContentType = command.post->contentType;
     }
 
     auto inserted = ports_.store->InsertDownload(download);
@@ -1033,7 +1044,9 @@ void Coordinator::OnFinalized(Entry& entry, const FinalizeFinished& finalized)
     d.status = DownloadStatus::Completed;
     d.completedAtMs = ports_.clock->NowUnixMs();
     d.partialPath.reset();
-    d.cookieSecret.clear();  // design decision 3: browser cookies are kept only until completion
+    d.cookieSecret.clear();  // design decision 3: browser cookies and form data are kept only until completion
+    d.postSecret.clear();
+    d.postContentType.reset();
     entry.replaceFinalFile = false;
     entry.finalizeAttempts = 0;
     entry.automaticRestarts = 0;
@@ -1151,6 +1164,11 @@ TransferRequest Coordinator::BuildRequest(Entry& entry)
             request.cookieLines = model::CookieLines(cookies.Value());
         }
     }
+    if (!d.postSecret.empty()) {
+        if (auto body = ports_.secrets->Unprotect(d.postSecret)) {
+            request.post = PostData{d.postContentType.value_or("application/x-www-form-urlencoded"), std::move(body).Value()};
+        }
+    }
     request.ftpActiveMode = !settings_.ftpPassive;
     request.partialPath = PathFromUtf8(d.partialPath.value_or(std::string()));
     request.knownSize = d.totalSize;
@@ -1168,6 +1186,9 @@ TransferRequest Coordinator::BuildRequest(Entry& entry)
     }
     if (entry.forcedMaxConnections) {
         connections = std::min(connections, *entry.forcedMaxConnections);
+    }
+    if (request.post) {
+        connections = 1;
     }
     request.maxConnections = std::clamp(connections, 1, kMaxConnections);
     request.speedLimitBytesPerSecond = d.speedLimitBytesPerSecond;
@@ -1537,6 +1558,7 @@ void Coordinator::PublishSnapshot()
             view->download = entry->download;
             view->download.loginSecret.clear();
             view->download.cookieSecret.clear();
+            view->download.postSecret.clear();
             view->hasPassword = !entry->download.loginSecret.empty();
             view->awaitingConfirmation = entry->awaitingConfirmation;
             view->bytesPerSecond = entry->bytesPerSecond;

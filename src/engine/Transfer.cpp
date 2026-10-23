@@ -273,13 +273,23 @@ void Transfer::StartConnection(Segment& segment, bool probe, Clock::time_point n
             range += std::to_string(last);
         }
         curl_easy_setopt(easy, CURLOPT_RANGE, range.c_str());  // copied by libcurl
-        if (http_) {
-            if (const auto ifRange = IfRangeValue()) {
-                curl_slist* list = curl_slist_append(nullptr, ("If-Range: " + *ifRange).c_str());
-                connection->headerList.reset(list);
-                curl_easy_setopt(easy, CURLOPT_HTTPHEADER, list);
-            }
+    }
+    curl_slist* headers = nullptr;
+    if (connection->ranged && http_) {
+        if (const auto ifRange = IfRangeValue()) {
+            headers = curl_slist_append(headers, ("If-Range: " + *ifRange).c_str());
         }
+    }
+    if (request_.post) {
+        // The form is sent again as the browser sent it. A redirect after it continues with GET, as
+        // browsers do.
+        curl_easy_setopt(easy, CURLOPT_POSTFIELDSIZE_LARGE, static_cast<curl_off_t>(request_.post->body.size()));
+        curl_easy_setopt(easy, CURLOPT_COPYPOSTFIELDS, request_.post->body.data());
+        headers = curl_slist_append(headers, ("Content-Type: " + request_.post->contentType).c_str());
+    }
+    if (headers != nullptr) {
+        connection->headerList.reset(headers);
+        curl_easy_setopt(easy, CURLOPT_HTTPHEADER, headers);
     }
 
     curl_easy_setopt(easy, CURLOPT_WRITEFUNCTION, &Transfer::WriteCallback);

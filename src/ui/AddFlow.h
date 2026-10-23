@@ -24,6 +24,7 @@ struct BrowserRequest {
     std::optional<std::string> referrer;  // the page the download started from
     std::string userAgent;
     std::vector<model::Cookie> cookies;
+    std::optional<core::PostData> post;  // the form submission the download answered
 };
 
 // One address that arrives from outside the Add URL dialog: the command line, a second launch,

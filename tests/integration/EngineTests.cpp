@@ -495,6 +495,19 @@ TEST_F(EngineTest, BrowserCookiesReachOnlyTheirOwnHostOnEveryConnection)
     EXPECT_TRUE(HoldsPayload(PartialPath(2), server_->Size()));
 }
 
+TEST_F(EngineTest, FormDownloadsSendTheFormAgain)
+{
+    const auto denied = Run(Request("/post.bin", 1));
+    ASSERT_EQ(denied.outcome, TransferOutcome::Failed) << "a plain GET is refused";
+
+    auto request = Request("/post.bin", 1, 2);
+    request.post = ldm::core::PostData{"application/x-www-form-urlencoded", "token=abc&x=1"};
+    request.maxConnections = 1;
+    const auto finished = Run(std::move(request));
+    ASSERT_EQ(finished.outcome, TransferOutcome::Completed) << (finished.failure ? finished.failure->message : "");
+    EXPECT_TRUE(HoldsPayload(PartialPath(2), server_->Size()));
+}
+
 TEST_F(EngineTest, RetryAfterAndServiceUnavailableAreRetried)
 {
     std::int64_t id = 0;

@@ -199,6 +199,21 @@ export function createReferenceFixture({
       }
       return;
     }
+    if (path === '/post.bin') {
+      // A download that answers a form: only the right form, sent as a POST, gets the file.
+      const chunks = [];
+      request.on('data', (chunk) => chunks.push(chunk));
+      request.on('end', () => {
+        const body = Buffer.concat(chunks).toString('utf8');
+        if (request.method !== 'POST' || request.headers['content-type'] !== 'application/x-www-form-urlencoded' ||
+            body !== 'token=abc&x=1') {
+          finish(403, { 'Content-Type': 'text/plain' }, 'form required');
+          return;
+        }
+        serveBody(request, response, id, data, { name: 'post.bin' });
+      });
+      return;
+    }
     if (!['GET', 'HEAD'].includes(request.method)) {
       finish(405, { Allow: 'GET, HEAD' });
       return;
