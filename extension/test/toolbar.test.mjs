@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
+import { existsSync } from 'node:fs';
 import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 import { State } from '../src/connection.js';
-import { toolbarAppearance } from '../src/toolbar.js';
+import { ICONS, toolbarAppearance } from '../src/toolbar.js';
 
 test('turned off shows the grey icon and [disabled]', () => {
   const look = toolbarAppearance({ enabled: false, connection: State.Connected });
@@ -30,4 +32,13 @@ test('connected shows the plain icon', () => {
   assert.equal(look.icon, 'on');
   assert.equal(look.badge, '');
   assert.match(look.title, /click to turn/);
+});
+
+test('icon paths are absolute and the files exist', () => {
+  for (const set of Object.values(ICONS)) {
+    for (const path of Object.values(set)) {
+      assert.ok(path.startsWith('/'), `${path} must start at the extension root`);
+      assert.ok(existsSync(fileURLToPath(new URL(`..${path}`, import.meta.url))), `${path} is missing`);
+    }
+  }
 });
