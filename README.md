@@ -16,6 +16,7 @@ Design documents:
 
 - [the reference parity checklist](docs/rewrite/parity-checklist.md): what "replacement" means, item by item.
 - [Milestone 2 technical design](docs/rewrite/m2-technical-design.md): modules, threads, database and build.
+- [Milestone 3 technical design](docs/rewrite/m3-technical-design.md): browser extensions, native messaging host and media capture.
 
 ## Requirements
 
