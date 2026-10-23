@@ -6,6 +6,16 @@
 LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
 
 IDI_LDM ICON "ldm.ico"
+IDI_TOOLBAR_RESUME ICON "toolbar/resume.ico"
+IDI_TOOLBAR_STOP ICON "toolbar/stop.ico"
+IDI_TOOLBAR_STOP_ALL ICON "toolbar/stop-all.ico"
+IDI_TOOLBAR_DELETE ICON "toolbar/delete.ico"
+IDI_TOOLBAR_DELETE_COMPLETED ICON "toolbar/delete-completed.ico"
+IDI_TOOLBAR_RESUME_DISABLED ICON "toolbar/resume-disabled.ico"
+IDI_TOOLBAR_STOP_DISABLED ICON "toolbar/stop-disabled.ico"
+IDI_TOOLBAR_STOP_ALL_DISABLED ICON "toolbar/stop-all-disabled.ico"
+IDI_TOOLBAR_DELETE_DISABLED ICON "toolbar/delete-disabled.ico"
+IDI_TOOLBAR_DELETE_COMPLETED_DISABLED ICON "toolbar/delete-completed-disabled.ico"
 
 CREATEPROCESS_MANIFEST_RESOURCE_ID RT_MANIFEST "ldm.manifest"
 
