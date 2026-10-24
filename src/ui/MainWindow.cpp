@@ -581,7 +581,9 @@ void MainWindow::UpdateStatus()
 {
     const core::Snapshot& snapshot = *snapshot_;
     std::vector<std::wstring> parts;
-    parts.push_back(std::to_wstring(snapshot.downloads.size()) + (snapshot.downloads.size() == 1 ? L" download" : L" downloads"));
+    const auto listed = std::count_if(snapshot.downloads.begin(), snapshot.downloads.end(),
+                                      [](const auto& view) { return view->download.InMainList(); });
+    parts.push_back(std::to_wstring(listed) + (listed == 1 ? L" download" : L" downloads"));
     parts.push_back(std::to_wstring(snapshot.activeDownloads) + L" active");
     if (snapshot.totalBytesPerSecond > 0) {
         parts.push_back(L"Speed: " + FormatSpeed(snapshot.totalBytesPerSecond));

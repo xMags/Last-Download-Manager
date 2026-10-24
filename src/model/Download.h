@@ -121,6 +121,9 @@ struct Download {
     std::vector<MediaTrack> tracks;  // a stream's tracks, in order; empty for a file
 
     [[nodiscard]] bool IsStream() const noexcept { return kind != DownloadKind::File; }
+    // Shown in the main list: every download but a Grabber project's that was not added to it. A
+    // download whose project is gone shows, so nothing stays hidden for good.
+    [[nodiscard]] bool InMainList() const noexcept { return listed || !projectId; }
     [[nodiscard]] std::int64_t DownloadedBytes() const noexcept;
 };
 

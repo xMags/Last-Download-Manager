@@ -112,6 +112,25 @@ TEST(ListModel, FiltersByStatusAndCategory)
     EXPECT_TRUE(BuildIndex(snapshot, {StatusFilter::Finished, CategoryId{5}}, {}).empty());
 }
 
+TEST(ListModel, HidesGrabberDownloadsNotInTheMainList)
+{
+    Snapshot snapshot = Sample();
+    auto hidden = std::make_shared<DownloadView>(*snapshot.downloads[0]);
+    hidden->download.id = ldm::model::DownloadId{9};
+    hidden->download.projectId = ldm::model::GrabberProjectId{1};
+    hidden->download.listed = false;
+    auto orphan = std::make_shared<DownloadView>(*hidden);
+    orphan->download.id = ldm::model::DownloadId{10};
+    orphan->download.projectId.reset();  // its project was deleted: shown again
+    auto added = std::make_shared<DownloadView>(*hidden);
+    added->download.id = ldm::model::DownloadId{11};
+    added->download.listed = true;
+    snapshot.downloads.push_back(hidden);
+    snapshot.downloads.push_back(orphan);
+    snapshot.downloads.push_back(added);
+    EXPECT_EQ(Ids(snapshot, BuildIndex(snapshot, {}, {})), (std::vector<std::int64_t>{1, 2, 3, 4, 10, 11}));
+}
+
 TEST(ListModel, QueueNodesListTheMembersInQueueOrder)
 {
     Snapshot snapshot = Sample();
