@@ -3,6 +3,8 @@
 #   LastDownloadManager-windows-x64.zip       ldm.exe, ldm-host.exe, ffmpeg.exe, ffprobe.exe, LICENSE,
 #                                             THIRD-PARTY-NOTICES.txt
 #   LastDownloadManager-browser-extension.zip  chromium/ and firefox/, to load unpacked
+#   LastDownloadManager-chromium.zip,
+#   LastDownloadManager-firefox.zip            the extension packages for the browser stores
 # Build with: cmake --build --preset windows-release --target ldm_package
 # The archives are written to <build dir>/package/.
 
@@ -29,9 +31,13 @@ set(LDM_PACKAGE_DEPENDS ldm ldm-host)
 if(TARGET ldm_extension)
     list(APPEND LDM_PACKAGE_COMMANDS
         COMMAND ${CMAKE_COMMAND} -E copy_directory "${PROJECT_SOURCE_DIR}/build/extension" "${LDM_EXTENSION_STAGE}"
+        COMMAND ${CMAKE_COMMAND} -E rm -rf "${LDM_EXTENSION_STAGE}/LastDownloadManager-chromium.zip"
+                "${LDM_EXTENSION_STAGE}/LastDownloadManager-firefox.zip"
         COMMAND ${CMAKE_COMMAND} -E chdir "${LDM_PACKAGE_DIR}"
                 ${CMAKE_COMMAND} -E tar cf LastDownloadManager-browser-extension.zip --format=zip
-                LastDownloadManager-browser-extension)
+                LastDownloadManager-browser-extension
+        COMMAND ${CMAKE_COMMAND} -E copy "${PROJECT_SOURCE_DIR}/build/extension/LastDownloadManager-chromium.zip"
+                "${PROJECT_SOURCE_DIR}/build/extension/LastDownloadManager-firefox.zip" "${LDM_PACKAGE_DIR}")
     list(APPEND LDM_PACKAGE_DEPENDS ldm_extension)
 endif()
 

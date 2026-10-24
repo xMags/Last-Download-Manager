@@ -10,7 +10,7 @@ endif()
 # One fixed folder for every preset (build/extension), so the folder a browser loaded unpacked is
 # always the one the latest build updated.
 add_custom_target(ldm_extension ALL
-    COMMAND ${LDM_NODE} ${PROJECT_SOURCE_DIR}/extension/build.mjs
+    COMMAND ${LDM_NODE} ${PROJECT_SOURCE_DIR}/extension/build.mjs --zip
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
     COMMENT "Building the browser extension into build/extension"
     VERBATIM)
