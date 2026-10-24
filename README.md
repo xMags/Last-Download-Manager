@@ -21,9 +21,12 @@
     <a href="https://github.com/xMags/Last-Download-Manager/releases/latest/download/LastDownloadManager-windows-x64-setup.exe"><img alt="Download the Last Download Manager installer for Windows" src="https://img.shields.io/badge/Download-Installer_x64-16A34A?style=for-the-badge&logo=windows&logoColor=white" /></a>
     <a href="https://github.com/xMags/Last-Download-Manager/releases/latest/download/LastDownloadManager-windows-x64.zip"><img alt="Download the portable Last Download Manager" src="https://img.shields.io/badge/Download-Portable_zip-15803D?style=for-the-badge&logo=windows&logoColor=white" /></a>
     <a href="https://github.com/xMags/Last-Download-Manager/releases/latest/download/LastDownloadManager-browser-extension.zip"><img alt="Download the browser extension" src="https://img.shields.io/badge/Download-Browser_extension-0097B2?style=for-the-badge&logo=googlechrome&logoColor=white" /></a>
+    <a href="https://lastprojects.com/wiki/last-download-manager"><img alt="Read the Last Download Manager user guide" src="https://img.shields.io/badge/User_guide-Wiki-8B5CF6?style=for-the-badge&logo=bookstack&logoColor=white" /></a>
   </p>
 
   <p>
+    <a href="https://lastprojects.com/wiki/last-download-manager"><strong>User guide</strong></a>
+    ·
     <a href="#install">Install</a>
     ·
     <a href="#features">Features</a>
@@ -64,6 +67,8 @@
 ---
 
 ## Features
+
+Every window, option and feature is explained with screenshots in the **[Last Download Manager user guide](https://lastprojects.com/wiki/last-download-manager)** on the Last Projects wiki.
 
 ### Downloads
 
