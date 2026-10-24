@@ -414,6 +414,23 @@ TEST_F(GrabberExplorerTest, ExploresBreadthFirstWithinTheDepth)
     EXPECT_FALSE(view->exploring);
     EXPECT_EQ(view->stats.pagesExplored, 3);
     EXPECT_TRUE(view->project.lastRunAtMs);
+    EXPECT_FALSE(view->startPageFailure);
+}
+
+TEST_F(GrabberExplorerTest, SaysWhenTheStartPageCannotBeRead)
+{
+    Start();
+    const GrabberProjectId id = Save(Definition("https://example.com/missing.html"));
+    explorer_->Handle(ldm::core::GrabberExploreCommand{id, false, {}});
+    Serve();
+    const auto* view = View(id);
+    ASSERT_TRUE(view);
+    ASSERT_TRUE(view->startPageFailure);
+    EXPECT_FALSE(view->startPageFailure->empty());
+    Page("https://example.com/missing.html", "<p>back</p>");
+    explorer_->Handle(ldm::core::GrabberExploreCommand{id, false, {}});
+    Serve();
+    EXPECT_FALSE(View(id)->startPageFailure);
 }
 
 TEST_F(GrabberExplorerTest, ReadsTheWholeSiteWithoutLooping)

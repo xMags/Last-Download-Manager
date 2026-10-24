@@ -116,6 +116,7 @@ private:
         std::set<std::int64_t> unsaved;
 
         bool exploring = false;
+        std::optional<std::string> startPageFailure;  // of the last exploration
         bool scheduledRun = false;      // its schedule started the current run
         bool downloadAfterExplore = false;
         std::deque<std::int64_t> pageQueue;
