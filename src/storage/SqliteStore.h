@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/GrabberStore.h"
 #include "core/Store.h"
 #include "storage/Sqlite.h"
 
@@ -8,12 +9,13 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace ldm::storage {
 
-// SQLite implementation of the persistence port. Owned and used by the core thread only.
-class SqliteStore final : public core::Store {
+// SQLite implementation of the persistence ports. Owned and used by the core thread only.
+class SqliteStore final : public core::Store, public core::GrabberStore {
 public:
     // Opens (creating if needed) and migrates the database. Holds an exclusive lock for its
     // lifetime, so a second process cannot open the same file. Pass ":memory:" for tests.
@@ -50,6 +52,15 @@ public:
 
     base::Result<std::vector<model::ServerLimit>> LoadServerLimits() override;
     base::Status ReplaceServerLimits(const std::vector<model::ServerLimit>& limits) override;
+
+    base::Result<std::vector<core::StoredGrabberProject>> LoadGrabberProjects() override;
+    base::Result<model::GrabberProjectId> InsertGrabberProject(const model::GrabberProject& project,
+                                                               std::string_view definitionJson) override;
+    base::Status SaveGrabberProject(const model::GrabberProject& project, std::string_view definitionJson) override;
+    base::Status DeleteGrabberProject(model::GrabberProjectId id) override;
+    base::Result<std::vector<model::GrabberItem>> LoadGrabberItems(model::GrabberProjectId id) override;
+    base::Status SaveGrabberItems(model::GrabberProjectId id, std::span<const model::GrabberItem> items) override;
+    base::Status ClearGrabberItems(model::GrabberProjectId id) override;
 
 private:
     explicit SqliteStore(Connection connection) noexcept : connection_(std::move(connection)) {}
