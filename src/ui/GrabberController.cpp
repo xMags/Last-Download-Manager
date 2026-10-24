@@ -164,6 +164,19 @@ void GrabberController::RunWizard(model::GrabberProject project, bool hasPasswor
     core::GrabberSaveProjectCommand save;
     save.token = nextToken_++;
     save.project = std::move(result->project);
+    if (self) {
+        // The Scheduler may have changed the project's schedule while the wizard was open: only
+        // what the wizard edits goes over the newest copy.
+        const grabber::GrabberProjectView* latest = Find(*self);
+        if (latest == nullptr) {
+            return;  // deleted meanwhile
+        }
+        model::GrabberProject merged = latest->project;
+        merged.name = std::move(save.project.name);
+        merged.definition = std::move(save.project.definition);
+        merged.loginUser = std::move(save.project.loginUser);
+        save.project = std::move(merged);
+    }
     save.loginPassword = std::move(result->password);
     pendingSaves_.emplace(save.token, save.project.isTemplate ? AfterSave::Nothing : after);
     Post(std::move(save));
