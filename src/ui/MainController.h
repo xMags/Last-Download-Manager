@@ -105,6 +105,9 @@ public:
     void OnDroppedUrls(std::vector<std::string> urls);
     // LDM runs as administrator, so browsers cannot hand it downloads (checklist B-10).
     void WarnElevated();
+    // Asks once whether LDM may check GitHub for new versions (checklist X-05); nothing when it
+    // asked before.
+    void AskAboutUpdatesOnce();
 
     [[nodiscard]] AddFlow& Adds() noexcept { return adds_; }
 
@@ -123,6 +126,7 @@ private:
     void ShowOptions();
     void AskForLogin(const core::DownloadFailed& failed);
     void AskAboutQuota(const core::QuotaReached& reached);
+    void OnUpdateChecked(const core::UpdateCheckFinished& finished);
     void ChooseListFont();
     void ModifySettings(std::function<void(model::Settings&)> modify);
     void SetSort(SortKey key);
@@ -144,6 +148,7 @@ private:
     QueueCommands queues_;
     ClipboardMonitor clipboard_;
     std::unique_ptr<FindDialog> find_;
+    bool askedAboutUpdates_ = false;  // in this run, while the answer is on its way to the settings
     std::unique_ptr<SchedulerWindow> scheduler_;
     FindOptions findOptions_;
     std::optional<model::CategoryId> categoryMenuTarget_;

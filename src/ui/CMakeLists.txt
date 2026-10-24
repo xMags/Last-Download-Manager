@@ -137,7 +137,9 @@ add_library(ldm_ui STATIC
     dialogs/QueueDialogs.cpp
     dialogs/QueueDialogs.h
     dialogs/SchedulerWindow.cpp
-    dialogs/SchedulerWindow.h)
+    dialogs/SchedulerWindow.h
+    dialogs/UpdateDialog.cpp
+    dialogs/UpdateDialog.h)
 target_link_libraries(ldm_ui
     PUBLIC ldm_browser ldm_core ldm_grabber ldm_media
     PRIVATE nlohmann_json::nlohmann_json comctl32 uxtheme dwmapi shell32 comdlg32 ole32 shcore)

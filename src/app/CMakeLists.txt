@@ -25,6 +25,7 @@ foreach(tool IN ITEMS ffmpeg ffprobe)
 endforeach()
 
 target_include_directories(ldm PRIVATE ${PROJECT_SOURCE_DIR}/src/resources)
+target_compile_definitions(ldm PRIVATE "LDM_VERSION=\"${PROJECT_VERSION}\"")
 
 # The manifest is embedded through ldm.rc, so the linker must not generate a second one.
 target_link_options(ldm PRIVATE /MANIFEST:NO)
