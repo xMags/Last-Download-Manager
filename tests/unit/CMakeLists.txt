@@ -17,6 +17,7 @@ add_executable(ldm_unit_tests
     media/DashManifestTests.cpp
     media/HlsPlaylistTests.cpp
     media/NumberTextTests.cpp
+    media/QualityListTests.cpp
     media/UrlReferenceTests.cpp
     model/DownloadTests.cpp
     model/SettingsTests.cpp
@@ -27,6 +28,7 @@ add_executable(ldm_unit_tests
     ui/CaptureFollowUpTests.cpp
     ui/ExportAndLaunchTests.cpp
     ui/ListModelTests.cpp
+    ui/MediaCatalogTests.cpp
     ui/PageLinksTests.cpp
     # The app's own manifest: the UI code under test needs version 6 of the common controls
     # (SetWindowSubclass and LoadIconMetric exist only there), as ldm.exe gets it.

@@ -11,6 +11,8 @@ add_library(ldm_media STATIC
     MediaModel.h
     NumberText.cpp
     NumberText.h
+    QualityList.cpp
+    QualityList.h
     UrlReference.cpp
     UrlReference.h
     XmlElement.cpp
