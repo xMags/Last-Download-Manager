@@ -57,6 +57,8 @@
 
 **Portable:** [**LastDownloadManager-windows-x64.zip**](https://github.com/xMags/Last-Download-Manager/releases/latest/download/LastDownloadManager-windows-x64.zip) holds the same program. Unzip it to a folder of your choice and run `ldm.exe`, keeping `ldm-host.exe`, `ffmpeg.exe` and `ffprobe.exe` beside it.
 
+**ARM64 (Windows on Snapdragon):** the x64 installer above works there through Windows' x64 emulation. A native build is also available: [**LastDownloadManager-windows-arm64-setup.exe**](https://github.com/xMags/Last-Download-Manager/releases/latest/download/LastDownloadManager-windows-arm64-setup.exe) or the portable [**LastDownloadManager-windows-arm64.zip**](https://github.com/xMags/Last-Download-Manager/releases/latest/download/LastDownloadManager-windows-arm64.zip). It has not been tested on ARM64 hardware yet; please [report](https://github.com/xMags/Last-Download-Manager/issues) how it runs.
+
 **Uninstalling** keeps your download list and settings unless you choose to delete them too; downloaded files are never deleted. Every release is listed on the [releases page](https://github.com/xMags/Last-Download-Manager/releases/latest).
 
 ---
