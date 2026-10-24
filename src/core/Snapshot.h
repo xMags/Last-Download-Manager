@@ -29,6 +29,15 @@ struct DownloadView {
     std::optional<TransferFailure> retrying;  // set while the engine retries after a failure
     bool waitingForQuota = false;  // paused by the download quota; starts again by itself
     bool waitingForAddress = false;  // Refresh download address: waits for the browser (ENG-08)
+    // A stream's progress, which has no total size until its pieces are joined. Its tracks are in
+    // `download.tracks` without their pieces, which can be many thousands.
+    struct Stream {
+        int piecesDone = 0;
+        int piecesTotal = 0;  // 0 while a track's list is not read yet
+        double fraction = 0;  // 0..1
+        std::optional<std::int64_t> estimatedBytes;  // of what is downloaded, before joining
+    };
+    std::optional<Stream> stream;
 };
 
 // A stored site login without its password.

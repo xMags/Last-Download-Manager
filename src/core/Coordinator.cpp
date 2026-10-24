@@ -5,6 +5,9 @@
 #include "core/FailureText.h"
 #include "core/FileNames.h"
 #include "core/Matching.h"
+#include "core/MediaDownloads.h"
+#include "core/MediaPieces.h"
+#include "core/NetworkAddress.h"
 #include "model/Cookie.h"
 
 #include <algorithm>
@@ -69,6 +72,26 @@ bool IsFileContentType(std::string_view type)
                    [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     lower.erase(std::remove(lower.begin(), lower.end(), ' '), lower.end());
     return !lower.empty() && lower != "text/html" && lower != "application/xhtml+xml";
+}
+
+// A stream's pieces while it downloads: the download's partial path names a folder.
+std::filesystem::path PartsFolder(const model::Download& download)
+{
+    return PathFromUtf8(download.partialPath.value_or(std::string()));
+}
+
+// Two downloads of the same stream: the same manifest and the same tracks of it.
+bool SameStream(const model::Download& download, const AddDownloadCommand& command)
+{
+    if (!command.media || !download.IsStream() || download.tracks.size() != command.media->tracks.size()) {
+        return false;
+    }
+    for (size_t i = 0; i < download.tracks.size(); ++i) {
+        if (download.tracks[i].sourceUrl != command.media->tracks[i].sourceUrl) {
+            return false;
+        }
+    }
+    return true;
 }
 
 std::int64_t ProgressEnd(const model::Download& download)
@@ -194,6 +217,7 @@ void Coordinator::RecoverAfterRestart(Entry& entry)
         break;
     case DownloadStatus::Finalizing: {
         // A crash between the move and its commit leaves a complete final file and no partial file.
+        // A stream joined again from its pieces otherwise: its run finds them all on disk.
         const bool partialGone = !d.partialPath || !ports_.fileSystem->Exists(PathFromUtf8(*d.partialPath));
         const auto finalSize = ports_.fileSystem->FileSize(FinalPath(d));
         if (partialGone && finalSize && d.totalSize && *finalSize == *d.totalSize) {
@@ -219,7 +243,11 @@ void Coordinator::RecoverAfterRestart(Entry& entry)
     }
     // The database may lag behind the partial file, never the other way round; a partial file that
     // is gone or shorter than the stored progress means the progress cannot be trusted.
-    if (d.status != DownloadStatus::Completed && ProgressEnd(d) > 0) {
+    if (d.IsStream()) {
+        if (d.status != DownloadStatus::Completed && d.partialPath) {
+            StoreTracks(entry, VerifyMediaProgress(d, PartsFolder(d), *ports_.fileSystem));
+        }
+    } else if (d.status != DownloadStatus::Completed && ProgressEnd(d) > 0) {
         const auto size = d.partialPath ? ports_.fileSystem->FileSize(PathFromUtf8(*d.partialPath)) : std::nullopt;
         if (!size || *size < ProgressEnd(d)) {
             ResetProgress(entry);
@@ -328,8 +356,14 @@ void Coordinator::Add(const AddDownloadCommand& command)
 
     std::optional<std::string> overwriteName;
     std::optional<std::string> overwriteDir;
+    if (command.media && url->scheme != "http" && url->scheme != "https") {
+        fail("A stream's address must be an http or https address.");
+        return;
+    }
     const auto duplicate = std::find_if(entries_.begin(), entries_.end(), [&](const auto& item) {
-        return item.second.download.url == address && !item.second.deleteWhenStopped;
+        const model::Download& existing = item.second.download;
+        const bool same = command.media ? SameStream(existing, command) : !existing.IsStream();
+        return existing.url == address && same && !item.second.deleteWhenStopped;
     });
     if (duplicate != entries_.end()) {
         Entry& existing = duplicate->second;
@@ -448,6 +482,12 @@ void Coordinator::Add(const AddDownloadCommand& command)
         download.postSecret = std::move(secret).Value();
         download.postContentType = command.post->contentType;
     }
+    if (command.media) {
+        if (auto error = ValidateMedia(*command.media, download)) {
+            fail(std::move(*error));
+            return;
+        }
+    }
 
     auto inserted = ports_.store->InsertDownload(download);
     if (!inserted) {
@@ -462,6 +502,9 @@ void Coordinator::Add(const AddDownloadCommand& command)
     entry.userChoseFolder = command.saveDir.has_value();
     entry.replaceFinalFile = replaceFinal;
     entry.lastCheckpoint = ports_.clock->Steady();
+    if (command.media && command.media->approximateBytes && *command.media->approximateBytes > 0) {
+        entry.approximateBytes = command.media->approximateBytes;
+    }
     const model::DownloadId id = entry.download.id;
     Entry& stored = entries_.emplace(id, std::move(entry)).first->second;
     MarkChanged(stored);
@@ -517,7 +560,7 @@ void Coordinator::Confirm(const ConfirmDownloadCommand& command)
 
     if (entry->holdFinalize) {
         entry->holdFinalize = false;
-        BeginFinalize(*entry);
+        CompleteRun(*entry);
     } else if (command.start) {
         if (!entry->running && CanStart(d.status)) {
             Start(*entry);
@@ -556,6 +599,8 @@ void Coordinator::Stop(const std::vector<model::DownloadId>& ids)
         }
         if (entry->running) {
             RequestStop(*entry);
+        } else if (entry->muxing) {
+            CancelMux(*entry);  // the pieces stay; Resume joins them again
         }
     }
 }
@@ -585,6 +630,8 @@ void Coordinator::Delete(const std::vector<model::DownloadId>& ids, bool deleteF
             MarkChanged(*entry);
             if (entry->running) {
                 RequestStop(*entry);  // last: a run that never reached the engine is removed here
+            } else if (entry->muxing) {
+                CancelMux(*entry);
             }
             continue;
         }
@@ -667,7 +714,11 @@ void Coordinator::Update(const UpdateDownloadCommand& command)
         return;
     }
     model::Download& d = entry->download;
-    if (command.url) {
+    if (command.url && *command.url != d.url) {
+        if (d.IsStream()) {
+            ReportError("The address of a stream cannot be changed: its tracks come from that address.");
+            return;
+        }
         if (!ParseUrl(*command.url)) {
             ReportError("The address is not a valid http, https or ftp address.");
             return;
@@ -712,8 +763,8 @@ void Coordinator::WaitForAddress(model::DownloadId id)
 {
     Entry* entry = Find(id);
     if (entry == nullptr || entry->deleteWhenStopped || entry->finalizing ||
-        entry->download.status == DownloadStatus::Completed) {
-        return;
+        entry->download.status == DownloadStatus::Completed || entry->download.IsStream()) {
+        return;  // a stream's addresses come from its manifest, not from one page link
     }
     if (waitingForAddress_ && *waitingForAddress_ != id) {
         StopWaitingForAddress(*waitingForAddress_);  // one at a time: the newer request takes over
@@ -989,7 +1040,9 @@ void Coordinator::OnEngineEvent(EngineEvent event)
 {
     // Manifest fetches are not downloads: their answers and proxy lookups go to their own owner.
     if (auto* fetched = std::get_if<FetchFinished>(&event.payload)) {
-        if (manifests_) {
+        if (fetched->fetchId < 0) {
+            OnPlaylistFetched(*fetched);
+        } else if (manifests_) {
             manifests_->OnFinished(std::move(*fetched));
         }
         return;
@@ -1019,8 +1072,12 @@ void Coordinator::OnEngineEvent(EngineEvent event)
                 OnProxyResolved(*entry, payload);
             } else if constexpr (std::is_same_v<T, FetchFinished>) {
                 // handled above
-            } else if constexpr (std::is_same_v<T, MediaProgress> || std::is_same_v<T, MediaFinished>) {
-                // The coordinator starts no stream runs yet, so none of their events can arrive.
+            } else if constexpr (std::is_same_v<T, MediaProgress>) {
+                OnMediaProgress(*entry, payload);
+            } else if constexpr (std::is_same_v<T, MediaFinished>) {
+                OnMediaFinished(*entry, payload);
+            } else if constexpr (std::is_same_v<T, MuxFinished>) {
+                OnMuxFinished(*entry, payload);
             } else {
                 static_assert(sizeof(T) == 0, "unhandled engine event");
             }
@@ -1107,7 +1164,12 @@ void Coordinator::OnFinished(Entry& entry, const TransferFinished& finished)
         d.totalSize = finished.totalSize;
     }
     MarkChanged(entry);
+    OnRunEnded(entry, finished.outcome, finished.failure);
+}
 
+void Coordinator::OnRunEnded(Entry& entry, TransferOutcome outcome, const std::optional<TransferFailure>& reportedFailure)
+{
+    model::Download& d = entry.download;
     if (entry.deleteWhenStopped) {
         RemoveEntry(d.id, false);
         UpdatePowerRequest();
@@ -1119,7 +1181,7 @@ void Coordinator::OnFinished(Entry& entry, const TransferFinished& finished)
         UpdatePowerRequest();
         return;
     }
-    if (entry.resumeWhenStopped && finished.outcome != TransferOutcome::Completed) {
+    if (entry.resumeWhenStopped && outcome != TransferOutcome::Completed) {
         // The old run ended after a new address arrived: continue from the new one.
         entry.resumeWhenStopped = false;
         d.status = DownloadStatus::Paused;
@@ -1130,7 +1192,7 @@ void Coordinator::OnFinished(Entry& entry, const TransferFinished& finished)
     }
     entry.resumeWhenStopped = false;
 
-    switch (finished.outcome) {
+    switch (outcome) {
     case TransferOutcome::Completed:
         StopWaitingForAddress(d.id);
         if (d.awaitingConfirmation) {
@@ -1138,7 +1200,7 @@ void Coordinator::OnFinished(Entry& entry, const TransferFinished& finished)
             d.status = DownloadStatus::Finalizing;
             Save(entry);
         } else {
-            BeginFinalize(entry);
+            CompleteRun(entry);
         }
         break;
     case TransferOutcome::Stopped:
@@ -1146,7 +1208,7 @@ void Coordinator::OnFinished(Entry& entry, const TransferFinished& finished)
         Save(entry);
         break;
     case TransferOutcome::Failed: {
-        const TransferFailure failure = finished.failure.value_or(
+        const TransferFailure failure = reportedFailure.value_or(
             TransferFailure{FailureReason::Internal, FailureClass::Fatal, 0, "the transfer failed without a reason"});
         if (shuttingDown_ || d.status == DownloadStatus::Stopping) {
             d.status = DownloadStatus::Paused;
@@ -1203,6 +1265,7 @@ void Coordinator::OnFinalized(Entry& entry, const FinalizeFinished& finalized)
     d.status = DownloadStatus::Completed;
     d.completedAtMs = ports_.clock->NowUnixMs();
     d.partialPath.reset();
+    entry.muxOutput.reset();
     d.cookieSecret.clear();  // design decision 3: browser cookies and form data are kept only until completion
     d.postSecret.clear();
     d.postContentType.reset();
@@ -1251,9 +1314,11 @@ void Coordinator::Start(Entry& entry)
         const std::filesystem::path directory =
             useTemporary ? PathFromUtf8(settings_.temporaryDirectory) : PathFromUtf8(d.saveDir);
         const std::string stem = useTemporary ? d.publicId : d.fileName;
-        std::filesystem::path partial = directory / PathFromUtf8(stem + ".ldmpart");
+        // A stream's pieces go into a folder of their own.
+        const std::string extension = d.IsStream() ? std::string(kPartsFolderExtension) : std::string(".ldmpart");
+        std::filesystem::path partial = directory / PathFromUtf8(stem + extension);
         for (int n = 2; (IsReserved(partial, d.id) || ports_.fileSystem->Exists(partial)) && n <= kMaxNumberedNames; ++n) {
-            partial = directory / PathFromUtf8(stem + "." + std::to_string(n) + ".ldmpart");
+            partial = directory / PathFromUtf8(stem + "." + std::to_string(n) + extension);
         }
         d.partialPath = PathToUtf8(partial);
     }
@@ -1264,6 +1329,7 @@ void Coordinator::Start(Entry& entry)
     }
     Save(entry);  // the epoch is stored before the engine can report anything for it
     entry.quotaCountedBytes = d.DownloadedBytes();  // bytes from earlier runs were counted then
+    entry.runStartBytes = d.DownloadedBytes();
     entry.running = true;
     entry.stopRequested = false;
     MarkChanged(entry);
@@ -1278,6 +1344,11 @@ void Coordinator::Start(Entry& entry)
 
 void Coordinator::StartEngine(Entry& entry, std::optional<std::string> proxy)
 {
+    if (entry.download.IsStream()) {
+        entry.runProxy = std::move(proxy);
+        StartStream(entry);
+        return;
+    }
     TransferRequest request = BuildRequest(entry);
     request.proxy = std::move(proxy);
     ports_.engine->Start(std::move(request));
@@ -1336,8 +1407,15 @@ TransferRequest Coordinator::BuildRequest(Entry& entry)
     request.knownContentType = d.contentType;
     request.ignoreLastModified = settings_.ignoreModificationTimeChanges;
     request.segments = d.segments;
+    request.maxConnections = ConnectionsFor(entry, url, request.post.has_value());
+    request.speedLimitBytesPerSecond = d.speedLimitBytesPerSecond;
+    request.maxAttemptsPerSegment = config_.maxAttemptsPerSegment;
+    return request;
+}
 
-    int connections = d.maxConnections.value_or(settings_.defaultMaxConnections);
+int Coordinator::ConnectionsFor(const Entry& entry, const std::optional<Url>& url, bool post) const
+{
+    int connections = entry.download.maxConnections.value_or(settings_.defaultMaxConnections);
     if (url) {
         if (const auto serverLimit = MatchServerLimit(serverLimits_, url->host)) {
             connections = std::min(connections, *serverLimit);
@@ -1346,13 +1424,10 @@ TransferRequest Coordinator::BuildRequest(Entry& entry)
     if (entry.forcedMaxConnections) {
         connections = std::min(connections, *entry.forcedMaxConnections);
     }
-    if (request.post) {
+    if (post) {
         connections = 1;
     }
-    request.maxConnections = std::clamp(connections, 1, kMaxConnections);
-    request.speedLimitBytesPerSecond = d.speedLimitBytesPerSecond;
-    request.maxAttemptsPerSegment = config_.maxAttemptsPerSegment;
-    return request;
+    return std::clamp(connections, 1, kMaxConnections);
 }
 
 void Coordinator::RequestStop(Entry& entry)
@@ -1360,10 +1435,19 @@ void Coordinator::RequestStop(Entry& entry)
     if (!entry.running || entry.stopRequested) {
         return;
     }
-    if (entry.awaitingProxy) {
+    if (entry.awaitingProxy || entry.pendingPlaylists > 0) {
         // The engine never started this run: finish it here, as the engine would have, so delete,
         // restart and shutdown follow their usual path. `entry` may be removed by this call.
+        // Answers to playlist fetches still under way are dropped when they come.
         entry.awaitingProxy = false;
+        if (entry.download.IsStream()) {
+            std::erase_if(playlistFetches_, [&entry](const auto& fetch) { return fetch.second.id == entry.download.id; });
+            entry.pendingPlaylists = 0;
+            MediaFinished stopped;
+            stopped.outcome = TransferOutcome::Stopped;
+            OnMediaFinished(entry, stopped);
+            return;
+        }
         TransferFinished stopped;
         stopped.outcome = TransferOutcome::Stopped;
         stopped.segments = entry.download.segments;
@@ -1382,6 +1466,19 @@ void Coordinator::RequestStop(Entry& entry)
 void Coordinator::ResetProgress(Entry& entry)
 {
     model::Download& d = entry.download;
+    if (d.IsStream()) {
+        if (d.partialPath) {
+            if (base::Status removed = ports_.fileSystem->RemoveFolder(PartsFolder(d)); !removed) {
+                ReportError("The downloaded parts could not be deleted: " + removed.GetError().message);
+            }
+        }
+        StoreTracks(entry, ResetMediaProgress(d));
+        entry.unsavedPieces.clear();
+        d.totalSize.reset();
+        entry.receivedBytes = 0;
+        MarkChanged(entry);
+        return;
+    }
     if (d.partialPath) {
         if (base::Status removed = ports_.fileSystem->Remove(PathFromUtf8(*d.partialPath)); !removed) {
             ReportError("A partial file could not be deleted: " + removed.GetError().message);
@@ -1407,7 +1504,10 @@ void Coordinator::RemoveEntry(model::DownloadId id, bool deleteFinalFile)
     }
     const model::Download& d = entry->download;
     if (d.partialPath) {
-        if (base::Status removed = ports_.fileSystem->Remove(PathFromUtf8(*d.partialPath)); !removed) {
+        const std::filesystem::path partial = PathFromUtf8(*d.partialPath);
+        const base::Status removed =
+            d.IsStream() ? ports_.fileSystem->RemoveFolder(partial) : ports_.fileSystem->Remove(partial);
+        if (!removed) {
             ReportError("A partial file could not be deleted: " + removed.GetError().message);
         }
     }
@@ -1445,7 +1545,11 @@ void Coordinator::BeginFinalize(Entry& entry)
     request.epoch = d.epoch;
     request.partialPath = PathFromUtf8(d.partialPath.value_or(std::string()));
     request.finalPath = target;
-    if (settings_.setFileDateFromServer) {
+    if (d.IsStream()) {
+        // The joined file is moved; the folder of pieces goes once it is in place.
+        request.partialPath = entry.muxOutput.value_or(std::filesystem::path());
+        request.removeFolder = PartsFolder(d);
+    } else if (settings_.setFileDateFromServer) {
         request.lastModified = d.validators.lastModified;
     }
     ports_.engine->Finalize(std::move(request));
@@ -1459,6 +1563,280 @@ void Coordinator::Fail(Entry& entry, const TransferFailure& failure)
     Save(entry);
     MarkChanged(entry);
     Notify(DownloadFailed{d.id, d.fileName, failure});
+}
+
+// ---------------------------------------------------------------------------------------------
+// Streams (M3 design section 6)
+
+std::optional<std::string> Coordinator::ValidateMedia(const MediaChoice& media, model::Download& download)
+{
+    if (media.kind != model::DownloadKind::Hls && media.kind != model::DownloadKind::Dash) {
+        return "Only HLS and DASH streams can be downloaded.";
+    }
+    if (media.tracks.empty() || media.tracks.size() > kMaxMediaTracks) {
+        return "A stream download needs between 1 and " + std::to_string(kMaxMediaTracks) + " tracks.";
+    }
+    const auto clip = [](const std::string& text) { return text.substr(0, 200); };
+    download.kind = media.kind;
+    download.mediaFromPrivateNetwork = media.fromPrivateNetwork;
+    download.tracks.clear();
+    for (const MediaTrackChoice& choice : media.tracks) {
+        const auto source = ParseUrl(choice.sourceUrl);
+        if (!source || (source->scheme != "http" && source->scheme != "https")) {
+            return "A track of the stream has no valid http or https address.";
+        }
+        if (media.kind == model::DownloadKind::Dash && !choice.segments) {
+            return "A DASH track needs its segment list.";
+        }
+        model::MediaTrack track;
+        track.role = choice.role;
+        track.sourceUrl = choice.sourceUrl;
+        track.codecs = clip(choice.codecs);
+        track.language = clip(choice.language);
+        track.name = clip(choice.name);
+        if (choice.segments) {
+            if (choice.segments->drm) {
+                return "The stream is protected (DRM), which LDM does not download.";
+            }
+            if (choice.segments->live) {
+                return "This is a live stream; LDM does not download live streams yet.";
+            }
+            if (choice.segments->segments.empty() || choice.segments->segments.size() > media::kMaxSegmentsPerTrack) {
+                return "A track of the stream lists no segments, or too many.";
+            }
+            FillTrack(track, *choice.segments);
+        }
+        download.tracks.push_back(std::move(track));
+    }
+    const auto manifest = ParseUrl(download.url);
+    if (!media.fromPrivateNetwork && manifest && IsPrivateHost(manifest->host)) {
+        download.mediaFromPrivateNetwork = true;  // the manifest's own host is private: so may its pieces be
+    }
+    if (const auto refused = CheckPrivateAddresses(download)) {
+        return "The stream comes from the internet but points into your own network, which LDM refuses.";
+    }
+    return std::nullopt;
+}
+
+void Coordinator::StartStream(Entry& entry)
+{
+    model::Download& d = entry.download;
+    std::vector<std::string> cookieLines;
+    if (!d.cookieSecret.empty()) {
+        if (auto cookies = ports_.secrets->Unprotect(d.cookieSecret)) {
+            cookieLines = model::CookieLines(cookies.Value());
+        }
+    }
+    const std::string userAgent = d.userAgent.value_or(settings_.userAgent);
+    const std::vector<std::uint32_t> unlisted = UnlistedTracks(d);
+    if (!unlisted.empty()) {
+        entry.playlistFailure.reset();
+        entry.pendingPlaylists = static_cast<int>(unlisted.size());
+        for (const std::uint32_t track : unlisted) {
+            FetchRequest fetch;
+            fetch.fetchId = --lastPlaylistFetchId_;
+            fetch.url = d.tracks[track].sourceUrl;
+            fetch.referer = d.referer;
+            fetch.userAgent = userAgent;
+            fetch.cookieLines = cookieLines;
+            fetch.proxy = entry.runProxy;
+            fetch.maxBytes = media::kMaxManifestBytes;
+            fetch.refusePrivateAddresses = !d.mediaFromPrivateNetwork;
+            playlistFetches_.emplace(fetch.fetchId, PlaylistFetch{d.id, d.epoch, track});
+            ports_.engine->Fetch(std::move(fetch));
+        }
+        return;
+    }
+    if (const auto refused = CheckPrivateAddresses(d)) {
+        MediaFinished failed;
+        failed.failure = refused;
+        OnMediaFinished(entry, failed);
+        return;
+    }
+    MediaRequest request = BuildMediaRequest(d, PartsFolder(d));
+    request.referer = d.referer;
+    request.userAgent = userAgent;
+    request.cookieLines = std::move(cookieLines);
+    request.proxy = entry.runProxy;
+    request.maxConnections = ConnectionsFor(entry, ParseUrl(d.url), false);
+    request.speedLimitBytesPerSecond = d.speedLimitBytesPerSecond;
+    request.maxAttemptsPerSegment = config_.maxAttemptsPerSegment;
+    ports_.engine->StartMedia(std::move(request));
+}
+
+void Coordinator::OnPlaylistFetched(const FetchFinished& fetched)
+{
+    const auto it = playlistFetches_.find(fetched.fetchId);
+    if (it == playlistFetches_.end()) {
+        return;  // its run was stopped meanwhile
+    }
+    const PlaylistFetch fetch = it->second;
+    playlistFetches_.erase(it);
+    Entry* entry = Find(fetch.id);
+    if (entry == nullptr || entry->download.epoch != fetch.epoch || !entry->running || entry->pendingPlaylists <= 0) {
+        return;
+    }
+    entry->pendingPlaylists -= 1;
+    if (fetched.failure) {
+        if (!entry->playlistFailure) {
+            entry->playlistFailure = fetched.failure;
+        }
+    } else if (!entry->playlistFailure && fetch.track < entry->download.tracks.size()) {
+        if (auto failure = ListTrack(entry->download.tracks[fetch.track], fetched)) {
+            entry->playlistFailure = std::move(failure);
+        } else {
+            StoreTracks(*entry, {fetch.track});
+            MarkChanged(*entry);
+        }
+    }
+    if (entry->pendingPlaylists > 0) {
+        return;
+    }
+    if (entry->playlistFailure) {
+        MediaFinished failed;
+        failed.failure = entry->playlistFailure;
+        entry->playlistFailure.reset();
+        OnMediaFinished(*entry, failed);
+        return;
+    }
+    StartStream(*entry);
+}
+
+void Coordinator::OnMediaProgress(Entry& entry, const MediaProgress& progress)
+{
+    if (!entry.running) {
+        return;
+    }
+    model::Download& d = entry.download;
+    const std::vector<MediaPieceDone> applied = ApplyPiecesDone(d, progress.done);
+    entry.unsavedPieces.insert(entry.unsavedPieces.end(), applied.begin(), applied.end());
+    ApplyRanges(d, progress.ranges);
+    entry.bytesPerSecond = progress.bytesPerSecond;
+    entry.receivedBytes = entry.runStartBytes + progress.receivedBytes;
+    // A stream's connections have no byte ranges to show; the table lists how many there are.
+    entry.connections.assign(static_cast<size_t>(std::max(progress.connections, 0)), ConnectionView{});
+    entry.retrying = progress.lastRetry;
+    entry.unsaved = true;
+    const auto now = ports_.clock->Steady();
+    quota_.Record(now, entry.receivedBytes - entry.quotaCountedBytes, QuotaLength());
+    entry.quotaCountedBytes = entry.receivedBytes;
+    if (now - entry.lastCheckpoint >= config_.checkpointInterval) {
+        Save(entry);
+    }
+    MarkChanged(entry);
+    EnforceQuota();
+}
+
+void Coordinator::OnMediaFinished(Entry& entry, const MediaFinished& finished)
+{
+    if (!entry.running) {
+        return;
+    }
+    model::Download& d = entry.download;
+    entry.running = false;
+    entry.stopRequested = false;
+    entry.bytesPerSecond = 0;
+    entry.connections.clear();
+    entry.retrying.reset();
+    const std::vector<MediaPieceDone> applied = ApplyPiecesDone(d, finished.done);
+    entry.unsavedPieces.insert(entry.unsavedPieces.end(), applied.begin(), applied.end());
+    ApplyRanges(d, finished.ranges);
+    entry.receivedBytes = d.DownloadedBytes();
+    entry.unsaved = true;
+    MarkChanged(entry);
+    OnRunEnded(entry, finished.outcome, finished.failure);
+}
+
+void Coordinator::CompleteRun(Entry& entry)
+{
+    if (entry.download.IsStream()) {
+        BeginMux(entry);
+    } else {
+        BeginFinalize(entry);
+    }
+}
+
+void Coordinator::BeginMux(Entry& entry)
+{
+    model::Download& d = entry.download;
+    if (ports_.media == nullptr) {
+        Fail(entry, TransferFailure{FailureReason::Internal, FailureClass::Fatal, 0, "LDM's media tools are not available"});
+        return;
+    }
+    d.status = DownloadStatus::Finalizing;
+    entry.finalizing = true;
+    entry.muxing = true;
+    entry.stopRequested = false;
+    Save(entry);
+    MarkChanged(entry);
+    UpdatePowerRequest();
+    ports_.media->Mux(BuildMuxRequest(d, PartsFolder(d)));
+}
+
+void Coordinator::CancelMux(Entry& entry)
+{
+    if (!entry.muxing || ports_.media == nullptr) {
+        return;
+    }
+    entry.stopRequested = true;
+    ports_.media->Cancel(entry.download.id, entry.download.epoch);
+}
+
+void Coordinator::OnMuxFinished(Entry& entry, const MuxFinished& finished)
+{
+    if (!entry.muxing) {
+        return;
+    }
+    model::Download& d = entry.download;
+    const bool stopRequested = entry.stopRequested;
+    entry.muxing = false;
+    entry.finalizing = false;
+    entry.stopRequested = false;
+    if (entry.deleteWhenStopped) {
+        RemoveEntry(d.id, false);
+        UpdatePowerRequest();
+        return;
+    }
+    if (finished.stopped || stopRequested) {
+        d.status = DownloadStatus::Paused;  // every piece is still there; Resume joins them again
+        Save(entry);
+        MarkChanged(entry);
+        UpdatePowerRequest();
+        return;
+    }
+    if (finished.failure) {
+        Fail(entry, *finished.failure);
+        UpdatePowerRequest();
+        return;
+    }
+    entry.muxOutput = finished.output;
+    d.totalSize = finished.bytes;
+    std::string extension = FileExtension(d.fileName);
+    std::transform(extension.begin(), extension.end(), extension.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    if (!finished.extension.empty() && extension != finished.extension) {
+        // MP4 could not hold the streams, so the file is Matroska: its name says so.
+        if (auto unique = UniqueFileName(PathFromUtf8(d.saveDir), WithExtension(d.fileName, finished.extension), d.id)) {
+            d.fileName = std::move(*unique);
+        }
+    }
+    if (!finished.mediaInfo.empty()) {
+        d.description = d.description.empty() ? finished.mediaInfo : d.description + "; " + finished.mediaInfo;
+    }
+    BeginFinalize(entry);
+}
+
+void Coordinator::StoreTracks(Entry& entry, const std::vector<std::uint32_t>& tracks)
+{
+    const model::Download& d = entry.download;
+    for (const std::uint32_t track : tracks) {
+        if (track >= d.tracks.size()) {
+            continue;
+        }
+        if (base::Status stored = ports_.store->ReplaceMediaTrack(d.id, track, d.tracks[track]); !stored) {
+            ReportError("Download state could not be saved: " + stored.GetError().message);
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1549,6 +1927,13 @@ void Coordinator::Save(Entry& entry)
 {
     entry.lastCheckpoint = ports_.clock->Steady();
     entry.unsaved = false;
+    if (!entry.unsavedPieces.empty()) {
+        // Pieces first: one stored as done is on disk whatever the row says, never the reverse.
+        if (base::Status saved = ports_.store->MarkMediaPiecesDone(entry.download.id, entry.unsavedPieces); !saved) {
+            ReportError("Download state could not be saved: " + saved.GetError().message);
+        }
+        entry.unsavedPieces.clear();
+    }
     if (base::Status saved = ports_.store->SaveDownload(entry.download); !saved) {
         ReportError("Download state could not be saved: " + saved.GetError().message);
     }
@@ -1735,9 +2120,31 @@ void Coordinator::PublishSnapshot()
             view->retrying = entry->retrying;
             view->waitingForQuota = entry->quotaHeld;
             view->waitingForAddress = waitingForAddress_ == entry->download.id;
-            if (entry->bytesPerSecond > 0 && entry->download.totalSize) {
-                view->secondsLeft = std::max<std::int64_t>(*entry->download.totalSize - view->receivedBytes, 0) /
-                                    entry->bytesPerSecond;
+            std::optional<std::int64_t> expectedSize = entry->download.totalSize;
+            if (entry->download.IsStream()) {
+                for (model::MediaTrack& track : view->download.tracks) {
+                    track.pieces.clear();
+                    track.keys.clear();
+                }
+                const StreamSummary summary = SummarizeStream(entry->download);
+                DownloadView::Stream stream;
+                stream.piecesDone = summary.piecesDone;
+                stream.piecesTotal = summary.piecesTotal;
+                stream.fraction = entry->download.status == DownloadStatus::Completed ? 1.0 : summary.fraction;
+                // From what arrived once there is enough of it; the panel's estimate before that.
+                constexpr double kEnoughToEstimate = 0.02;
+                if (summary.fraction >= kEnoughToEstimate && summary.bytesDone > 0) {
+                    stream.estimatedBytes = static_cast<std::int64_t>(static_cast<double>(summary.bytesDone) / summary.fraction);
+                } else {
+                    stream.estimatedBytes = entry->approximateBytes;
+                }
+                if (!expectedSize) {
+                    expectedSize = stream.estimatedBytes;
+                }
+                view->stream = stream;
+            }
+            if (entry->bytesPerSecond > 0 && expectedSize) {
+                view->secondsLeft = std::max<std::int64_t>(*expectedSize - view->receivedBytes, 0) / entry->bytesPerSecond;
             }
             entry->view = std::move(view);
             entry->viewDirty = false;
@@ -1807,6 +2214,8 @@ void Coordinator::BeginShutdown()
     for (auto& [id, entry] : entries_) {
         if (entry.running) {
             RequestStop(entry);
+        } else if (entry.muxing) {
+            CancelMux(entry);  // the pieces stay; the next start joins them again
         }
     }
 }

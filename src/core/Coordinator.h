@@ -3,6 +3,8 @@
 #include "base/Result.h"
 #include "core/Commands.h"
 #include "core/ManifestFetches.h"
+#include "core/MediaProgress.h"
+#include "core/MediaTools.h"
 #include "core/Ports.h"
 #include "core/Quota.h"
 #include "core/Snapshot.h"
@@ -32,6 +34,8 @@ struct CoordinatorPorts {
     IdGenerator* ids = nullptr;
     PowerRequests* power = nullptr;
     ProxyResolver* proxy = nullptr;
+    // Joins finished streams; without it a stream fails when its pieces are all on disk.
+    MediaTools* media = nullptr;
 };
 
 struct CoordinatorConfig {
@@ -102,6 +106,16 @@ private:
         bool quotaHeld = false;              // paused by the quota; started again when it allows
         std::int64_t quotaCountedBytes = 0;  // received bytes of this run already counted
 
+        // Streams (M3 design section 6).
+        std::optional<std::int64_t> approximateBytes;  // from the media panel, until progress tells
+        std::int64_t runStartBytes = 0;   // on disk when the run started; the run reports its own
+        int pendingPlaylists = 0;         // HLS playlists of this run still being fetched
+        std::optional<std::string> runProxy;  // the run's proxy, kept for the engine start after them
+        std::optional<TransferFailure> playlistFailure;
+        std::vector<MediaPieceDone> unsavedPieces;  // done since the last checkpoint
+        bool muxing = false;              // a Mux for download.epoch has not answered
+        std::optional<std::filesystem::path> muxOutput;  // the joined file, until it is moved
+
         std::shared_ptr<const DownloadView> view;  // rebuilt when `viewDirty`
         bool viewDirty = true;
     };
@@ -137,10 +151,25 @@ private:
     void OnFinished(Entry& entry, const TransferFinished& finished);
     void OnFinalized(Entry& entry, const FinalizeFinished& finalized);
     void OnProxyResolved(Entry& entry, const ProxyResolved& resolved);
+    void OnMediaProgress(Entry& entry, const MediaProgress& progress);
+    void OnMediaFinished(Entry& entry, const MediaFinished& finished);
+    void OnMuxFinished(Entry& entry, const MuxFinished& finished);
+    void OnPlaylistFetched(const FetchFinished& fetched);
+    // What follows the end of any run, file or stream, once its own results are applied.
+    void OnRunEnded(Entry& entry, TransferOutcome outcome, const std::optional<TransferFailure>& failure);
 
     // Lifecycle helpers.
     void Start(Entry& entry);
     void StartEngine(Entry& entry, std::optional<std::string> proxy);
+    // A stream's run: its HLS playlists first when they are not read yet, then the engine.
+    void StartStream(Entry& entry);
+    // A finished run's next step: the final move, or joining a stream's pieces first.
+    void CompleteRun(Entry& entry);
+    void BeginMux(Entry& entry);
+    void CancelMux(Entry& entry);
+    // Stores tracks whose lists or progress changed as a whole.
+    void StoreTracks(Entry& entry, const std::vector<std::uint32_t>& tracks);
+    [[nodiscard]] std::optional<std::string> ValidateMedia(const MediaChoice& media, model::Download& download);
     void RequestStop(Entry& entry);
     void ResetProgress(Entry& entry);
     void RemoveEntry(model::DownloadId id, bool deleteFinalFile);
@@ -175,6 +204,7 @@ private:
     void StopForQuota();
     [[nodiscard]] Entry* Find(model::DownloadId id);
     [[nodiscard]] TransferRequest BuildRequest(Entry& entry);
+    [[nodiscard]] int ConnectionsFor(const Entry& entry, const std::optional<Url>& url, bool post) const;
     [[nodiscard]] base::Status SeedCategories();
     void RecoverAfterRestart(Entry& entry);
 
@@ -198,6 +228,16 @@ private:
     // Manifest fetches for the media panel; set when the ports have an engine, a proxy resolver
     // and an observer.
     std::unique_ptr<ManifestFetches> manifests_;
+
+    // HLS playlists fetched at a stream's start, by fetch id. Their ids are negative, apart from
+    // the media panel's, which are at least 1.
+    struct PlaylistFetch {
+        model::DownloadId id;
+        std::int64_t epoch = 0;
+        std::uint32_t track = 0;
+    };
+    std::map<std::int64_t, PlaylistFetch> playlistFetches_;
+    std::int64_t lastPlaylistFetchId_ = 0;
 
     // Refresh download address: the one download waiting for a new address, and since when.
     std::optional<model::DownloadId> waitingForAddress_;

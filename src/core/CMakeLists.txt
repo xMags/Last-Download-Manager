@@ -12,9 +12,12 @@ add_library(ldm_core STATIC
     LaunchRequest.h
     ManifestFetches.cpp
     ManifestFetches.h
+    MediaDownloads.cpp
+    MediaDownloads.h
     MediaPieces.cpp
     MediaPieces.h
     MediaProgress.h
+    MediaTools.h
     Matching.cpp
     Matching.h
     NetworkAddress.cpp

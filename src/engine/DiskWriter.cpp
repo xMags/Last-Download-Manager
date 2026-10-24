@@ -378,6 +378,12 @@ void DiskWriter::Handle(FinalizeJob& job)
     if (!result.failure && request.lastModified) {
         SetFileTimeFromHttpDate(request.finalPath, *request.lastModified);
     }
+    if (!result.failure && request.removeFolder) {
+        // Best effort: the download is complete either way; a folder left behind holds only
+        // pieces that were already joined into the final file.
+        std::error_code ignored;
+        std::filesystem::remove_all(std::filesystem::path(base::ToExtendedLengthPath(*request.removeFolder)), ignored);
+    }
     finalizeSink_(core::EngineEvent{request.id, request.epoch, std::move(result)});
 }
 
