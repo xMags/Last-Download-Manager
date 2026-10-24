@@ -30,6 +30,7 @@ TEST(GrabberFilters, FindsTheMainDomain)
     EXPECT_EQ(MainDomainOf("localhost"), "localhost");
     EXPECT_EQ(MainDomainOf("192.168.1.10"), "192.168.1.10");
     EXPECT_EQ(MainDomainOf("::1"), "::1");
+    EXPECT_EQ(MainDomainOf("www.example.com."), "example.com");
 }
 
 TEST(GrabberFilters, JudgesTheBaseSite)
@@ -45,6 +46,11 @@ TEST(GrabberFilters, JudgesTheBaseSite)
     EXPECT_TRUE(ldm::grabber::OnBaseSite(site, U("http://example.com/x"), true));
     EXPECT_FALSE(ldm::grabber::OnBaseSite(site, U("http://notexample.com/x"), true));
     EXPECT_FALSE(ldm::grabber::OnBaseSite(site, U("http://example.com.evil.net/x"), true));
+    EXPECT_TRUE(ldm::grabber::OnBaseSite(site, U("http://www.example.com./x"), false));
+
+    const BaseSite dotted = ldm::grabber::BaseSiteOf(U("http://www.example.com./"));
+    EXPECT_FALSE(ldm::grabber::OnBaseSite(dotted, U("http://evil.com./x"), true)) << "not every .com site";
+    EXPECT_TRUE(ldm::grabber::OnBaseSite(dotted, U("http://cdn.example.com/x"), true));
 }
 
 TEST(GrabberFilters, CountsDepths)
@@ -127,6 +133,15 @@ TEST(GrabberFilters, MatchesFiles)
     files.excludePaths = {"/private/"};
     EXPECT_EQ(ldm::grabber::MatchFile(files, site, false, U("http://example.com/private/b.png"), std::nullopt),
               FileMatch::Filtered);
+
+    files.excludePaths = {"/my files/*"};
+    EXPECT_EQ(ldm::grabber::MatchFile(files, site, false, U("http://example.com/my%20files/b.png"), std::nullopt),
+              FileMatch::Filtered)
+        << "a mask typed with a space matches the encoded path";
+    files.excludePaths = {"/my%20files/*"};
+    EXPECT_EQ(ldm::grabber::MatchFile(files, site, false, U("http://example.com/my%20files/b.png"), std::nullopt),
+              FileMatch::Filtered)
+        << "and one typed encoded still does";
 }
 
 TEST(GrabberFilters, AppliesSizeLimitsAtTheBoundaries)

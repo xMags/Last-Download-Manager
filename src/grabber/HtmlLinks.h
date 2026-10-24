@@ -29,10 +29,19 @@ struct HtmlLink {
     std::size_t end = 0;
 };
 
+// A stretch of the page's bytes, as positions in it.
+struct TextRange {
+    std::size_t begin = 0;
+    std::size_t end = 0;
+};
+
 struct PageLinks {
     std::optional<std::string> baseHref;  // the first <base href>, entities decoded
-    std::vector<HtmlLink> links;          // in page order
-    bool truncated = false;               // more links than the cap; the rest were not read
+    // Where that <base href>'s value is in the page, for RewriteLinks: a saved page must not keep
+    // a base that sends its converted links back to the website.
+    std::optional<TextRange> baseHrefRange;
+    std::vector<HtmlLink> links;  // in page order
+    bool truncated = false;       // more links than the cap; the rest were not read
 };
 
 inline constexpr std::size_t kMaxLinkText = 256;

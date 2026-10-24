@@ -274,7 +274,8 @@ private:
     {
         const std::string_view rest = html_.substr(open);
         if (rest.starts_with("<!--")) {
-            const std::size_t close = html_.find("-->", open + 4);
+            // From the second dash: "<!-->" and "<!--->" are whole (empty) comments, as browsers read them.
+            const std::size_t close = html_.find("-->", open + 2);
             return close == std::string_view::npos ? html_.size() : close + 3;
         }
         if (rest.size() < 2) {
@@ -319,6 +320,7 @@ private:
             if (const Attribute* href = tag.Find("href"); href != nullptr && !result_.baseHref) {
                 const Span span = Trim(href->value, 0, href->value.size());
                 result_.baseHref = DecodeEntities(href->value.substr(span.begin, span.end - span.begin));
+                result_.baseHrefRange = TextRange{href->valueBegin + span.begin, href->valueBegin + span.end};
             }
             return;
         }
@@ -425,6 +427,8 @@ private:
         std::string address = DecodeEntities(html_.substr(span.begin, span.end - span.begin));
         const Span decoded = Trim(address, 0, address.size());
         address = address.substr(decoded.begin, decoded.end - decoded.begin);
+        // Browsers remove tabs and line breaks anywhere in an address (pages wrap long ones).
+        std::erase_if(address, [](char c) { return c == '\t' || c == '\n' || c == '\r'; });
         if (IsDroppedAddress(address)) {
             return false;
         }
@@ -565,7 +569,9 @@ std::string DecodeEntities(std::string_view text)
             std::size_t j = i + (hex ? 2 : 1);
             std::uint32_t value = 0;
             const std::size_t digitsBegin = j;
-            while (j < text.size() && j - digitsBegin < 8) {
+            // Every digit is read (zero padding is allowed); a value past U+10FFFF stops growing
+            // and becomes U+FFFD.
+            while (j < text.size()) {
                 const char c = text[j];
                 int digit = -1;
                 if (c >= '0' && c <= '9') {
@@ -578,7 +584,9 @@ std::string DecodeEntities(std::string_view text)
                 if (digit < 0) {
                     break;
                 }
-                value = value * (hex ? 16 : 10) + static_cast<std::uint32_t>(digit);
+                if (value <= 0x10FFFF) {
+                    value = value * (hex ? 16 : 10) + static_cast<std::uint32_t>(digit);
+                }
                 ++j;
             }
             if (j == digitsBegin) {

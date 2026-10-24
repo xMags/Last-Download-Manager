@@ -1520,7 +1520,7 @@ base::Result<std::vector<model::GrabberItem>> SqliteStore::LoadGrabberItems(mode
         const auto kind = model::ParseGrabberItemKind(r.Text(2));
         const auto state = model::ParseGrabberItemState(r.Text(9));
         const std::int64_t depth = r.Int64(4);
-        if (!kind || !state || depth > std::numeric_limits<int>::max()) {
+        if (!kind || !state || depth < 0 || depth > std::numeric_limits<int>::max()) {
             return CorruptRow("grabber_items");
         }
         item.kind = *kind;

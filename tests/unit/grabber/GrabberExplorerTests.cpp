@@ -660,6 +660,21 @@ TEST_F(GrabberExplorerTest, SavesPagesForOfflineBrowsing)
     EXPECT_EQ(adds[0].fileName, "logo.png");
 }
 
+TEST_F(GrabberExplorerTest, ASavedPageNoLongerTakesItsBaseFromTheWebsite)
+{
+    Start();
+    Page("https://example.com/", R"(<base href="https://example.com/"><a href="docs/a.html">A</a>)");
+    Page("https://example.com/docs/a.html", R"(<p>A</p>)");
+    auto definition = ldm::grabber::ApplyTemplate(Definition("https://example.com/"), ldm::model::GrabberTemplate::WholeSite);
+    definition.saveMode = ldm::model::GrabberSaveMode::OneFolder;
+    definition.folder = "C:\\Mirror";
+    const GrabberProjectId id = Save(definition);
+    explorer_->Handle(ldm::core::GrabberExploreCommand{id, false, {}});
+    Serve();
+    const std::string start = files_.written.at("C:/Mirror/example.com/index.html");
+    EXPECT_EQ(start, R"(<base href="index.html"><a href="docs/a.html">A</a>)");
+}
+
 TEST_F(GrabberExplorerTest, ValidatesProjects)
 {
     Start();

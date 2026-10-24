@@ -20,6 +20,9 @@ namespace ldm::grabber {
 // safe in any attribute, quoted or not.
 [[nodiscard]] std::string RelativeReference(std::string_view fromPath, std::string_view toPath);
 
+// The text with its valid "%XX" escapes decoded; others stay as written.
+[[nodiscard]] std::string PercentDecode(std::string_view text);
+
 // Percent-encodes an address for an attribute: spaces, quotes, '<', '>', '&' and ',' (srcset
 // separates its candidates with commas), and bytes outside ASCII.
 [[nodiscard]] std::string AttributeSafeAddress(std::string_view address);
