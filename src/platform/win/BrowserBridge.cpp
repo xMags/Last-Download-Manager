@@ -28,6 +28,10 @@ struct BrowserBridge::Slot {
     OVERLAPPED overlapped{};
     Phase phase = Phase::Dead;
     bool connectedAtOnce = false;  // the client connected before ConnectNamedPipe was called
+    // An overlapped operation is in flight, so Close must cancel it and wait for it. Only set when
+    // Windows said ERROR_IO_PENDING: a call that fails at once leaves `overlapped` looking pending
+    // and never signals the event, so waiting for it would hang the bridge.
+    bool pending = false;
     ui::BrowserConnectionId connection = 0;
     bool introduced = false;  // the host message arrived
     unsigned char header[4] = {};
@@ -107,6 +111,7 @@ void BrowserBridge::Listen(Slot& slot)
     slot.overlapped.hEvent = slot.event.Get();
     ::ResetEvent(slot.event.Get());
     slot.connectedAtOnce = false;
+    slot.pending = false;
     slot.phase = Slot::Phase::Listening;
     if (::ConnectNamedPipe(slot.pipe.Get(), &slot.overlapped)) {
         return;  // completed; the event is set
@@ -120,6 +125,7 @@ void BrowserBridge::Listen(Slot& slot)
     }
     switch (::GetLastError()) {
     case ERROR_IO_PENDING:
+        slot.pending = true;
         return;
     case ERROR_PIPE_CONNECTED:
         slot.connectedAtOnce = true;
@@ -139,16 +145,24 @@ bool BrowserBridge::BeginRead(Slot& slot)
     void* base = slot.phase == Slot::Phase::Header ? static_cast<void*>(slot.header) : slot.body.data();
     char* target = static_cast<char*>(base);
     const DWORD size = slot.phase == Slot::Phase::Header ? 4 : static_cast<DWORD>(slot.body.size());
-    // On an overlapped handle the event is set whether the read completes now or later.
-    return ::ReadFile(slot.pipe.Get(), target + slot.have, size - slot.have, nullptr, &slot.overlapped) ||
-           ::GetLastError() == ERROR_IO_PENDING;
+    // On an overlapped handle the event is set whether the read completes now or later; a read
+    // that fails at once (the host already left) sets nothing.
+    if (::ReadFile(slot.pipe.Get(), target + slot.have, size - slot.have, nullptr, &slot.overlapped)) {
+        slot.pending = false;
+        return true;
+    }
+    slot.pending = ::GetLastError() == ERROR_IO_PENDING;
+    return slot.pending;
 }
 
 void BrowserBridge::Close(Slot& slot, bool notify)
 {
-    ::CancelIoEx(slot.pipe.Get(), &slot.overlapped);
-    DWORD ignored = 0;
-    ::GetOverlappedResult(slot.pipe.Get(), &slot.overlapped, &ignored, TRUE);
+    if (slot.pending) {
+        ::CancelIoEx(slot.pipe.Get(), &slot.overlapped);
+        DWORD ignored = 0;
+        ::GetOverlappedResult(slot.pipe.Get(), &slot.overlapped, &ignored, TRUE);
+        slot.pending = false;
+    }
     if (notify && slot.introduced) {
         onEvent_(ui::BrowserEvent{slot.connection, std::nullopt});
     }
@@ -180,6 +194,7 @@ bool BrowserBridge::Deliver(Slot& slot)
 // The slot's pending operation finished; advance it. False closes the connection.
 bool BrowserBridge::Advance(Slot& slot)
 {
+    slot.pending = false;  // its event fired: the operation is complete
     if (slot.phase == Slot::Phase::Listening) {
         DWORD ignored = 0;
         if (!slot.connectedAtOnce && !::GetOverlappedResult(slot.pipe.Get(), &slot.overlapped, &ignored, FALSE)) {
