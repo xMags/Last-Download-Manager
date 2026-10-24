@@ -255,6 +255,9 @@ void GrabberWindow::RefreshTree()
 void GrabberWindow::RefreshRows()
 {
     const HWND list = Item(IDC_GG_LIST);
+    if (list == nullptr) {
+        return;  // the window is gone; a missing list would answer row 0 forever
+    }
     // The list view keeps its selection by row, and rows move with every snapshot and node change,
     // so the selection follows the items: actions never land on the files that moved into its rows.
     std::unordered_set<std::int64_t> selected;
@@ -336,6 +339,9 @@ std::vector<int> GrabberWindow::SelectedRows() const
 {
     std::vector<int> rows;
     const HWND list = Item(IDC_GG_LIST);
+    if (list == nullptr) {
+        return rows;  // the window is gone; a missing list would answer row 0 forever
+    }
     for (int row = ListView_GetNextItem(list, -1, LVNI_SELECTED); row >= 0; row = ListView_GetNextItem(list, row, LVNI_SELECTED)) {
         rows.push_back(row);
     }
