@@ -10,6 +10,7 @@
 #include "ui/dialogs/AddUrlDialog.h"
 #include "ui/dialogs/AllLinksDialog.h"
 #include "ui/dialogs/BatchDialog.h"
+#include "ui/dialogs/QueueDialogs.h"
 #include "ui/dialogs/CategoryDialog.h"
 #include "ui/dialogs/ConfirmDialogs.h"
 #include "ui/dialogs/DownloadInfoDialog.h"
@@ -351,7 +352,12 @@ void AddFlow::AddWithInfoDialog(InfoDialogInput input)
         if (command.mode == core::AddMode::StartNow) {
             progressOnAdd_.push_back(token);
         }
+        const auto queue = command.mode == core::AddMode::Later ? AskForQueue(1, false) : std::nullopt;
+        if (queue) {
+            command.queue = queue->queue;
+        }
         Post(std::move(command));
+        StartChosenQueue(queue);
         return;
     }
 
@@ -375,24 +381,83 @@ void AddFlow::AddWithInfoDialog(InfoDialogInput input)
     confirm.description = choice.description;
     confirm.start = choice.action == DownloadInfoDialog::Action::Start;
     confirm.rememberFolderForCategory = choice.rememberFolder;
-    if (pending->second.id) {
-        confirm.id = *pending->second.id;
+    std::optional<QueueAnswer> queue;
+    if (!confirm.start) {
+        // The panel is modal: the add's answer may arrive while it is open. It is kept, and the
+        // pending add is looked up again after the panel.
+        pending->second.choosingQueue = true;
+        queue = AskForQueue(1, false);
+        if (queue) {
+            confirm.queue = queue->queue;
+        }
+    }
+    const auto waiting = pendingAdds_.find(token);
+    if (waiting == pendingAdds_.end()) {
+        return;
+    }
+    waiting->second.choosingQueue = false;
+    if (waiting->second.failed) {
+        pendingAdds_.erase(waiting);
+        return;
+    }
+    if (waiting->second.id) {
+        confirm.id = *waiting->second.id;
         Post(confirm);
+        StartChosenQueue(queue);
         if (confirm.start) {
             context_.openProgress(confirm.id);
         }
-        pendingAdds_.erase(pending);
+        pendingAdds_.erase(waiting);
         return;
     }
+    StartChosenQueue(queue);
     if (confirm.start) {
         progressOnAdd_.push_back(token);
     }
-    pending->second.confirmation = confirm;
+    waiting->second.confirmation = confirm;
+}
+
+std::optional<AddFlow::QueueAnswer> AddFlow::AskForQueue(int downloads, bool batch)
+{
+    const auto snapshot = context_.snapshot();
+    if (!snapshot || downloads <= 0 || (batch ? !snapshot->settings.queuePanelOnBatch : !snapshot->settings.queuePanelOnLater)) {
+        return std::nullopt;
+    }
+    std::vector<QueuePanelDialog::Entry> queues;
+    for (const core::QueueView& view : snapshot->queues) {
+        queues.push_back({view.queue.id, base::ToUtf16(view.queue.name)});
+    }
+    if (queues.empty()) {
+        return std::nullopt;
+    }
+    QueuePanelDialog panel(*context_.theme, std::move(queues), downloads);
+    const auto choice = panel.Run(context_.owner);
+    if (!choice) {
+        return std::nullopt;
+    }
+    if (choice->dontAskAgain) {
+        ModifySettings([batch](model::Settings& s) {
+            if (batch) {
+                s.queuePanelOnBatch = false;
+            } else {
+                s.queuePanelOnLater = false;
+            }
+        });
+    }
+    return QueueAnswer{choice->queue, choice->startNow};
+}
+
+void AddFlow::StartChosenQueue(const std::optional<QueueAnswer>& answer)
+{
+    if (answer && answer->startNow) {
+        Post(core::StartQueueCommand{answer->queue});
+    }
 }
 
 void AddFlow::AddMany(const std::vector<std::string>& urls, bool start, std::optional<std::string> user,
                       std::optional<std::string> password)
 {
+    const auto queue = start ? std::nullopt : AskForQueue(static_cast<int>(urls.size()), true);
     for (const std::string& url : urls) {
         core::AddDownloadCommand command;
         command.token = nextToken_++;
@@ -400,10 +465,14 @@ void AddFlow::AddMany(const std::vector<std::string>& urls, bool start, std::opt
         command.loginUser = user;
         command.loginPassword = password;
         command.mode = start ? core::AddMode::StartNow : core::AddMode::Later;
+        if (queue) {
+            command.queue = queue->queue;
+        }
         // A batch never stops to ask about each duplicate.
         command.duplicatePolicy = model::DuplicatePolicy::AddNumbered;
         Post(std::move(command));
     }
+    StartChosenQueue(queue);
 }
 
 void AddFlow::AddBatch()
@@ -550,6 +619,7 @@ void AddFlow::RunLinksDialog(AllLinksDialog& dialog, const model::Settings& sett
         const std::string folder = choice->folder;
         ModifySettings([folder](model::Settings& s) { s.recentFolders = PushHistory(s.recentFolders, folder, kFolderHistoryLimit); });
     }
+    const auto queue = AskForQueue(static_cast<int>(choice->picks.size()), true);
     for (const AllLinksDialog::Pick& pick : choice->picks) {
         core::AddDownloadCommand command;
         command.token = nextToken_++;
@@ -567,9 +637,13 @@ void AddFlow::RunLinksDialog(AllLinksDialog& dialog, const model::Settings& sett
         command.cookies = CookiesForAddress(source.cookies, pick.url);
         // Added to the list without starting.
         command.mode = core::AddMode::Later;
+        if (queue) {
+            command.queue = queue->queue;
+        }
         command.duplicatePolicy = model::DuplicatePolicy::AddNumbered;
         Post(std::move(command));
     }
+    StartChosenQueue(queue);
 }
 
 void AddFlow::OnSnapshot(const core::Snapshot& snapshot)
@@ -608,6 +682,9 @@ void AddFlow::OnAddResult(const core::AddResult& result)
         if (pending != pendingAdds_.end() && pending->second.dialog != nullptr) {
             ::EndDialog(pending->second.dialog->Handle(), IDCANCEL);
         }
+        if (pending != pendingAdds_.end()) {
+            pending->second.failed = true;
+        }
         ShowError(base::ToUtf16(*result.error));
     }
     if (result.showExistingComplete && result.id) {
@@ -632,8 +709,10 @@ void AddFlow::OnAddResult(const core::AddResult& result)
             Post(*pending->second.confirmation);
         }
     }
-    if (pending->second.dialog == nullptr) {
+    if (pending->second.dialog == nullptr && !pending->second.choosingQueue) {
         pendingAdds_.erase(pending);
+    } else if (pending->second.dialog == nullptr) {
+        return;  // the queue panel's answer decides what follows
     } else if (const auto snapshot = context_.snapshot()) {
         OnSnapshot(*snapshot);
     }
