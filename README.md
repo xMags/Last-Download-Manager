@@ -56,7 +56,7 @@
 2. Add the browser extension: load it from [**LastDownloadManager-browser-extension.zip**](https://github.com/xMags/Last-Download-Manager/releases/latest/download/LastDownloadManager-browser-extension.zip) as described in [Browser extension](#browser-extension). Store listings for Chrome, Edge and Firefox are on the way.
 
 > [!IMPORTANT]
-> The installer is not code-signed yet, so Windows SmartScreen may say "Windows protected your PC". Choose **More info**, then **Run anyway**. The message goes away as more people install the release.
+> The installer is not code-signed, so Windows SmartScreen may say "Windows protected your PC". Choose **More info**, then **Run anyway**. Code signing needs a paid certificate tied to a registered identity, which is out of reach for a single developer; the source and the build steps are public instead.
 
 **Portable:** [**LastDownloadManager-windows-x64.zip**](https://github.com/xMags/Last-Download-Manager/releases/latest/download/LastDownloadManager-windows-x64.zip) holds the same program. Unzip it to a folder of your choice and run `ldm.exe`, keeping `ldm-host.exe`, `ffmpeg.exe` and `ffprobe.exe` beside it.
 
@@ -155,8 +155,8 @@ One coordinator on its own thread owns all download state and the database; the 
 | 1 | Feature study and plan | Done |
 | 2 | Native shell and reliable downloads | Done |
 | 3 | Browser integration and media capture | Done |
-| 4 | Queues, scheduler, organization and Site Grabber | Done, in final testing |
-| 5 | Installer, update check and first release | In progress: the release and the store listings are next |
+| 4 | Queues, scheduler, organization and Site Grabber | Done |
+| 5 | Installer, update check and first release | Done: [5.0.0](https://github.com/xMags/Last-Download-Manager/releases/tag/v5.0.0) released; browser store listings later |
 
 ---
 
