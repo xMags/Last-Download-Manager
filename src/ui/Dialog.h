@@ -68,11 +68,18 @@ protected:
 private:
     static INT_PTR CALLBACK DialogProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam);
     static void BringToFront(HWND window);
+    INT_PTR Dispatch(HWND window, UINT message, WPARAM wParam, LPARAM lParam);
 
     int templateId_;
     const Theme& theme_;
     HWND window_ = nullptr;
     bool modal_ = false;
+    // A modeless window's handler can run a nested message loop (a question, a file picker, a
+    // popup menu), during which something else may destroy the window, such as LDM exiting.
+    // OnDestroyed may delete this object, so while any handler of this window is still on the
+    // stack it waits until the outermost one returns. Handle() is null from the destruction on.
+    int dispatchDepth_ = 0;
+    bool destroyPending_ = false;
 };
 
 }  // namespace ldm::ui

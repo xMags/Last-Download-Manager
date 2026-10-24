@@ -83,15 +83,38 @@ INT_PTR CALLBACK Dialog::DialogProc(HWND window, UINT message, WPARAM wParam, LP
     if (self == nullptr) {
         return FALSE;
     }
+    if (message == WM_DESTROY && !self->modal_) {
+        self->OnDestroying();
+        ::SetWindowLongPtrW(window, DWLP_USER, 0);
+        self->window_ = nullptr;
+        if (self->dispatchDepth_ > 0) {
+            // A handler of this window is below us on the stack and still uses `self`.
+            self->destroyPending_ = true;
+            return TRUE;
+        }
+        self->OnDestroyed();  // may delete `self`; nothing below touches it
+        return TRUE;
+    }
+    ++self->dispatchDepth_;
+    const INT_PTR result = self->Dispatch(window, message, wParam, lParam);
+    if (--self->dispatchDepth_ == 0 && self->destroyPending_) {
+        self->destroyPending_ = false;
+        self->OnDestroyed();  // may delete `self`; nothing below touches it
+    }
+    return result;
+}
+
+INT_PTR Dialog::Dispatch(HWND window, UINT message, WPARAM wParam, LPARAM lParam)
+{
     switch (message) {
     case kBringToFrontMessage:
         BringToFront(window);
         return TRUE;
     case WM_COMMAND:
-        return self->OnCommand(LOWORD(wParam), HIWORD(wParam), reinterpret_cast<HWND>(lParam)) ? TRUE : FALSE;
+        return OnCommand(LOWORD(wParam), HIWORD(wParam), reinterpret_cast<HWND>(lParam)) ? TRUE : FALSE;
     case WM_NOTIFY: {
         LRESULT result = 0;
-        if (self->OnNotify(*reinterpret_cast<const NMHDR*>(lParam), result)) {
+        if (OnNotify(*reinterpret_cast<const NMHDR*>(lParam), result)) {
             ::SetWindowLongPtrW(window, DWLP_MSGRESULT, result);
             return TRUE;
         }
@@ -102,32 +125,23 @@ INT_PTR CALLBACK Dialog::DialogProc(HWND window, UINT message, WPARAM wParam, LP
     case WM_CTLCOLORBTN:
     case WM_CTLCOLOREDIT:
     case WM_CTLCOLORLISTBOX: {
-        if (!self->theme_.IsDark()) {
+        if (!theme_.IsDark()) {
             return FALSE;
         }
         const bool editable = message == WM_CTLCOLOREDIT || message == WM_CTLCOLORLISTBOX;
         const auto dc = reinterpret_cast<HDC>(wParam);  // WM_CTLCOLOR* passes the control's DC
-        const HBRUSH brush = self->theme_.OnCtlColor(dc, editable);
+        const HBRUSH brush = theme_.OnCtlColor(dc, editable);
         if (message == WM_CTLCOLORSTATIC && IsLink(reinterpret_cast<HWND>(lParam))) {
-            ::SetTextColor(dc, self->theme_.Colors().accent);  // links stay recognizable as links
+            ::SetTextColor(dc, theme_.Colors().accent);  // links stay recognizable as links
         }
         // A dialog procedure returns the brush itself for WM_CTLCOLOR* messages.
         return reinterpret_cast<INT_PTR>(brush);
     }
-    case WM_DESTROY:
-        if (!self->modal_) {
-            self->OnDestroying();
-            ::SetWindowLongPtrW(window, DWLP_USER, 0);
-            self->window_ = nullptr;
-            self->OnDestroyed();  // may delete `self`; nothing below touches it
-            return TRUE;
-        }
-        break;
     default:
         break;
     }
     LRESULT result = 0;
-    if (self->OnMessage(message, wParam, lParam, result)) {
+    if (OnMessage(message, wParam, lParam, result)) {
         ::SetWindowLongPtrW(window, DWLP_MSGRESULT, result);
         return TRUE;
     }

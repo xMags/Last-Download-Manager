@@ -272,6 +272,9 @@ std::vector<model::DownloadId> SchedulerWindow::SelectedFiles() const
 {
     std::vector<model::DownloadId> ids;
     const HWND files = Item(IDC_SCHED_FILES);
+    if (files == nullptr) {
+        return ids;  // the window is gone; a missing list would answer row 0 forever
+    }
     for (int row = ListView_GetNextItem(files, -1, LVNI_SELECTED); row >= 0; row = ListView_GetNextItem(files, row, LVNI_SELECTED)) {
         if (static_cast<size_t>(row) < files_.size()) {
             ids.push_back(files_[static_cast<size_t>(row)]);
@@ -661,6 +664,9 @@ bool SchedulerWindow::SettleChanges()
     const int answer = ShowMessage(Handle(), CurrentTheme(),
                                    MessageRequest{L"Apply the changes to \"" + name + L"\" first?", MessageKind::Question,
                                                   MessageButtons::YesNoCancel});
+    if (Handle() == nullptr) {
+        return false;  // the window was closed while the question was open (LDM exiting, say)
+    }
     if (answer == IDCANCEL) {
         return false;
     }
@@ -689,7 +695,9 @@ bool SchedulerWindow::ChooseProject(model::GrabberProjectId project)
         return true;
     }
     if (!SettleChanges()) {
-        RefreshQueueList();
+        if (Handle() != nullptr) {
+            RefreshQueueList();
+        }
         return false;
     }
     chosenProject_ = project;
@@ -707,7 +715,9 @@ bool SchedulerWindow::Choose(model::QueueId queue)
         return true;
     }
     if (!SettleChanges()) {
-        RefreshQueueList();  // the list box shows the queue the fields belong to again
+        if (Handle() != nullptr) {
+            RefreshQueueList();  // the list box shows the queue the fields belong to again
+        }
         return false;
     }
     chosenProject_.reset();
