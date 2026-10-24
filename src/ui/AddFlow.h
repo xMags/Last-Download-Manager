@@ -109,6 +109,9 @@ private:
         std::optional<model::DownloadId> id;
         DownloadInfoDialog* dialog = nullptr;
         bool cancelled = false;
+        // The queue panel is open after the info dialog: the add's answer is kept until it closes.
+        bool choosingQueue = false;
+        bool failed = false;  // the add was refused; its error was shown
         std::optional<core::ConfirmDownloadCommand> confirmation;  // sent once the id is known
     };
 
@@ -142,6 +145,16 @@ private:
                                         const core::MediaChoice* media = nullptr);
     void AddMany(const std::vector<std::string>& urls, bool start, std::optional<std::string> user,
                  std::optional<std::string> password);
+    // The queue panel (checklist A-04) before downloads are added without starting, when Options
+    // ask for it: `batch` for several at once (a batch or Download All Links), else Download Later.
+    // Nothing means the main queue, without starting it.
+    struct QueueAnswer {
+        model::QueueId queue;
+        bool startNow = false;
+    };
+    [[nodiscard]] std::optional<QueueAnswer> AskForQueue(int downloads, bool batch);
+    // Starts the chosen queue after the adds before it, which the core handles first.
+    void StartChosenQueue(const std::optional<QueueAnswer>& answer);
     void Post(core::Command command);
     // Copies the browser's referrer, User-Agent, cookies and type into an add command, and
     // remembers the command as a capture.

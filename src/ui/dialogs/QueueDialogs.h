@@ -1,5 +1,6 @@
 #pragma once
 
+#include "model/Ids.h"
 #include "ui/Dialog.h"
 
 #include <optional>
@@ -22,6 +23,34 @@ private:
 
     std::vector<std::wstring> taken_;
     std::optional<std::string> name_;
+};
+
+// The queue panel (checklist A-04), after Download Later, a batch add or Download All Links: which
+// queue the new downloads join, and whether it starts now.
+class QueuePanelDialog final : public Dialog {
+public:
+    struct Entry {
+        model::QueueId id;
+        std::wstring name;
+    };
+    struct Choice {
+        model::QueueId queue;
+        bool startNow = false;
+        bool dontAskAgain = false;
+    };
+
+    // `queues` in their sort order; the first one, the main queue, is chosen at first.
+    QueuePanelDialog(const Theme& theme, std::vector<Entry> queues, int downloads);
+    // Nothing when the panel was closed: the downloads go into the main queue.
+    [[nodiscard]] std::optional<Choice> Run(HWND owner);
+
+private:
+    bool OnInit() override;
+    bool OnCommand(int id, int code, HWND control) override;
+
+    std::vector<Entry> queues_;
+    int downloads_ = 1;
+    std::optional<Choice> choice_;
 };
 
 }  // namespace ldm::ui
