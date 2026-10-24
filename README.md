@@ -38,6 +38,8 @@
     ·
     <a href="#license">License</a>
   </p>
+
+  <img src="docs/images/main-window.png" alt="Last Download Manager's main window with finished and running downloads" width="900" />
 </div>
 
 > [!NOTE]
