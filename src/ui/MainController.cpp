@@ -27,6 +27,9 @@ namespace ldm::ui {
 namespace {
 
 constexpr wchar_t kHelpUrl[] = L"https://github.com/xMags/Last-Download-Manager#readme";
+constexpr wchar_t kQueuesHelpUrl[] = L"https://github.com/xMags/Last-Download-Manager/blob/main/docs/help/queues.md";
+constexpr wchar_t kGrabberHelpUrl[] =
+    L"https://github.com/xMags/Last-Download-Manager/blob/main/docs/help/site-grabber.md";
 
 std::filesystem::path FinalPath(const model::Download& download)
 {
@@ -262,10 +265,14 @@ bool MainController::OnCommand(int id)
         Tell(L"The default font is used after Last Download Manager restarts.");
         return true;
     case ID_HELP_CONTENTS:
-        if (!context_.shell->OpenUrl(context_.owner, kHelpUrl)) {
+    case ID_HELP_QUEUES:
+    case ID_HELP_GRABBER: {
+        const wchar_t* url = id == ID_HELP_QUEUES ? kQueuesHelpUrl : id == ID_HELP_GRABBER ? kGrabberHelpUrl : kHelpUrl;
+        if (!context_.shell->OpenUrl(context_.owner, url)) {
             ShowError(L"The help page could not be opened.");
         }
         return true;
+    }
     case ID_HELP_CHECK_UPDATES:
         Post(core::CheckForUpdatesCommand{});
         return true;
