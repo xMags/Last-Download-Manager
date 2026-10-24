@@ -36,6 +36,7 @@ const fs::path kRoot = LR"(C:\Users\Test\Downloads)";
 class FakeEngine final : public ldm::core::TransferEngine {
 public:
     void Start(ldm::core::TransferRequest request) override { starts.push_back(std::move(request)); }
+    void StartMedia(ldm::core::MediaRequest request) override { mediaStarts.push_back(std::move(request)); }
     void Stop(DownloadId id, std::int64_t epoch) override { stops.emplace_back(id, epoch); }
     void SetSpeedLimit(DownloadId, std::int64_t, std::optional<std::int64_t> limit) override { downloadLimit = limit; }
     void SetGlobalSpeedLimit(std::optional<std::int64_t> limit) override { globalLimit = limit; }
@@ -43,6 +44,7 @@ public:
     void Fetch(ldm::core::FetchRequest request) override { fetches.push_back(std::move(request)); }
 
     std::vector<ldm::core::TransferRequest> starts;
+    std::vector<ldm::core::MediaRequest> mediaStarts;
     std::vector<std::pair<DownloadId, std::int64_t>> stops;
     std::vector<ldm::core::FinalizeRequest> finalizes;
     std::vector<ldm::core::FetchRequest> fetches;

@@ -12,8 +12,13 @@ add_library(ldm_core STATIC
     LaunchRequest.h
     ManifestFetches.cpp
     ManifestFetches.h
+    MediaPieces.cpp
+    MediaPieces.h
+    MediaProgress.h
     Matching.cpp
     Matching.h
+    NetworkAddress.cpp
+    NetworkAddress.h
     Quota.cpp
     Quota.h
     Ports.h
@@ -24,4 +29,4 @@ add_library(ldm_core STATIC
     TransferEngine.h
     Url.cpp
     Url.h)
-target_link_libraries(ldm_core PUBLIC ldm_model)
+target_link_libraries(ldm_core PUBLIC ldm_model ldm_media)

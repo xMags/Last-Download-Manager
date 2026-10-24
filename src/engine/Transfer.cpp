@@ -65,8 +65,8 @@ void AppendBytes(std::vector<std::byte>& target, const char* data, size_t size)
 
 }  // namespace
 
-Transfer::Transfer(const TransferServices& services, core::TransferRequest request)
-    : services_(services), request_(std::move(request))
+Transfer::Transfer(const TransferServices& services, core::TransferRequest request, std::uint32_t file)
+    : services_(services), request_(std::move(request)), file_(file)
 {
     http_ = StartsWithIgnoreCase(request_.url, "http://") || StartsWithIgnoreCase(request_.url, "https://");
     finalUrl_ = request_.url;
@@ -201,6 +201,12 @@ std::optional<std::string> Transfer::IfRangeValue() const
     return std::nullopt;
 }
 
+bool Transfer::CanTake(Clock::time_point now) noexcept
+{
+    return bucket_.CanTake(now) && services_.globalBucket->CanTake(now) &&
+           (services_.runBucket == nullptr || services_.runBucket->CanTake(now));
+}
+
 int Transfer::ConnectionLimit() const noexcept
 {
     if (!rangesPossible_ || !totalSize_) {
@@ -296,7 +302,9 @@ void Transfer::StartConnection(Segment& segment, bool probe, Clock::time_point n
     curl_easy_setopt(easy, CURLOPT_WRITEDATA, connection.get());
     curl_easy_setopt(easy, CURLOPT_HEADERFUNCTION, &Transfer::HeaderCallback);
     curl_easy_setopt(easy, CURLOPT_HEADERDATA, connection.get());
-    curl_easy_setopt(easy, CURLOPT_PRIVATE, connection.get());
+    ConnectionOwner::Attach(easy, this);
+    connection->addressGuard.refuse = request_.refusePrivateAddresses && !request_.proxy;
+    InstallAddressGuard(easy, &connection->addressGuard);
 
     if (curl_multi_add_handle(services_.multi, easy) != CURLM_OK) {
         Fail(MakeFailure(FailureReason::Internal, FailureClass::Fatal, "could not start a connection"));
@@ -335,15 +343,6 @@ void Transfer::FlushPending(Connection& connection)
     connection.pending = {};
 }
 
-Transfer* Transfer::OwnerOf(CURL* easy)
-{
-    void* connection = nullptr;
-    if (curl_easy_getinfo(easy, CURLINFO_PRIVATE, &connection) != CURLE_OK || connection == nullptr) {
-        return nullptr;
-    }
-    return static_cast<Connection*>(connection)->owner;
-}
-
 size_t Transfer::WriteCallback(char* data, size_t size, size_t count, void* userdata)
 {
     auto* connection = static_cast<Connection*>(userdata);
@@ -369,7 +368,7 @@ size_t Transfer::OnData(Connection& connection, const char* data, size_t size)
         return 0;
     }
     const Clock::time_point now = Clock::now();
-    if (!bucket_.CanTake(now) || !services_.globalBucket->CanTake(now)) {
+    if (!CanTake(now)) {
         connection.pausedForRate = true;
         return CURL_WRITEFUNC_PAUSE;
     }
@@ -380,6 +379,9 @@ size_t Transfer::OnData(Connection& connection, const char* data, size_t size)
     }
     bucket_.Take(chunk);
     services_.globalBucket->Take(chunk);
+    if (services_.runBucket != nullptr) {
+        services_.runBucket->Take(chunk);
+    }
 
     Segment* segment = FindSegment(connection.segmentKey);
     assert(segment != nullptr);
@@ -586,6 +588,10 @@ void Transfer::OnConnectionDone(CURL* easy, CURLcode result, Clock::time_point n
     const bool rangeRejected = connection->rangeRejected || restRefused;
     const bool finishedNormally = connection->reachedEnd || (result == CURLE_OK && connection->accepted);
     std::optional<TransferFailure> failure = connection->failure;
+    if (!failure && connection->addressGuard.refuse && connection->addressGuard.reachedPrivate) {
+        failure = MakeFailure(FailureReason::PrivateAddress, FailureClass::Fatal,
+                              "the address leads to a loopback or private network address");
+    }
     if (!failure && !finishedNormally && !rangeRejected) {
         failure = ClassifyCurlResult(result, connection->errorBuffer.data());
     }
@@ -748,7 +754,7 @@ void Transfer::UnpauseConnections(Clock::time_point now)
     for (size_t step = 0; step < count; ++step) {
         Connection& connection = *connections_[(first + step) % count];
         if (connection.pausedForRate) {
-            if (bucket_.CanTake(now) && services_.globalBucket->CanTake(now)) {
+            if (CanTake(now)) {
                 connection.pausedForRate = false;
                 curl_easy_pause(connection.easy.get(), CURLPAUSE_CONT);
             }

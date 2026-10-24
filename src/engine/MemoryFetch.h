@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/TransferEngine.h"
+#include "engine/ConnectionGuards.h"
 #include "engine/CurlHandles.h"
 
 #include <curl/curl.h>
@@ -41,6 +42,7 @@ private:
     bool tooLarge_ = false;
     bool added_ = false;
     std::array<char, CURL_ERROR_SIZE> error_{};
+    AddressGuard addressGuard_;
 };
 
 }  // namespace ldm::engine

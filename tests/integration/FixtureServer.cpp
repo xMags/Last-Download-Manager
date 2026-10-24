@@ -88,6 +88,9 @@ std::unique_ptr<FixtureServer> FixtureServer::Launch(const FixtureOptions& optio
     std::wstring commandLine = L"\"" + node->wstring() + L"\" \"" + base::ToUtf16(LDM_FIXTURE_SCRIPT) +
                                L"\" --quiet --size " + std::to_wstring(options.size) + L" --delay " +
                                std::to_wstring(options.delayMs) + L" --chunk " + std::to_wstring(options.chunkBytes);
+    if (!options.mediaRoot.empty()) {
+        commandLine += L" --media-root \"" + options.mediaRoot.wstring() + L"\"";
+    }
     STARTUPINFOW startup{};
     startup.cb = sizeof(startup);
     startup.dwFlags = STARTF_USESTDHANDLES;

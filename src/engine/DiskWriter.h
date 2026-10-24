@@ -19,10 +19,12 @@
 
 namespace ldm::engine {
 
-// Identifies one run of one download. Reports for an older epoch are ignored by the receiver.
+// Identifies one file of one run of one download. Reports for an older epoch are ignored by the
+// receiver. A file download has one file, 0; a stream has one per piece and per whole-file track.
 struct RunKey {
     model::DownloadId id;
     std::int64_t epoch = 0;
+    std::uint32_t file = 0;
 
     auto operator<=>(const RunKey&) const = default;
 };

@@ -3,6 +3,7 @@
 #include "engine/BufferPool.h"
 #include "engine/CurlHandles.h"
 #include "engine/DiskWriter.h"
+#include "engine/MediaRun.h"
 #include "engine/MemoryFetch.h"
 #include "engine/TokenBucket.h"
 
@@ -41,6 +42,9 @@ public:
 struct StartCommand {
     core::TransferRequest request;
 };
+struct StartMediaCommand {
+    core::MediaRequest request;
+};
 struct StopCommand {
     model::DownloadId id;
     std::int64_t epoch;
@@ -58,8 +62,8 @@ struct FetchCommand {
     core::FetchRequest request;
 };
 
-using Command =
-    std::variant<StartCommand, StopCommand, SpeedCommand, GlobalSpeedCommand, ShutdownCommand, DiskReport, FetchCommand>;
+using Command = std::variant<StartCommand, StartMediaCommand, StopCommand, SpeedCommand, GlobalSpeedCommand,
+                             ShutdownCommand, DiskReport, FetchCommand>;
 
 }  // namespace
 
@@ -96,9 +100,9 @@ public:
         if (thread_.joinable()) {
             thread_.join();
         }
-        // Transfers that missed the shutdown deadline give up their handles and buffers; their last
+        // Runs that missed the shutdown deadline give up their handles and buffers; their last
         // durable checkpoints are already with the core. The disk writer then closes their files.
-        transfers_.clear();
+        runs_.clear();
         fetches_.clear();
         disk_.reset();
     }
@@ -134,7 +138,7 @@ private:
                 Dispatch(command, now, shutdownDeadline);
             }
             batch.clear();
-            if (shutdownDeadline && (transfers_.empty() || now >= *shutdownDeadline)) {
+            if (shutdownDeadline && (runs_.empty() || now >= *shutdownDeadline)) {
                 // Fetches still running are answered, so each request gets its one answer.
                 while (!fetches_.empty()) {
                     FinishFetch(fetches_.begin(), CURLE_ABORTED_BY_CALLBACK);
@@ -155,7 +159,7 @@ private:
                     FinishFetch(fetch, result);
                     continue;
                 }
-                if (Transfer* owner = Transfer::OwnerOf(easy)) {
+                if (ConnectionOwner* owner = ConnectionOwner::Of(easy)) {
                     owner->OnConnectionDone(easy, result, Clock::now());
                 }
             }
@@ -164,20 +168,20 @@ private:
             Clock::time_point deadline = now + std::chrono::seconds(1);
             // Downloads take turns being serviced first, so under the global limit the one with
             // the lowest id does not take every refill (Q-09).
-            if (!transfers_.empty()) {
-                std::vector<Transfer*> order;
-                order.reserve(transfers_.size());
-                for (auto& [id, transfer] : transfers_) {
-                    order.push_back(transfer.get());
+            if (!runs_.empty()) {
+                std::vector<engine::Run*> order;
+                order.reserve(runs_.size());
+                for (auto& [id, run] : runs_) {
+                    order.push_back(run.get());
                 }
                 const size_t first = serviceRotation_++ % order.size();
                 for (size_t step = 0; step < order.size(); ++step) {
                     order[(first + step) % order.size()]->Service(now);
                 }
             }
-            for (auto it = transfers_.begin(); it != transfers_.end();) {
+            for (auto it = runs_.begin(); it != runs_.end();) {
                 if (it->second->Done()) {
-                    it = transfers_.erase(it);
+                    it = runs_.erase(it);
                     continue;
                 }
                 deadline = std::min(deadline, it->second->NextDeadline(now));
@@ -224,20 +228,35 @@ private:
         fetches_.emplace(handle, std::move(fetch));
     }
 
-    Transfer* FindRun(model::DownloadId id, std::int64_t epoch)
+    engine::Run* FindRun(model::DownloadId id, std::int64_t epoch)
     {
-        const auto it = transfers_.find(id);
-        if (it == transfers_.end() || it->second->Key().epoch != epoch) {
+        const auto it = runs_.find(id);
+        if (it == runs_.end() || it->second->Key().epoch != epoch) {
             return nullptr;
         }
         return it->second.get();
+    }
+
+    // Refused without touching any file: the stored progress goes back unchanged.
+    void RefuseStart(const core::MediaRequest& request, bool shuttingDown)
+    {
+        core::MediaFinished finished;
+        finished.failure = core::TransferFailure{core::FailureReason::Internal, core::FailureClass::Fatal, 0,
+                                                 shuttingDown ? "the engine is shutting down"
+                                                              : "the download is already running"};
+        for (const core::MediaTrackRequest& track : request.tracks) {
+            if (track.wholeFile) {
+                finished.ranges.push_back(core::MediaTrackRanges{track.track, track.ranges, std::nullopt});
+            }
+        }
+        listener_.OnEngineEvent(core::EngineEvent{request.id, request.epoch, std::move(finished)});
     }
 
     void Dispatch(Command& command, Clock::time_point now, std::optional<Clock::time_point>& shutdownDeadline)
     {
         if (auto* start = std::get_if<StartCommand>(&command)) {
             core::TransferRequest& request = start->request;
-            if (shutdownDeadline || transfers_.contains(request.id)) {
+            if (shutdownDeadline || runs_.contains(request.id)) {
                 // Refused without touching the file: report the stored progress back unchanged.
                 core::TransferFinished finished;
                 finished.outcome = core::TransferOutcome::Failed;
@@ -252,19 +271,32 @@ private:
             const model::DownloadId id = request.id;
             auto transfer = std::make_unique<Transfer>(services_, std::move(request));
             Transfer& started = *transfer;
-            transfers_.emplace(id, std::move(transfer));
+            runs_.emplace(id, std::move(transfer));
+            started.Begin(now);
+            return;
+        }
+        if (auto* startMedia = std::get_if<StartMediaCommand>(&command)) {
+            core::MediaRequest& request = startMedia->request;
+            if (shutdownDeadline || runs_.contains(request.id)) {
+                RefuseStart(request, shutdownDeadline.has_value());
+                return;
+            }
+            const model::DownloadId id = request.id;
+            auto run = std::make_unique<MediaRun>(services_, std::move(request));
+            MediaRun& started = *run;
+            runs_.emplace(id, std::move(run));
             started.Begin(now);
             return;
         }
         if (auto* stop = std::get_if<StopCommand>(&command)) {
-            if (Transfer* transfer = FindRun(stop->id, stop->epoch)) {
-                transfer->RequestStop();
+            if (engine::Run* run = FindRun(stop->id, stop->epoch)) {
+                run->RequestStop();
             }
             return;
         }
         if (auto* speed = std::get_if<SpeedCommand>(&command)) {
-            if (Transfer* transfer = FindRun(speed->id, speed->epoch)) {
-                transfer->SetSpeedLimit(speed->bytesPerSecond, now);
+            if (engine::Run* run = FindRun(speed->id, speed->epoch)) {
+                run->SetSpeedLimit(speed->bytesPerSecond, now);
             }
             return;
         }
@@ -279,15 +311,15 @@ private:
         if (std::holds_alternative<ShutdownCommand>(command)) {
             if (!shutdownDeadline) {
                 shutdownDeadline = now + options_.shutdownTimeout;
-                for (auto& [id, transfer] : transfers_) {
-                    transfer->RequestStop();
+                for (auto& [id, run] : runs_) {
+                    run->RequestStop();
                 }
             }
             return;
         }
         auto& report = std::get<DiskReport>(command);
-        if (Transfer* transfer = FindRun(report.key.id, report.key.epoch)) {
-            transfer->OnDiskReport(report, now);
+        if (engine::Run* run = FindRun(report.key.id, report.key.epoch)) {
+            run->OnDiskReport(report, now);
         }
     }
 
@@ -306,7 +338,7 @@ private:
     std::vector<Command> inbox_;
 
     // Network thread only.
-    std::map<model::DownloadId, std::unique_ptr<Transfer>> transfers_;
+    std::map<model::DownloadId, std::unique_ptr<engine::Run>> runs_;
     Fetches fetches_;
     size_t serviceRotation_ = 0;  // see the service loop
 
@@ -323,6 +355,11 @@ CurlEngine::~CurlEngine() = default;
 void CurlEngine::Start(core::TransferRequest request)
 {
     loop_->Post(StartCommand{std::move(request)});
+}
+
+void CurlEngine::StartMedia(core::MediaRequest request)
+{
+    loop_->Post(StartMediaCommand{std::move(request)});
 }
 
 void CurlEngine::Stop(model::DownloadId id, std::int64_t epoch)

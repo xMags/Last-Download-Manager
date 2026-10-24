@@ -8,9 +8,11 @@ add_executable(ldm_unit_tests
     browser/ProtocolTests.cpp
     core/CaptureCasesTests.cpp
     core/CoordinatorTests.cpp
+    core/NetworkAddressTests.cpp
     core/QuotaTests.cpp
     core/SegmentPlannerTests.cpp
     core/UrlAndNamesTests.cpp
+    engine/Aes128CbcTests.cpp
     engine/FailurePolicyTests.cpp
     engine/HttpHeadersTests.cpp
     engine/TokenBucketTests.cpp
@@ -44,7 +46,8 @@ target_link_libraries(ldm_unit_tests PRIVATE
     ldm_ui
     nlohmann_json::nlohmann_json
     GTest::gtest
-    GTest::gtest_main)
+    GTest::gtest_main
+    bcrypt)
 target_compile_definitions(ldm_unit_tests PRIVATE
     LDM_CAPTURE_CASES="${PROJECT_SOURCE_DIR}/extension/test/capture-cases.json"
     LDM_MEDIA_FIXTURES="${PROJECT_SOURCE_DIR}/tests/fixtures/media")

@@ -1,8 +1,10 @@
 #pragma once
 
 #include "core/Commands.h"
+#include "core/MediaProgress.h"
 #include "model/Download.h"
 #include "model/Ids.h"
+#include "model/Media.h"
 
 #include <cstdint>
 #include <filesystem>
@@ -50,6 +52,51 @@ struct TransferRequest {
     int maxConnections = 8;
     std::optional<std::int64_t> speedLimitBytesPerSecond;
     int maxAttemptsPerSegment = 10;
+    // Refuse connections to loopback and private addresses (core::IsPrivateIpv4): a stream from a
+    // public host. Not checked through a proxy, which connects on the user's behalf.
+    bool refusePrivateAddresses = false;
+};
+
+// One piece of a stream's track to fetch into its own file (M3 design section 6).
+struct MediaPieceRequest {
+    std::uint32_t index = 0;  // in the track, as reported back in MediaPieceDone
+    std::string url;
+    std::optional<std::int64_t> rangeOffset;  // with rangeLength: only these bytes of `url`
+    std::optional<std::int64_t> rangeLength;
+    std::optional<std::uint32_t> key;  // index into MediaTrackRequest::keys; AES-128 with `iv`
+    model::AesKey iv{};
+    std::filesystem::path path;  // absolute; created, or replaced when a run left part of it
+};
+
+struct MediaTrackRequest {
+    std::uint32_t track = 0;
+    std::vector<model::MediaKey> keys;
+    // The pieces not on disk yet, in playback order.
+    std::vector<MediaPieceRequest> pieces;
+    // A track that is one file instead: downloaded like a file into `path`, continuing `ranges`.
+    bool wholeFile = false;
+    std::string url;
+    std::filesystem::path path;
+    std::vector<model::Segment> ranges;
+};
+
+// Everything the engine needs to run one stream download: the pieces of every track, fetched
+// several at once into separate files, decrypted as they arrive.
+struct MediaRequest {
+    model::DownloadId id;
+    std::int64_t epoch = 0;
+
+    std::optional<std::string> referer;
+    std::string userAgent;
+    std::vector<std::string> cookieLines;  // Netscape format, as in TransferRequest
+    std::optional<std::string> proxy;
+    bool refusePrivateAddresses = false;  // as in TransferRequest; for pieces and keys
+
+    std::vector<MediaTrackRequest> tracks;
+
+    int maxConnections = 8;
+    std::optional<std::int64_t> speedLimitBytesPerSecond;
+    int maxAttemptsPerSegment = 10;  // per piece
 };
 
 // Why a run stopped short. Each reason maps to one user-visible message.
@@ -74,6 +121,7 @@ enum class FailureReason {
     DiskError,
     PermissionDenied,
     Protocol,
+    PrivateAddress,  // a stream from a public host pointed at a loopback or private address
     Internal,
 };
 
@@ -133,12 +181,38 @@ struct TransferFinished {
     std::optional<std::int64_t> totalSize;
 };
 
+// Durable byte ranges of a stream's whole-file track.
+struct MediaTrackRanges {
+    std::uint32_t track = 0;
+    std::vector<model::Segment> ranges;
+    std::optional<std::int64_t> totalSize;
+};
+
+struct MediaProgress {
+    std::vector<MediaPieceDone> done;  // pieces durable since the previous report of the run
+    std::vector<MediaTrackRanges> ranges;
+    std::int64_t receivedBytes = 0;  // in this run, durable or not; for display
+    std::int64_t bytesPerSecond = 0;
+    int connections = 0;
+    std::optional<TransferFailure> lastRetry;
+};
+
+// The end of a stream run: like TransferFinished, after every file of the run is closed.
+struct MediaFinished {
+    TransferOutcome outcome = TransferOutcome::Failed;
+    std::optional<TransferFailure> failure;
+    std::vector<MediaPieceDone> done;  // since the last MediaProgress
+    std::vector<MediaTrackRanges> ranges;
+};
+
 struct FinalizeRequest {
     model::DownloadId id;
     std::int64_t epoch = 0;
     std::filesystem::path partialPath;
     std::filesystem::path finalPath;  // must not exist; the engine never overwrites
     std::optional<std::string> lastModified;  // set as the file time when present (checklist ENG-16)
+    // A stream's parts folder, removed with everything in it once the move succeeded.
+    std::optional<std::filesystem::path> removeFolder;
 };
 
 struct FinalizeFinished {
@@ -162,6 +236,7 @@ struct FetchRequest {
     std::vector<std::string> cookieLines;  // Netscape format, as in TransferRequest
     std::optional<std::string> proxy;
     std::size_t maxBytes = 0;  // a longer body fails the fetch
+    bool refusePrivateAddresses = false;  // as in TransferRequest
 };
 
 // The answer to a FetchRequest: exactly one per request.
@@ -171,10 +246,13 @@ struct FetchFinished {
     std::string finalUrl;  // after redirects; relative addresses in the body resolve against it
     std::optional<std::string> contentType;
     std::string body;
+    // The answer came from a loopback or private address, or a host named so: what the media
+    // the body lists may point at (MediaRequest::refusePrivateAddresses).
+    bool fromPrivateNetwork = false;
 };
 
-using EnginePayload =
-    std::variant<ResponseInfo, ProgressInfo, TransferFinished, FinalizeFinished, ProxyResolved, FetchFinished>;
+using EnginePayload = std::variant<ResponseInfo, ProgressInfo, TransferFinished, FinalizeFinished, ProxyResolved,
+                                   FetchFinished, MediaProgress, MediaFinished>;
 
 struct EngineEvent {
     model::DownloadId id;
@@ -198,8 +276,11 @@ public:
     // Starts a run. A download may have at most one run at a time; the caller waits for
     // TransferFinished before starting the next epoch.
     virtual void Start(TransferRequest request) = 0;
-    // Requests a stop. Always answered by exactly one TransferFinished for that epoch, sent after
-    // the partial file is closed, unless the run had already finished.
+    // Starts a run of a stream, under the same rules as Start; answered with MediaProgress and
+    // one MediaFinished instead.
+    virtual void StartMedia(MediaRequest request) = 0;
+    // Requests a stop. Always answered by exactly one TransferFinished (MediaFinished for a
+    // stream) for that epoch, sent after the run's files are closed, unless it had already finished.
     virtual void Stop(model::DownloadId id, std::int64_t epoch) = 0;
     virtual void SetSpeedLimit(model::DownloadId id, std::int64_t epoch, std::optional<std::int64_t> bytesPerSecond) = 0;
     virtual void SetGlobalSpeedLimit(std::optional<std::int64_t> bytesPerSecond) = 0;

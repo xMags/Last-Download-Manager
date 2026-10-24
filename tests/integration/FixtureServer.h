@@ -14,6 +14,8 @@ struct FixtureOptions {
     std::int64_t size = 4 * 1024 * 1024;
     int delayMs = 2;
     int chunkBytes = 32 * 1024;
+    // Served under /media/: the folder of generated HLS and DASH fixtures. Nothing when empty.
+    std::filesystem::path mediaRoot;
 };
 
 // Runs tools/research/http-reference-fixture.mjs in a Node.js child process for the lifetime of

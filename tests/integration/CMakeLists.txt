@@ -7,9 +7,11 @@ add_executable(ldm_integration_tests
     EngineTests.cpp
     FixtureServer.cpp
     FixtureServer.h
+    MediaEngineTests.cpp
     MediaFixtures.cpp
     MediaFixtures.h
-    MediaFixtureTests.cpp)
+    MediaFixtureTests.cpp
+    RecordingListener.h)
 target_link_libraries(ldm_integration_tests PRIVATE
     ldm_engine
     ldm_platform
