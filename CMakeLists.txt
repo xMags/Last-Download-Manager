@@ -49,6 +49,7 @@ endif()
 
 add_subdirectory(src)
 add_subdirectory(extension)
+include(cmake/Packaging.cmake)
 
 if(LDM_BUILD_TESTS)
     add_subdirectory(tests)
