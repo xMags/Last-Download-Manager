@@ -8,6 +8,7 @@
 #include "platform/win/WinBrowserWindows.h"
 #include "platform/win/XmlLiteReader.h"
 #include "platform/win/BrowserHostRegistration.h"
+#include "platform/win/FfmpegMediaTools.h"
 #include "platform/win/InstanceChannel.h"
 #include "platform/win/SystemPorts.h"
 #include "platform/win/RunKeyStartup.h"
@@ -181,6 +182,8 @@ int WINAPI wWinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int sho
     ldm::platform::RunKeyStartup startup;
     auto storeInstance = std::make_unique<ldm::storage::SqliteStore>(std::move(store).Value());
     auto engine = std::make_unique<ldm::engine::CurlEngine>(core);
+    // ffmpeg.exe and ffprobe.exe ship next to ldm.exe; joins answer through the core thread.
+    ldm::platform::FfmpegMediaTools mediaTools(ProgramFolder(), core);
 
     ldm::core::CoordinatorPorts ports;
     ports.store = storeInstance.get();
@@ -192,6 +195,7 @@ int WINAPI wWinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int sho
     ports.ids = &ids;
     ports.power = &power;
     ports.proxy = &proxy;
+    ports.media = &mediaTools;
     ldm::core::CoordinatorConfig config;
     config.downloadsFolder = *downloads;
     ldm::core::Coordinator coordinator(ports, config);

@@ -13,6 +13,10 @@ add_library(ldm_platform STATIC
     win/BrowserHostRegistration.h
     win/ChildProcess.cpp
     win/ChildProcess.h
+    win/FfmpegCommands.cpp
+    win/FfmpegCommands.h
+    win/FfmpegMediaTools.cpp
+    win/FfmpegMediaTools.h
     win/InstanceChannel.cpp
     win/InstanceChannel.h
     win/RunKeyStartup.cpp
