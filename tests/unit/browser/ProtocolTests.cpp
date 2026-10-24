@@ -381,4 +381,136 @@ TEST(BrowserHostManifest, FirefoxManifestAllowsOnlyLdmAddOn)
     EXPECT_FALSE(json.contains("allowed_origins"));
 }
 
+std::string MediaJson(const std::string& fields)
+{
+    return R"({"v":1,"id":"m1","type":"media",)" + fields + "}";
+}
+
+constexpr char kMediaFields[] =
+    R"("tabId":12,"frameId":0,"incognito":false,"kind":"hls","url":"https://cdn.a.test/master.m3u8",)"
+    R"("pageUrl":"https://a.test/watch","pageTitle":"A film","mimeType":"application/vnd.apple.mpegurl",)"
+    R"("userAgent":"Mozilla/5.0","cookies":[{"domain":"cdn.a.test","hostOnly":true,"path":"/","secure":true,"expires":0,"name":"s","value":"1"}])";
+
+TEST(BrowserProtocol, ParsesMedia)
+{
+    const auto parsed = ldm::browser::ParseMessage(MediaJson(kMediaFields));
+    ASSERT_TRUE(parsed);
+    const auto& media = std::get<ldm::browser::MediaFound>(parsed->message);
+    EXPECT_EQ(media.tabId, 12);
+    EXPECT_EQ(media.frameId, 0);
+    EXPECT_FALSE(media.incognito);
+    EXPECT_EQ(media.kind, ldm::browser::MediaKind::Hls);
+    EXPECT_EQ(media.url, "https://cdn.a.test/master.m3u8");
+    EXPECT_EQ(media.pageUrl, "https://a.test/watch");
+    EXPECT_EQ(media.pageTitle, "A film");
+    EXPECT_EQ(media.mimeType, "application/vnd.apple.mpegurl");
+    EXPECT_FALSE(media.fileSize);
+    ASSERT_EQ(media.cookies.size(), 1u);
+
+    const auto file = ldm::browser::ParseMessage(MediaJson(
+        R"("tabId":3,"frameId":7,"incognito":true,"kind":"file","url":"http://a.test/v.mp4","fileSize":5000000,"userAgent":"UA","cookies":[])"));
+    ASSERT_TRUE(file);
+    const auto& plain = std::get<ldm::browser::MediaFound>(file->message);
+    EXPECT_EQ(plain.kind, ldm::browser::MediaKind::File);
+    EXPECT_EQ(plain.fileSize, 5'000'000);
+    EXPECT_TRUE(plain.incognito);
+    EXPECT_TRUE(plain.pageTitle.empty());
+}
+
+TEST(BrowserProtocol, RejectsInvalidMedia)
+{
+    const std::string good = kMediaFields;
+    const auto with = [&good](const std::string& from, const std::string& to) {
+        std::string fields = good;
+        fields.replace(fields.find(from), from.size(), to);
+        return MediaJson(fields);
+    };
+    EXPECT_FALSE(ldm::browser::ParseMessage(with(R"("tabId":12)", R"("tabId":-1)")));
+    EXPECT_FALSE(ldm::browser::ParseMessage(with(R"("tabId":12)", R"("tabId":4294967296)")));
+    EXPECT_FALSE(ldm::browser::ParseMessage(with(R"("tabId":12)", R"("tabId":"12")")));
+    EXPECT_FALSE(ldm::browser::ParseMessage(with(R"("kind":"hls")", R"("kind":"rtmp")")));
+    EXPECT_FALSE(ldm::browser::ParseMessage(with("https://cdn.a.test/master.m3u8", "ftp://cdn.a.test/master.m3u8")))
+        << "media comes from the web only";
+    EXPECT_FALSE(ldm::browser::ParseMessage(with("https://cdn.a.test/master.m3u8", "file:///C:/x.m3u8")));
+    EXPECT_FALSE(ldm::browser::ParseMessage(with("https://a.test/watch", "javascript:alert(1)")));
+    EXPECT_FALSE(ldm::browser::ParseMessage(with(R"("pageTitle":"A film")", R"("pageTitle":"A\nfilm")")));
+    EXPECT_FALSE(ldm::browser::ParseMessage(with(R"("pageTitle":"A film")", R"("pageTitle":")" +
+                                                                               std::string(1025, 'x') + "\"")));
+    EXPECT_FALSE(ldm::browser::ParseMessage(with(R"("userAgent":"Mozilla/5.0",)", "")));
+    EXPECT_FALSE(ldm::browser::ParseMessage(with(R"("incognito":false,)", "")));
+}
+
+std::string PositionJson(const std::string& override = {})
+{
+    std::string json =
+        R"({"v":1,"id":"p1","type":"video-position","tabId":12,"visible":true,"fullscreen":false,)"
+        R"("window":{"x":-8,"y":-8,"width":1936,"height":1048},"viewport":{"x":0,"y":0,"width":1920,"height":937},)"
+        R"("viewportPositionKnown":false,"video":{"x":100.5,"y":80,"width":1280,"height":720},"pixelRatio":1.25})";
+    if (!override.empty()) {
+        const size_t colon = override.find(':');
+        const std::string key = override.substr(0, colon + 1);
+        const size_t start = json.find(key);
+        size_t end = start + key.size();
+        int depth = 0;
+        for (; end < json.size(); ++end) {
+            const char c = json[end];
+            depth += c == '{' ? 1 : (c == '}' ? -1 : 0);
+            if (depth < 0 || (depth == 0 && c == ',')) {
+                break;
+            }
+        }
+        json.replace(start, end - start, override);
+    }
+    return json;
+}
+
+TEST(BrowserProtocol, ParsesVideoPosition)
+{
+    const auto parsed = ldm::browser::ParseMessage(PositionJson());
+    ASSERT_TRUE(parsed);
+    const auto& position = std::get<ldm::browser::VideoPosition>(parsed->message);
+    EXPECT_EQ(position.tabId, 12);
+    EXPECT_TRUE(position.visible);
+    EXPECT_FALSE(position.fullscreen);
+    EXPECT_FALSE(position.viewportPositionKnown);
+    EXPECT_DOUBLE_EQ(position.window.x, -8);
+    EXPECT_DOUBLE_EQ(position.viewport.height, 937);
+    EXPECT_DOUBLE_EQ(position.video.x, 100.5);
+    EXPECT_DOUBLE_EQ(position.pixelRatio, 1.25);
+}
+
+TEST(BrowserProtocol, RejectsInvalidVideoPosition)
+{
+    for (const char* override : {R"("pixelRatio":0)", R"("pixelRatio":17)", R"("pixelRatio":"1")",
+                                 R"("video":{"x":0,"y":0,"width":-1,"height":10})",
+                                 R"("video":{"x":1e300,"y":0,"width":1,"height":1})",
+                                 R"("video":{"x":0,"y":0,"width":1})", R"("window":null)", R"("visible":1)"}) {
+        EXPECT_FALSE(ldm::browser::ParseMessage(PositionJson(override))) << override;
+    }
+}
+
+TEST(BrowserProtocol, ParsesMediaReset)
+{
+    const auto parsed = ldm::browser::ParseMessage(R"({"v":1,"id":"r","type":"media-reset","tabId":5})");
+    ASSERT_TRUE(parsed);
+    EXPECT_EQ(std::get<ldm::browser::MediaReset>(parsed->message).tabId, 5);
+    EXPECT_FALSE(ldm::browser::ParseMessage(R"({"v":1,"id":"r","type":"media-reset"})"));
+}
+
+TEST(BrowserProtocol, EncodesMediaListAndMediaRules)
+{
+    const auto list = nlohmann::json::parse(ldm::browser::EncodeMediaList(9, true));
+    EXPECT_EQ(list["type"], "media-list");
+    EXPECT_EQ(list["tabId"], 9);
+    EXPECT_EQ(list["hasMedia"], true);
+
+    ldm::browser::Config config{"5.0.0", {}};
+    config.media = {true, {"mp4", "webm"}, 1024 * 1024, {"*.example.test"}};
+    const auto json = nlohmann::json::parse(ldm::browser::EncodeConfig(config, "7"));
+    EXPECT_EQ(json["media"], nlohmann::json({{"enabled", true},
+                                             {"types", {"mp4", "webm"}},
+                                             {"minimumBytes", 1024 * 1024},
+                                             {"siteExceptions", {"*.example.test"}}}));
+}
+
 }  // namespace

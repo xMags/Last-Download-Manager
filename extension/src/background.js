@@ -11,8 +11,10 @@ import { applyMenu, clickedAddress, menuItems, MenuId } from './context-menu.js'
 import { FormPosts } from './form-posts.js';
 import { downloadVerdict, keySettings, sendsForcedLinkToLdm } from './key-rules.js';
 import { cleanKeys, LinkClicks } from './link-clicks.js';
-import { isDownloadAddress, menuSettings } from './protocol.js';
+import { MediaDetector } from './media-detect.js';
+import { isDownloadAddress, menuSettings, parseMediaList } from './protocol.js';
 import { applyToolbar, toolbarAppearance } from './toolbar.js';
+import { VideoPositions } from './video-positions.js';
 
 const api = globalThis.browser ?? globalThis.chrome;
 
@@ -40,6 +42,12 @@ const connection = new LdmConnection(api, {
     }
   },
   onMessage: (message) => {
+    // LDM has something to offer for a tab (or no longer): follow that tab's video for the panel.
+    const mediaList = parseMediaList(message);
+    if (mediaList) {
+      videoPositions.setHasMedia(mediaList.tabId, mediaList.hasMedia);
+      return;
+    }
     // Refresh download address (checklist ENG-08): LDM asks to open the page a download came from.
     if (message?.type === 'open-page' && isDownloadAddress(message.url) && /^https?:/i.test(message.url)) {
       api.tabs.create({ url: message.url, active: true })
@@ -49,6 +57,11 @@ const connection = new LdmConnection(api, {
   },
   onState: (state) => {
     render();
+    if (state === State.Connected) {
+      // A new LDM knows nothing of the tabs yet: report their media again as it comes.
+      mediaDetector.forgetAll();
+      videoPositions.forgetAll();
+    }
     if (state === State.Connected || state === State.Connecting) {
       api.alarms.clear(RECONNECT_ALARM);
     } else {
@@ -83,6 +96,14 @@ const capture = new DownloadCapture(api, connection, {
 });
 
 const allLinks = new AllLinks(api, connection, { userAgent: navigator.userAgent, tell });
+
+const mediaDetector = new MediaDetector(api, connection, {
+  ready: settingsLoaded,
+  isEnabled: () => enabled,
+  rules: () => rules,
+  userAgent: navigator.userAgent,
+});
+const videoPositions = new VideoPositions(api, connection);
 
 /** Shows `text` in the page the user is on; pages the browser protects show nothing. */
 function tell(tab, text) {
@@ -156,6 +177,26 @@ const FORM_FILTER = { urls: ['<all_urls>'], types: ['main_frame', 'sub_frame'] }
 api.webRequest.onBeforeRequest.addListener((details) => forms.onBeforeRequest(details), FORM_FILTER, ['requestBody']);
 api.webRequest.onSendHeaders.addListener((details) => forms.onSendHeaders(details), FORM_FILTER, ['requestHeaders']);
 
+// Media for the panel over web players (M3 design section 6): responses are only observed.
+api.webRequest.onHeadersReceived.addListener((details) => {
+  mediaDetector.onHeadersReceived(details).catch((error) => console.warn('LDM: media check failed', error));
+}, { urls: ['http://*/*', 'https://*/*'] }, ['responseHeaders']);
+// A tab that loads another page starts with nothing to offer. Single-page sites that change the
+// video without loading a page keep their earlier media until they do.
+api.webRequest.onBeforeRequest.addListener((details) => {
+  if (details.tabId >= 0) {
+    mediaDetector.reset(details.tabId);
+    videoPositions.forget(details.tabId);
+  }
+}, { urls: ['<all_urls>'], types: ['main_frame'] });
+api.tabs.onRemoved.addListener((tabId) => {
+  mediaDetector.reset(tabId);
+  videoPositions.forget(tabId);
+});
+api.tabs.onActivated.addListener(() => videoPositions.refreshAll());
+api.windows.onFocusChanged.addListener(() => videoPositions.refreshAll());
+api.windows.onBoundsChanged?.addListener(() => videoPositions.refreshAll());
+
 api.contextMenus.onClicked.addListener((info, tab) => {
   onMenuClick(info, tab).catch((error) => console.warn('LDM: menu action failed', error));
 });
@@ -172,7 +213,7 @@ async function addPageScriptToOpenTabs() {
   const tabs = await api.tabs.query({ url: ['http://*/*', 'https://*/*'] });
   await Promise.all(tabs.map((tab) => api.scripting.executeScript({
     target: { tabId: tab.id, allFrames: true },
-    files: ['src/page-keys.js'],
+    files: ['src/page-keys.js', 'src/video-finder.js'],
   }).catch(() => {})));  // pages the browser protects refuse; nothing to do there
 }
 
@@ -188,6 +229,12 @@ api.runtime.onInstalled.addListener((details) => {
 function onPageMessage(message, sender, reply) {
   const pageUrl = typeof message.pageUrl === 'string' ? message.pageUrl : undefined;
   switch (message.type) {
+    case 'video-rect':
+      videoPositions.onFrameReport(message, sender);
+      break;
+    case 'video-finder-ready':
+      videoPositions.frameReady(sender);
+      break;
     case 'keys':
       clicks.recordKeys(cleanKeys(message.keys));
       break;

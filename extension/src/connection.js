@@ -67,6 +67,22 @@ export class LdmConnection {
   }
 
   /**
+   * Sends a message LDM does not answer on the lasting connection. False when not connected: the
+   * message is dropped, as media reports must never start LDM.
+   */
+  post(message) {
+    if (!this.port || this.state !== State.Connected || message === null) {
+      return false;
+    }
+    try {
+      this.port.postMessage(message);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
    * Sends one message on a connection of its own and resolves with LDM's answer (same id), or with
    * null when there is none within `timeoutMs`. Each call starts a fresh ldm-host.exe, and LDM when
    * it is not running. Captures use this: the browser starts that host while the user is in the

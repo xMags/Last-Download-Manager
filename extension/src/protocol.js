@@ -75,6 +75,19 @@ export function parseConfig(message) {
     addressExceptions: patternList(message.addressExceptions),
     keys: keySettings(message),
     menu: menuSettings(message),
+    media: mediaSettings(message.media),
+  };
+}
+
+/** The media panel's rules; an LDM that sends none gets no types, so nothing is reported. */
+function mediaSettings(media) {
+  const types = Array.isArray(media?.types) ? media.types : [];
+  return {
+    enabled: media?.enabled !== false,
+    types: types.filter((entry) => typeof entry === 'string' && EXTENSION_PATTERN.test(entry))
+      .map((entry) => entry.replace(/^\./, '')),
+    minimumBytes: Number.isSafeInteger(media?.minimumBytes) && media.minimumBytes > 0 ? media.minimumBytes : 0,
+    siteExceptions: patternList(media?.siteExceptions),
   };
 }
 
@@ -281,6 +294,116 @@ export function linksAccepted(message, id) {
 export function isLinksDone(message, id) {
   return message !== null && typeof message === 'object' && message.v === PROTOCOL_VERSION &&
     message.type === 'links-done' && message.id === id;
+}
+
+const MAX_PAGE_TITLE_BYTES = 1024;
+const MEDIA_KINDS = new Set(['hls', 'dash', 'file']);
+
+/** True for a tab or frame id LDM accepts. */
+function isBrowserId(value) {
+  return Number.isSafeInteger(value) && value >= 0 && value <= 0x7fffffff;
+}
+
+/** True for an http or https address LDM accepts. */
+function isWebAddress(url) {
+  return isDownloadAddress(url) && /^https?:/i.test(url);
+}
+
+/**
+ * The media message for a response a tab loaded (M3 design section 6), or null when LDM would
+ * refuse it.
+ * @param {{tabId: number, frameId: number, incognito: boolean, kind: string, url: string,
+ *          pageUrl?: string, pageTitle?: string, mimeType?: string, fileSize?: number,
+ *          userAgent: string, cookies: object[]}} media cookies as the browser's cookies API gives them
+ */
+export function makeMedia(media) {
+  if (!isBrowserId(media.tabId) || !isBrowserId(media.frameId) || !MEDIA_KINDS.has(media.kind) ||
+      !isWebAddress(media.url)) {
+    return null;
+  }
+  const seen = new Set();
+  const cookies = [];
+  for (const cookie of media.cookies) {
+    const converted = toLdmCookie(cookie);
+    const key = converted && `${converted.domain}\t${converted.path}\t${converted.name}`;
+    if (converted && !seen.has(key) && cookies.length < MAX_COOKIES) {
+      seen.add(key);
+      cookies.push(converted);
+    }
+  }
+  const mimeType = String(media.mimeType ?? '');
+  return {
+    v: PROTOCOL_VERSION,
+    id: nextId(),
+    type: 'media',
+    tabId: media.tabId,
+    frameId: media.frameId,
+    incognito: Boolean(media.incognito),
+    kind: media.kind,
+    url: media.url,
+    pageUrl: isWebAddress(media.pageUrl) ? media.pageUrl : undefined,
+    pageTitle: cleanPageText(media.pageTitle, MAX_PAGE_TITLE_BYTES) || undefined,
+    mimeType: mimeType && mimeType.length <= 256 && !CONTROL.test(mimeType) ? mimeType : undefined,
+    fileSize: Number.isSafeInteger(media.fileSize) && media.fileSize >= 0 ? media.fileSize : undefined,
+    userAgent: cleanText(media.userAgent, 1024) || 'Mozilla/5.0',
+    cookies,
+  };
+}
+
+/** The tab's page changed or the tab closed. */
+export function makeMediaReset(tabId) {
+  return isBrowserId(tabId) ? { v: PROTOCOL_VERSION, id: nextId(), type: 'media-reset', tabId } : null;
+}
+
+const MAX_COORDINATE = 1000000;
+
+/** A rectangle LDM accepts, rounded to a tenth of a pixel; null for anything else. */
+function cleanRect(rect) {
+  const values = [rect?.x, rect?.y, rect?.width, rect?.height];
+  if (!values.every((value) => Number.isFinite(value) && Math.abs(value) <= MAX_COORDINATE) ||
+      rect.width < 0 || rect.height < 0) {
+    return null;
+  }
+  const round = (value) => Math.round(value * 10) / 10;
+  return { x: round(rect.x), y: round(rect.y), width: round(rect.width), height: round(rect.height) };
+}
+
+/**
+ * Where a tab's video is, for LDM's panel; null when a value is out of range.
+ * @param {{tabId: number, visible: boolean, fullscreen: boolean, window: object, viewport: object,
+ *          viewportPositionKnown: boolean, video: object, pixelRatio: number}} position
+ */
+export function makeVideoPosition(position) {
+  const window = cleanRect(position.window);
+  const viewport = cleanRect(position.viewport);
+  const video = cleanRect(position.video);
+  const ratio = position.pixelRatio;
+  if (!isBrowserId(position.tabId) || !window || !viewport || !video || !Number.isFinite(ratio) || ratio < 0.1 ||
+      ratio > 16) {
+    return null;
+  }
+  return {
+    v: PROTOCOL_VERSION,
+    id: nextId(),
+    type: 'video-position',
+    tabId: position.tabId,
+    visible: Boolean(position.visible),
+    fullscreen: Boolean(position.fullscreen),
+    window,
+    viewport,
+    viewportPositionKnown: Boolean(position.viewportPositionKnown),
+    video,
+    pixelRatio: ratio,
+  };
+}
+
+/** LDM says whether it offers something for a tab: {tabId, hasMedia}, or null for anything else. */
+export function parseMediaList(message) {
+  if (message === null || typeof message !== 'object' || message.v !== PROTOCOL_VERSION ||
+      message.type !== 'media-list' || !isBrowserId(message.tabId) || typeof message.hasMedia !== 'boolean') {
+    return null;
+  }
+  return { tabId: message.tabId, hasMedia: message.hasMedia };
 }
 
 /**

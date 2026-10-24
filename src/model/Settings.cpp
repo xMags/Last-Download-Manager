@@ -263,6 +263,11 @@ void VisitSettings(Visitor& v, SettingsType& s)
     v.Bool("browser.menu.chromium.downloadAll", s.chromiumMenu.downloadAll);
     v.Bool("browser.menu.firefox.downloadLink", s.firefoxMenu.downloadLink);
     v.Bool("browser.menu.firefox.downloadAll", s.firefoxMenu.downloadAll);
+    v.Bool("media.panelEnabled", s.mediaPanelEnabled);
+    v.String("media.types", s.mediaTypes);
+    v.Int("media.minimumKilobytes", s.mediaMinimumKilobytes, 0, 10'000'000);
+    v.String("media.siteExceptions", s.mediaSiteExceptions);
+    v.Bool("media.drmNotice", s.mediaDrmNotice);
     v.Bool("allLinks.useLinkText", s.allLinksUseLinkText);
     v.Bool("allLinks.hideHtml", s.allLinksHideHtml);
     v.Bool("allLinks.hideImages", s.allLinksHideImages);
@@ -354,6 +359,12 @@ std::string DefaultCaptureSiteExceptions()
 {
     // Windows Update fetches its packages through the browser download machinery on some systems.
     return "*.update.microsoft.com download.windowsupdate.com";
+}
+
+std::string DefaultMediaTypes()
+{
+    return "3GP AAC ASF AVI DFXP F4V FLV M4A M4V MKV MOV MP3 MP4 MPEG MPG OGG OGV QT RM SRT TS TTML VTT WAV "
+           "WEBM WMA WMV";
 }
 
 SettingsLoadResult SettingsFromMap(const SettingsMap& values)

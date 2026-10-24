@@ -114,7 +114,58 @@ struct LinkInfo {
     std::vector<LinkDetails> items;
 };
 
-using Message = std::variant<HostInfo, Hello, Capture, Links, LinkInfo>;
+// What a response the browser loaded is, as far as the media panel cares (M3 design section 6).
+enum class MediaKind {
+    Hls,   // an HLS playlist (.m3u8, application/vnd.apple.mpegurl)
+    Dash,  // a DASH manifest (.mpd, application/dash+xml)
+    File,  // a plain media file of one of the panel's types
+};
+
+// Media a tab loaded, seen by the extension in a response. LDM fetches and reads manifests
+// itself, with the cookies the browser would send to that address.
+struct MediaFound {
+    int tabId = 0;    // the browser's tab id, at least 0
+    int frameId = 0;  // 0 for the tab's top frame
+    bool incognito = false;
+    MediaKind kind = MediaKind::File;
+    std::string url;  // http or https
+    std::optional<std::string> pageUrl;  // the tab's page, the Referer of LDM's requests
+    std::string pageTitle;  // UTF-8, may be empty; suggests the file name
+    std::optional<std::string> mimeType;
+    std::optional<std::int64_t> fileSize;
+    std::string userAgent;
+    std::vector<model::Cookie> cookies;
+};
+
+// The tab's page changed or the tab closed: whatever LDM found for it is gone.
+struct MediaReset {
+    int tabId = 0;
+};
+
+// A rectangle in CSS pixels, as browsers measure them.
+struct CssRect {
+    double x = 0;
+    double y = 0;
+    double width = 0;
+    double height = 0;
+};
+
+// Where the video of a tab with media is, so LDM can place its panel over it (M3 design
+// section 6). Sent while the tab has media, whenever something moved. Page-controlled, so LDM
+// uses it only to place and hide its own window.
+struct VideoPosition {
+    int tabId = 0;
+    // The tab is the active one of a window that is not minimized, and a video is on screen.
+    bool visible = false;
+    bool fullscreen = false;
+    CssRect window;    // the browser window, from the windows API, in screen CSS pixels
+    CssRect viewport;  // the top frame's viewport: its size, and its screen position when known
+    bool viewportPositionKnown = false;  // Firefox reports it (mozInnerScreenX); Chromium cannot
+    CssRect video;     // in the top frame's viewport
+    double pixelRatio = 1;  // device pixels per CSS pixel: display scale times page zoom
+};
+
+using Message = std::variant<HostInfo, Hello, Capture, Links, LinkInfo, MediaFound, MediaReset, VideoPosition>;
 
 struct ParsedMessage {
     std::string id;  // echoed in answers
@@ -139,6 +190,14 @@ struct ParsedMessage {
 
 // Capture rules LDM pushes to the extension; the extension decides locally from them (M3 design
 // decision 2). Grows with each capture feature.
+// The media panel's rules (checklists B-07, B-09); the extension reports only what passes them.
+struct MediaRules {
+    bool enabled = true;  // false, or no types: the extension reports nothing
+    std::vector<std::string> types;  // lower-case extensions without dots, such as "mp4"
+    std::int64_t minimumBytes = 0;   // plain files of a known smaller size are not reported
+    std::vector<std::string> siteExceptions;  // host patterns, '*' wildcards
+};
+
 struct Config {
     std::string appVersion;
     std::vector<std::string> capturedExtensions;  // lower-case patterns without dots; '*' matches anything
@@ -146,6 +205,7 @@ struct Config {
     std::vector<std::string> addressExceptions;   // whole-address patterns, '*' wildcards
     model::CaptureKeys keys;
     model::BrowserMenu menu;  // for this browser's family
+    MediaRules media;
 };
 
 [[nodiscard]] std::string EncodeConfig(const Config& config, std::string_view replyTo);
@@ -163,5 +223,9 @@ struct Config {
 // Refresh download address (checklist ENG-08): asks the browser to open the page a download came
 // from, so the user can start it again there. `url` is http or https.
 [[nodiscard]] std::string EncodeOpenPage(std::string_view url);
+
+// Tells the extension whether LDM has something to offer for a tab, so it reports where that
+// tab's video is (VideoPosition) only while it does.
+[[nodiscard]] std::string EncodeMediaList(int tabId, bool hasMedia);
 
 }  // namespace ldm::browser

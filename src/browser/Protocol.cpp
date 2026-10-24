@@ -6,6 +6,8 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
+#include <limits>
 #include <iterator>
 
 namespace ldm::browser {
@@ -24,6 +26,11 @@ constexpr size_t kMaxFileName = 1024;
 constexpr size_t kMaxUserAgent = 1024;
 constexpr size_t kMaxMimeType = 256;
 constexpr size_t kMaxCookies = 300;
+constexpr size_t kMaxPageTitle = 1024;  // bytes of UTF-8
+// Coordinates beyond this are nonsense from a page; real screens are far smaller.
+constexpr double kMaxCoordinate = 1'000'000;
+constexpr double kMinPixelRatio = 0.1;
+constexpr double kMaxPixelRatio = 16;
 
 bool IsPrintableAscii(std::string_view text)
 {
@@ -405,6 +412,142 @@ std::optional<LinkInfo> ParseLinkInfo(const nlohmann::json& object)
     return info;
 }
 
+// A tab or frame id: a JSON integer from 0 to INT_MAX.
+std::optional<int> BrowserId(const nlohmann::json& object, const char* key)
+{
+    const auto it = object.find(key);
+    if (it == object.end() || !it->is_number_integer()) {
+        return std::nullopt;
+    }
+    const auto value = it->get<std::int64_t>();
+    if (value < 0 || value > std::numeric_limits<int>::max()) {
+        return std::nullopt;
+    }
+    return static_cast<int>(value);
+}
+
+// A download address of the web: http or https.
+bool IsWebAddress(const std::string& url)
+{
+    return IsDownloadAddress(url) && std::tolower(static_cast<unsigned char>(url.front())) == 'h';
+}
+
+std::optional<MediaKind> ParseMediaKind(const std::string& kind)
+{
+    if (kind == "hls") {
+        return MediaKind::Hls;
+    }
+    if (kind == "dash") {
+        return MediaKind::Dash;
+    }
+    if (kind == "file") {
+        return MediaKind::File;
+    }
+    return std::nullopt;
+}
+
+std::optional<MediaFound> ParseMediaFound(const nlohmann::json& object)
+{
+    const auto tabId = BrowserId(object, "tabId");
+    const auto frameId = BrowserId(object, "frameId");
+    const auto incognito = Boolean(object, "incognito");
+    const auto kind = Text(object, "kind", 8);
+    const auto url = object.find("url");
+    if (!tabId || !frameId || !incognito || !kind || url == object.end() || !url->is_string() ||
+        !IsWebAddress(url->get_ref<const std::string&>())) {
+        return std::nullopt;
+    }
+    const auto parsedKind = ParseMediaKind(*kind);
+    if (!parsedKind) {
+        return std::nullopt;
+    }
+    MediaFound media;
+    media.tabId = *tabId;
+    media.frameId = *frameId;
+    media.incognito = *incognito;
+    media.kind = *parsedKind;
+    media.url = url->get<std::string>();
+    const auto plain = [](size_t max) {
+        return [max](const std::string& text) { return !text.empty() && text.size() <= max && HasNoControlCharacters(text); };
+    };
+    std::optional<std::string> title;
+    if (!OptionalField(object, "pageUrl", IsWebAddress, media.pageUrl) ||
+        !OptionalField(object, "pageTitle", plain(kMaxPageTitle), title) ||
+        !OptionalField(object, "mimeType", plain(kMaxMimeType), media.mimeType)) {
+        return std::nullopt;
+    }
+    media.pageTitle = title.value_or(std::string());
+    const auto size = object.find("fileSize");
+    if (size != object.end() && !size->is_null()) {
+        if (!size->is_number_integer() || size->get<std::int64_t>() < 0) {
+            return std::nullopt;
+        }
+        media.fileSize = size->get<std::int64_t>();
+    }
+    auto userAgent = Text(object, "userAgent", kMaxUserAgent);
+    if (!userAgent || userAgent->empty() || !ParseCookies(object, kMaxCookies, media.cookies)) {
+        return std::nullopt;
+    }
+    media.userAgent = std::move(*userAgent);
+    return media;
+}
+
+std::optional<MediaReset> ParseMediaReset(const nlohmann::json& object)
+{
+    const auto tabId = BrowserId(object, "tabId");
+    if (!tabId) {
+        return std::nullopt;
+    }
+    return MediaReset{*tabId};
+}
+
+std::optional<double> Coordinate(const nlohmann::json& object, const char* key, double minimum)
+{
+    const auto it = object.find(key);
+    if (it == object.end() || !it->is_number()) {
+        return std::nullopt;
+    }
+    const double value = it->get<double>();
+    if (!std::isfinite(value) || value < minimum || value > kMaxCoordinate) {
+        return std::nullopt;
+    }
+    return value;
+}
+
+// {"x", "y", "width", "height"}: finite and within reason, sizes not negative.
+std::optional<CssRect> ParseRect(const nlohmann::json& object, const char* key)
+{
+    const auto it = object.find(key);
+    if (it == object.end() || !it->is_object()) {
+        return std::nullopt;
+    }
+    const auto x = Coordinate(*it, "x", -kMaxCoordinate);
+    const auto y = Coordinate(*it, "y", -kMaxCoordinate);
+    const auto width = Coordinate(*it, "width", 0);
+    const auto height = Coordinate(*it, "height", 0);
+    if (!x || !y || !width || !height) {
+        return std::nullopt;
+    }
+    return CssRect{*x, *y, *width, *height};
+}
+
+std::optional<VideoPosition> ParseVideoPosition(const nlohmann::json& object)
+{
+    const auto tabId = BrowserId(object, "tabId");
+    const auto visible = Boolean(object, "visible");
+    const auto fullscreen = Boolean(object, "fullscreen");
+    const auto known = Boolean(object, "viewportPositionKnown");
+    const auto window = ParseRect(object, "window");
+    const auto viewport = ParseRect(object, "viewport");
+    const auto video = ParseRect(object, "video");
+    const auto ratio = Coordinate(object, "pixelRatio", kMinPixelRatio);
+    if (!tabId || !visible || !fullscreen || !known || !window || !viewport || !video || !ratio ||
+        *ratio > kMaxPixelRatio) {
+        return std::nullopt;
+    }
+    return VideoPosition{*tabId, *visible, *fullscreen, *window, *viewport, *known, *video, *ratio};
+}
+
 nlohmann::json Envelope(std::string_view id, std::string_view type)
 {
     return {{"v", kProtocolVersion}, {"id", std::string(id)}, {"type", std::string(type)}};
@@ -464,6 +607,18 @@ std::optional<ParsedMessage> ParseMessage(std::string_view json)
         if (auto info = ParseLinkInfo(message)) {
             return ParsedMessage{std::move(id), std::move(*info)};
         }
+    } else if (type == "media") {
+        if (auto media = ParseMediaFound(message)) {
+            return ParsedMessage{std::move(id), std::move(*media)};
+        }
+    } else if (type == "media-reset") {
+        if (const auto reset = ParseMediaReset(message)) {
+            return ParsedMessage{std::move(id), *reset};
+        }
+    } else if (type == "video-position") {
+        if (const auto position = ParseVideoPosition(message)) {
+            return ParsedMessage{std::move(id), *position};
+        }
     }
     return std::nullopt;
 }
@@ -516,6 +671,10 @@ std::string EncodeConfig(const Config& config, std::string_view replyTo)
         {"skipWebContent", keys.skipWebContent},
     };
     message["menu"] = {{"downloadLink", config.menu.downloadLink}, {"downloadAll", config.menu.downloadAll}};
+    message["media"] = {{"enabled", config.media.enabled},
+                        {"types", config.media.types},
+                        {"minimumBytes", config.media.minimumBytes},
+                        {"siteExceptions", config.media.siteExceptions}};
     return message.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
 }
 
@@ -543,6 +702,14 @@ std::string EncodeOpenPage(std::string_view url)
     nlohmann::json message = Envelope("open-page", "open-page");
     message["url"] = url;
     return message.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
+}
+
+std::string EncodeMediaList(int tabId, bool hasMedia)
+{
+    nlohmann::json message = Envelope("media-list", "media-list");
+    message["tabId"] = tabId;
+    message["hasMedia"] = hasMedia;
+    return message.dump();
 }
 
 }  // namespace ldm::browser
