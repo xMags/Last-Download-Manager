@@ -12,7 +12,7 @@ import { FormPosts } from './form-posts.js';
 import { downloadVerdict, keySettings, sendsForcedLinkToLdm } from './key-rules.js';
 import { cleanKeys, LinkClicks } from './link-clicks.js';
 import { MediaDetector } from './media-detect.js';
-import { isDownloadAddress, menuSettings, parseMediaList } from './protocol.js';
+import { isDownloadAddress, makeCookies, menuSettings, parseCookiesRequest, parseMediaList } from './protocol.js';
 import { applyToolbar, toolbarAppearance } from './toolbar.js';
 import { VideoPositions } from './video-positions.js';
 
@@ -46,6 +46,15 @@ const connection = new LdmConnection(api, {
     const mediaList = parseMediaList(message);
     if (mediaList) {
       videoPositions.setHasMedia(mediaList.tabId, mediaList.hasMedia);
+      return;
+    }
+    // The Site Grabber asks for the cookies the browser sends to a project's start page. Only the
+    // normal store's: a private window's session stays out of a project LDM keeps.
+    const cookiesRequest = parseCookiesRequest(message);
+    if (cookiesRequest) {
+      api.cookies.getAll({ url: cookiesRequest.url })
+        .catch(() => [])
+        .then((cookies) => connection.post(makeCookies(cookiesRequest.requestId, cookies ?? [])));
       return;
     }
     // Refresh download address (checklist ENG-08): LDM asks to open the page a download came from.

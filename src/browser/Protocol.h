@@ -165,7 +165,14 @@ struct VideoPosition {
     double pixelRatio = 1;  // device pixels per CSS pixel: display scale times page zoom
 };
 
-using Message = std::variant<HostInfo, Hello, Capture, Links, LinkInfo, MediaFound, MediaReset, VideoPosition>;
+// The answer to a cookies request (EncodeCookiesRequest): the cookies the browser would send to
+// the address LDM asked about, for the Site Grabber (M4 design section 6.4).
+struct Cookies {
+    std::string requestId;  // the request's id, as LDM sent it
+    std::vector<model::Cookie> cookies;
+};
+
+using Message = std::variant<HostInfo, Hello, Capture, Links, LinkInfo, MediaFound, MediaReset, VideoPosition, Cookies>;
 
 struct ParsedMessage {
     std::string id;  // echoed in answers
@@ -227,5 +234,9 @@ struct Config {
 // Tells the extension whether LDM has something to offer for a tab, so it reports where that
 // tab's video is (VideoPosition) only while it does.
 [[nodiscard]] std::string EncodeMediaList(int tabId, bool hasMedia);
+
+// Asks the extension for the cookies its browser would send to `url` (http or https); answered
+// by a Cookies message with `requestId`.
+[[nodiscard]] std::string EncodeCookiesRequest(std::string_view requestId, std::string_view url);
 
 }  // namespace ldm::browser
