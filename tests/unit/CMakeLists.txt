@@ -23,6 +23,7 @@ add_executable(ldm_unit_tests
     media/UrlReferenceTests.cpp
     model/DownloadTests.cpp
     model/SettingsTests.cpp
+    platform/FfmpegCommandsTests.cpp
     platform/XmlLiteReaderTests.cpp
     storage/SqliteStoreTests.cpp
     ui/BatchAndHistoryTests.cpp

@@ -5,12 +5,19 @@
 #include "MediaFixtures.h"
 #include "RecordingListener.h"
 
+#include "core/MediaDownloads.h"
 #include "core/MediaPieces.h"
 #include "engine/Aes128Cbc.h"
 #include "engine/CurlEngine.h"
+#include "media/DashManifest.h"
 #include "media/HlsPlaylist.h"
+#include "platform/win/ChildProcess.h"
+#include "platform/win/FfmpegCommands.h"
+#include "platform/win/FfmpegMediaTools.h"
+#include "platform/win/XmlLiteReader.h"
 
 #include <gtest/gtest.h>
+#include <nlohmann/json.hpp>
 
 #include <chrono>
 #include <filesystem>
@@ -374,6 +381,217 @@ TEST_F(MediaEngineTest, FetchesSayWhetherTheyCameFromAPrivateNetwork)
     ASSERT_TRUE(refused);
     ASSERT_TRUE(refused->failure);
     EXPECT_EQ(refused->failure->reason, FailureReason::PrivateAddress);
+}
+
+
+// ---- joining (FfmpegMediaTools) ----
+
+struct Probed {
+    double seconds = 0;
+    int video = 0;
+    int audio = 0;
+    int subtitles = 0;
+};
+
+Probed Probe(const fs::path& file)
+{
+    ldm::platform::ChildProcessRequest request;
+    request.program = ldm::test::FfprobeExe();
+    request.arguments = ldm::platform::ProbeArguments(file);
+    const auto run = ldm::platform::RunChildProcess(request);
+    EXPECT_TRUE(run && run.Value().exitCode == 0) << (run ? run.Value().output : run.GetError().message);
+    Probed probed;
+    if (!run) {
+        return probed;
+    }
+    const auto json = nlohmann::json::parse(run.Value().output, nullptr, false);
+    if (json.is_discarded()) {
+        ADD_FAILURE() << run.Value().output;
+        return probed;
+    }
+    probed.seconds = std::stod(json.at("format").value("duration", std::string("0")));
+    for (const auto& stream : json.value("streams", nlohmann::json::array())) {
+        const std::string type = stream.value("codec_type", std::string());
+        probed.video += type == "video" ? 1 : 0;
+        probed.audio += type == "audio" ? 1 : 0;
+        probed.subtitles += type == "subtitle" ? 1 : 0;
+    }
+    return probed;
+}
+
+class MediaJoinTest : public MediaEngineTest {
+protected:
+    void SetUp() override
+    {
+        MediaEngineTest::SetUp();
+        tools_ = std::make_unique<ldm::platform::FfmpegMediaTools>(ldm::test::FfmpegExe().parent_path(), listener_);
+    }
+    void TearDown() override
+    {
+        tools_.reset();
+        MediaEngineTest::TearDown();
+    }
+
+    // The address the fixture server serves `local` at.
+    static std::string UrlOf(const fs::path& local)
+    {
+        return server_->Url("/media/" + fs::relative(local, *fixtureRoot_).generic_string());
+    }
+    static fs::path LocalOf(const std::string& url)
+    {
+        const std::string prefix = server_->Url("/media/");
+        EXPECT_TRUE(url.starts_with(prefix)) << url;
+        return *fixtureRoot_ / fs::path(url.substr(std::min(url.size(), prefix.size())));
+    }
+    static ldm::model::MediaTrack HlsTrack(const fs::path& local, ldm::model::TrackRole role)
+    {
+        ldm::model::MediaTrack track = Track(local);
+        track.role = role;
+        track.sourceUrl = UrlOf(local);
+        return track;
+    }
+
+    // Downloads every track of `download` through the engine, then joins them.
+    std::optional<ldm::core::MuxFinished> DownloadAndJoin(ldm::model::Download& download, std::int64_t epoch = 1)
+    {
+        download.id = DownloadId{1};
+        download.epoch = epoch;
+        download.mediaFromPrivateNetwork = true;
+        MediaRequest request = ldm::core::BuildMediaRequest(download, parts_);
+        request.userAgent = "LDM test";
+        request.maxConnections = 4;
+        engine_->StartMedia(request);
+        const auto finished = Finished(epoch);
+        if (!finished || finished->outcome != TransferOutcome::Completed) {
+            ADD_FAILURE() << "the download did not complete: "
+                          << (finished && finished->failure ? finished->failure->message : "no answer");
+            return std::nullopt;
+        }
+        tools_->Mux(ldm::core::BuildMuxRequest(download, parts_));
+        auto muxed = listener_.WaitFor<ldm::core::MuxFinished>(DownloadId{1}, epoch, 120s);
+        EXPECT_TRUE(muxed) << "the join did not answer";
+        if (muxed && muxed->failure) {
+            ADD_FAILURE() << muxed->failure->message;
+        }
+        return muxed;
+    }
+
+    std::unique_ptr<ldm::platform::FfmpegMediaTools> tools_;
+};
+
+TEST_F(MediaJoinTest, TransportStreamBecomesAnMp4WithItsLengthAndStreams)
+{
+    ldm::model::Download download;
+    download.kind = ldm::model::DownloadKind::Hls;
+    download.tracks = {HlsTrack(fixtures_->hlsTs, ldm::model::TrackRole::Video)};
+    const auto muxed = DownloadAndJoin(download);
+    ASSERT_TRUE(muxed && !muxed->failure);
+    EXPECT_EQ(muxed->extension, "mp4");
+    EXPECT_EQ(muxed->output, parts_ / L"output.mp4");
+    EXPECT_EQ(muxed->bytes, static_cast<std::int64_t>(fs::file_size(muxed->output)));
+    const Probed probed = Probe(muxed->output);
+    EXPECT_NEAR(probed.seconds, ldm::test::kFixtureSeconds, 0.3);
+    EXPECT_EQ(probed.video, 1);
+    EXPECT_EQ(probed.audio, 1);
+    EXPECT_NE(muxed->mediaInfo.find("320x240, 25 fps, MPEG-4; AAC, stereo, 48 kHz"), std::string::npos) << muxed->mediaInfo;
+}
+
+TEST_F(MediaJoinTest, FragmentedMp4ByteRangeAndEncryptedStreamsJoin)
+{
+    std::int64_t epoch = 0;
+    for (const fs::path* fixture : {&fixtures_->hlsFmp4, &fixtures_->hlsByteRange, &fixtures_->hlsAes}) {
+        SCOPED_TRACE(fixture->string());
+        std::error_code ignored;
+        fs::remove_all(parts_, ignored);  // each run its own epoch and its own pieces
+        ldm::model::Download download;
+        download.kind = ldm::model::DownloadKind::Hls;
+        download.tracks = {HlsTrack(*fixture, ldm::model::TrackRole::Video)};
+        const auto muxed = DownloadAndJoin(download, ++epoch);
+        ASSERT_TRUE(muxed && !muxed->failure);
+        const Probed probed = Probe(muxed->output);
+        EXPECT_NEAR(probed.seconds, ldm::test::kFixtureSeconds, 0.3);
+        EXPECT_EQ(probed.video, 1);
+        EXPECT_EQ(probed.audio, 1);
+    }
+}
+
+TEST_F(MediaJoinTest, SeparateVideoAndAudioTracksBecomeOneFile)
+{
+    const std::string text = ReadFile(fixtures_->hlsMaster);
+    const auto master = ldm::media::ParseHls(text, UrlOf(fixtures_->hlsMaster));
+    ASSERT_TRUE(master);
+    const auto& offer = std::get<ldm::media::MediaOffer>(master.Value());
+    const auto& video = std::get<ldm::media::PlaylistAddress>(offer.variants.at(0).source);
+    const auto& audio = std::get<ldm::media::PlaylistAddress>(*offer.audio.at(0).source);
+    ldm::model::Download download;
+    download.kind = ldm::model::DownloadKind::Hls;
+    download.tracks = {HlsTrack(LocalOf(video.url), ldm::model::TrackRole::Video),
+                       HlsTrack(LocalOf(audio.url), ldm::model::TrackRole::Audio)};
+    const auto muxed = DownloadAndJoin(download);
+    ASSERT_TRUE(muxed && !muxed->failure);
+    const Probed probed = Probe(muxed->output);
+    EXPECT_NEAR(probed.seconds, ldm::test::kFixtureSeconds, 0.3);
+    EXPECT_EQ(probed.video, 1);
+    EXPECT_EQ(probed.audio, 1);
+    EXPECT_EQ(probed.subtitles, 0) << "subtitles are downloads of their own";
+}
+
+TEST_F(MediaJoinTest, HlsSubtitlesBecomeAWebVttFile)
+{
+    const auto master = ldm::media::ParseHls(ReadFile(fixtures_->hlsMaster), UrlOf(fixtures_->hlsMaster));
+    ASSERT_TRUE(master);
+    const auto& offer = std::get<ldm::media::MediaOffer>(master.Value());
+    const auto& subtitles = std::get<ldm::media::PlaylistAddress>(*offer.subtitles.at(0).source);
+    ldm::model::Download download;
+    download.kind = ldm::model::DownloadKind::Hls;
+    download.tracks = {HlsTrack(LocalOf(subtitles.url), ldm::model::TrackRole::Subtitles)};
+    download.tracks[0].language = "en";
+    const auto muxed = DownloadAndJoin(download);
+    ASSERT_TRUE(muxed && !muxed->failure);
+    EXPECT_EQ(muxed->extension, "vtt");
+    const std::string vtt = ReadFile(muxed->output);
+    EXPECT_TRUE(vtt.starts_with("WEBVTT")) << vtt.substr(0, 40);
+    EXPECT_NE(vtt.find("First cue"), std::string::npos);
+    EXPECT_NE(vtt.find("Second cue"), std::string::npos);
+    EXPECT_EQ(muxed->mediaInfo, "WebVTT subtitles, en");
+}
+
+TEST_F(MediaJoinTest, DashVideoAndAudioBecomeOneFile)
+{
+    auto root = ldm::platform::ReadXml(ReadFile(fixtures_->dash));
+    ASSERT_TRUE(root);
+    auto offer = ldm::media::ParseMpd(root.Value(), UrlOf(fixtures_->dash), std::chrono::system_clock::now());
+    ASSERT_TRUE(offer) << offer.GetError().message;
+    ldm::model::Download download;
+    download.kind = ldm::model::DownloadKind::Dash;
+    ldm::model::MediaTrack video;
+    video.role = ldm::model::TrackRole::Video;
+    ldm::core::FillTrack(video, std::get<ldm::media::TrackSegments>(offer.Value().variants.at(0).source));
+    ldm::model::MediaTrack audio;
+    audio.role = ldm::model::TrackRole::Audio;
+    ldm::core::FillTrack(audio, std::get<ldm::media::TrackSegments>(*offer.Value().audio.at(0).source));
+    download.tracks = {video, audio};
+    const auto muxed = DownloadAndJoin(download);
+    ASSERT_TRUE(muxed && !muxed->failure);
+    const Probed probed = Probe(muxed->output);
+    EXPECT_NEAR(probed.seconds, ldm::test::kFixtureSeconds, 0.3);
+    EXPECT_EQ(probed.video, 1);
+    EXPECT_EQ(probed.audio, 1);
+}
+
+TEST_F(MediaJoinTest, ACancelledJoinAnswersStopped)
+{
+    ldm::core::MuxRequest request;
+    request.id = DownloadId{1};
+    request.epoch = 9;
+    request.folder = parts_;
+    request.preferredExtension = "mp4";
+    // Queued behind nothing, cancelled before or while it runs: either way it answers once.
+    tools_->Mux(request);
+    tools_->Cancel(DownloadId{1}, 9);
+    const auto answer = listener_.WaitFor<ldm::core::MuxFinished>(DownloadId{1}, 9, 30s);
+    ASSERT_TRUE(answer);
+    EXPECT_TRUE(answer->stopped || answer->failure) << "a request without tracks cannot succeed";
 }
 
 }  // namespace

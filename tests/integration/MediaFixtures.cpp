@@ -16,13 +16,15 @@ namespace {
 // The test picture and the silent audio every fixture starts from, encoded with FFmpeg's built-in
 // encoders. Filter sources need no input device, so the build can leave libavdevice out; and the
 // silent source produces AAC's sample format directly, as the build has no libswresample to
-// convert a tone's.
+// convert a tone's. The video repeats its header (the VOL) on every key frame, as real streams do
+// with theirs: without it, a transport stream segment does not say the picture's size, and
+// nothing can copy it into MP4.
 std::vector<std::wstring> Source()
 {
     return {L"-filter_complex",
             L"testsrc2=size=320x240:rate=25:duration=4[v];anullsrc=channel_layout=stereo:sample_rate=48000:duration=4[a]",
             L"-map", L"[v]", L"-map", L"[a]",
-            L"-c:v", L"mpeg4", L"-q:v", L"5", L"-g", L"25",
+            L"-c:v", L"mpeg4", L"-q:v", L"5", L"-g", L"25", L"-bsf:v", L"dump_extra=freq=keyframe",
             L"-c:a", L"aac", L"-b:a", L"64k"};
 }
 
