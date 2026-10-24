@@ -77,6 +77,29 @@ private:
     std::optional<BrowserMenus> result_;
 };
 
+// The media panel's settings (checklists B-07, B-09; the reference's panel settings).
+struct MediaPanelSettings {
+    bool enabled = true;
+    std::string types;           // space separated
+    int minimumKilobytes = 0;
+    std::string siteExceptions;  // space separated
+    bool drmNotice = true;
+};
+
+// Options > General > Media panel.
+class MediaPanelDialog final : public Dialog {
+public:
+    MediaPanelDialog(const Theme& theme, MediaPanelSettings settings);
+    [[nodiscard]] std::optional<MediaPanelSettings> Run(HWND owner);
+
+private:
+    bool OnInit() override;
+    bool OnCommand(int id, int code, HWND control) override;
+
+    MediaPanelSettings settings_;
+    std::optional<MediaPanelSettings> result_;
+};
+
 // Offered after two captured downloads from one site were cancelled (checklist B-06, the reference's dialog
 // 302): add the site or an address pattern to the capture exceptions.
 class ExceptionOfferDialog final : public Dialog {

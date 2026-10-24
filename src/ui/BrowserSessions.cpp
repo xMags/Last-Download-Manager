@@ -60,7 +60,7 @@ void BrowserSessions::OnEvent(BrowserEvent event, const model::Settings& setting
     }
     browser::ParsedMessage& parsed = *event.message;
     if (auto* host = std::get_if<browser::HostInfo>(&parsed.message)) {
-        sessions_[event.connection] = Session{std::move(*host), std::nullopt};
+        sessions_[event.connection] = Session{std::move(*host), std::nullopt, event.hostProcessId};
         return;
     }
     const auto session = sessions_.find(event.connection);
@@ -97,6 +97,23 @@ void BrowserSessions::OnEvent(BrowserEvent event, const model::Settings& setting
         if (session->second.hello && handlers_.onLinkInfo) {
             handlers_.onLinkInfo(event.connection, std::move(*info));
         }
+        return;
+    }
+    if (!session->second.hello) {
+        return;  // media reports start after the extension's hello
+    }
+    if (auto* media = std::get_if<browser::MediaFound>(&parsed.message)) {
+        if (handlers_.onMedia) {
+            handlers_.onMedia(event.connection, std::move(*media));
+        }
+    } else if (const auto* reset = std::get_if<browser::MediaReset>(&parsed.message)) {
+        if (handlers_.onMediaReset) {
+            handlers_.onMediaReset(event.connection, reset->tabId);
+        }
+    } else if (const auto* position = std::get_if<browser::VideoPosition>(&parsed.message)) {
+        if (handlers_.onVideoPosition) {
+            handlers_.onVideoPosition(event.connection, *position);
+        }
     }
 }
 
@@ -126,6 +143,13 @@ bool BrowserSessions::OpenPage(const std::string& url)
     }
     link_.Send(*target, browser::EncodeOpenPage(url));
     return true;
+}
+
+void BrowserSessions::SendMediaList(BrowserConnectionId connection, int tabId, bool hasMedia)
+{
+    if (sessions_.contains(connection)) {
+        link_.Send(connection, browser::EncodeMediaList(tabId, hasMedia));
+    }
 }
 
 void BrowserSessions::LinksDone(BrowserConnectionId connection, const std::string& requestId)

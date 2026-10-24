@@ -33,6 +33,7 @@ struct BrowserBridge::Slot {
     // and never signals the event, so waiting for it would hang the bridge.
     bool pending = false;
     ui::BrowserConnectionId connection = 0;
+    DWORD clientProcessId = 0;
     bool introduced = false;  // the host message arrived
     unsigned char header[4] = {};
     std::string body;
@@ -168,6 +169,7 @@ void BrowserBridge::Close(Slot& slot, bool notify)
     }
     ::DisconnectNamedPipe(slot.pipe.Get());
     slot.connection = 0;
+    slot.clientProcessId = 0;
     slot.introduced = false;
     slot.body.clear();
     slot.have = 0;
@@ -187,7 +189,7 @@ bool BrowserBridge::Deliver(Slot& slot)
         return false;
     }
     slot.introduced = true;
-    onEvent_(ui::BrowserEvent{slot.connection, std::move(*parsed)});
+    onEvent_(ui::BrowserEvent{slot.connection, std::move(*parsed), slot.clientProcessId});
     return true;
 }
 
@@ -201,6 +203,9 @@ bool BrowserBridge::Advance(Slot& slot)
             return false;
         }
         slot.connection = ++lastConnection_;
+        if (!::GetNamedPipeClientProcessId(slot.pipe.Get(), &slot.clientProcessId)) {
+            slot.clientProcessId = 0;
+        }
         slot.phase = Slot::Phase::Header;
         slot.have = 0;
         return BeginRead(slot);

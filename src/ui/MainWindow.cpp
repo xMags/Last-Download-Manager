@@ -4,6 +4,7 @@
 #include "resource.h"
 #include "ui/Dpi.h"
 #include "ui/Format.h"
+#include "ui/dialogs/MessageDialog.h"
 
 #include <commctrl.h>
 #include <shellapi.h>
@@ -88,6 +89,24 @@ MainWindow::MainWindow(const Services& services) : services_(services)
         handlers.onClosed = [this](BrowserConnectionId connection) {
             if (controller_) {
                 controller_->Adds().OnBrowserClosed(connection);
+            }
+            if (mediaPanel_) {
+                mediaPanel_->OnConnectionClosed(connection);
+            }
+        };
+        handlers.onMedia = [this](BrowserConnectionId connection, browser::MediaFound media) {
+            if (mediaPanel_) {
+                mediaPanel_->OnMedia(connection, std::move(media));
+            }
+        };
+        handlers.onMediaReset = [this](BrowserConnectionId connection, int tabId) {
+            if (mediaPanel_) {
+                mediaPanel_->OnMediaReset(connection, tabId);
+            }
+        };
+        handlers.onVideoPosition = [this](BrowserConnectionId connection, browser::VideoPosition position) {
+            if (mediaPanel_) {
+                mediaPanel_->OnVideoPosition(connection, position);
             }
         };
         browserSessions_ = std::make_unique<BrowserSessions>(*services_.browser, base::ToUtf8(LDM_VERSION_WIDE),
@@ -212,6 +231,9 @@ void MainWindow::OnCreate()
         return browserSessions_ && browserSessions_->OpenPage(url);
     };
     controller_ = std::make_unique<MainController>(std::move(context));
+    if (browserSessions_ && services_.browserWindows != nullptr && services_.readXml) {
+        CreateMediaPanel();
+    }
 
     list_.SetColumns(ParseColumns(settings.columnLayout));
     list_.SetSort(ParseSort(settings.listSortKey));
@@ -251,6 +273,30 @@ void MainWindow::ApplyTheme()
     ::DrawMenuBar(window_);
     ::RedrawWindow(window_, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_FRAME);
     Layout();
+    if (mediaPanel_) {
+        mediaPanel_->ThemeChanged();
+    }
+}
+
+void MainWindow::CreateMediaPanel()
+{
+    MediaPanelController::Hooks hooks;
+    hooks.fetch = [this](core::FetchManifestCommand command) { services_.commands->Post(std::move(command)); };
+    hooks.sendMediaList = [this](BrowserConnectionId connection, int tabId, bool hasMedia) {
+        browserSessions_->SendMediaList(connection, tabId, hasMedia);
+    };
+    hooks.hostProcessOf = [this](BrowserConnectionId connection) -> std::uint32_t {
+        const auto& sessions = browserSessions_->Sessions();
+        const auto session = sessions.find(connection);
+        return session == sessions.end() ? 0 : session->second.hostProcessId;
+    };
+    // Plain files from the panel go through the add flow like a browser capture.
+    hooks.downloadFile = [this](browser::Capture capture) { QueueExternalInput(std::move(capture)); };
+    hooks.tell = [this](const std::wstring& text) {
+        (void)ShowMessage(window_, *theme_, MessageRequest{text, MessageKind::Information});
+    };
+    hooks.readXml = services_.readXml;
+    mediaPanel_ = std::make_unique<MediaPanelController>(*services_.browserWindows, *theme_, std::move(hooks));
 }
 
 void MainWindow::ApplyViewSettings(const model::Settings& settings, bool initial)
@@ -512,6 +558,9 @@ void MainWindow::ApplySnapshot(std::shared_ptr<const core::Snapshot> snapshot)
     if (browserSessions_) {
         browserSessions_->OnSettingsChanged(snapshot_->settings);
     }
+    if (mediaPanel_) {
+        mediaPanel_->ApplySettings(snapshot_->settings);
+    }
     UpdateStatus();
 }
 
@@ -732,9 +781,18 @@ LRESULT MainWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
     case kSnapshotMessage:
         ApplySnapshot(services_.bridge->TakeSnapshot());
         return 0;
-    case kNotificationMessage:
-        controller_->OnNotifications(services_.bridge->TakeNotifications());
+    case kNotificationMessage: {
+        auto notifications = services_.bridge->TakeNotifications();
+        if (mediaPanel_) {
+            // Manifest fetches answer the media panel, not the download list.
+            std::erase_if(notifications, [this](const core::Notification& notification) {
+                const auto* fetched = std::get_if<core::FetchFinished>(&notification);
+                return fetched != nullptr && mediaPanel_->OnFetched(*fetched);
+            });
+        }
+        controller_->OnNotifications(std::move(notifications));
         return 0;
+    }
     case kTrayMessage:
         OnTrayEvent(LOWORD(lParam), POINT{GET_X_LPARAM(wParam), GET_Y_LPARAM(wParam)});
         return 0;

@@ -490,14 +490,16 @@ FONT 9, "Segoe UI", 400, 0, 0x1
 BEGIN
     AUTOCHECKBOX "&Launch Last Download Manager when Windows starts", IDC_OPT_STARTUP, 7, 7, 286, 10, WS_TABSTOP
     AUTOCHECKBOX "&Watch the clipboard and offer to download copied addresses", IDC_OPT_CLIPBOARD, 7, 23, 286, 10, WS_TABSTOP
-    GROUPBOX "Browser integration", -1, 7, 42, 286, 118
+    GROUPBOX "Browser integration", -1, 7, 42, 286, 99
     LTEXT "Browsers connected to Last Download Manager now:", -1, 14, 55, 272, 8
-    CONTROL "", IDC_OPT_BROWSERS, "SysListView32", LVS_REPORT | LVS_NOSORTHEADER | LVS_SINGLESEL | WS_BORDER | WS_TABSTOP, 14, 66, 272, 56
-    LTEXT "", IDC_OPT_BROWSERS_HINT, 14, 127, 272, 27
-    PUSHBUTTON "&Keys...", IDC_OPT_KEYS, 7, 167, 60, 14, WS_TABSTOP
-    LTEXT "Keys that keep a clicked link in the browser or give it to LDM", -1, 72, 170, 221, 8
-    PUSHBUTTON "Context &menu...", IDC_OPT_MENU, 7, 184, 60, 14, WS_TABSTOP
-    LTEXT "Items LDM adds to the browser's right-click menu", -1, 72, 187, 221, 8
+    CONTROL "", IDC_OPT_BROWSERS, "SysListView32", LVS_REPORT | LVS_NOSORTHEADER | LVS_SINGLESEL | WS_BORDER | WS_TABSTOP, 14, 66, 272, 40
+    LTEXT "", IDC_OPT_BROWSERS_HINT, 14, 110, 272, 27
+    PUSHBUTTON "&Keys...", IDC_OPT_KEYS, 7, 148, 60, 14, WS_TABSTOP
+    LTEXT "Keys that keep a clicked link in the browser or give it to LDM", -1, 72, 151, 221, 8
+    PUSHBUTTON "Context &menu...", IDC_OPT_MENU, 7, 165, 60, 14, WS_TABSTOP
+    LTEXT "Items LDM adds to the browser's right-click menu", -1, 72, 168, 221, 8
+    PUSHBUTTON "Media &panel...", IDC_OPT_MEDIA, 7, 182, 60, 14, WS_TABSTOP
+    LTEXT "The download button LDM shows over videos in the browser", -1, 72, 185, 221, 8
 END
 
 IDD_OPTIONS_FILETYPES DIALOGEX 0, 0, 300, 200
@@ -597,6 +599,27 @@ BEGIN
     AUTOCHECKBOX "Download all links with LDM", IDC_MENU_FIREFOX_ALL, 14, 96, 232, 10, WS_TABSTOP
     DEFPUSHBUTTON "OK", IDOK, 147, 127, 50, 14
     PUSHBUTTON "Cancel", IDCANCEL, 203, 127, 50, 14
+END
+
+IDD_MEDIA_PANEL DIALOGEX 0, 0, 290, 230
+STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Media panel"
+FONT 9, "Segoe UI", 400, 0, 0x1
+BEGIN
+    AUTOCHECKBOX "&Show a download button over videos in the browser", IDC_MEDIA_ENABLED, 7, 7, 276, 10, WS_TABSTOP
+    LTEXT "Offer &these media types:", -1, 7, 24, 276, 8
+    EDITTEXT IDC_MEDIA_TYPES, 7, 35, 276, 30, ES_MULTILINE | ES_AUTOVSCROLL | WS_VSCROLL | WS_TABSTOP
+    PUSHBUTTON "&Default", IDC_MEDIA_TYPES_DEFAULT, 233, 68, 50, 14, WS_TABSTOP
+    LTEXT "HLS and DASH streams are offered as long as any type is listed; with none, the button never shows.", -1, 7, 70, 222, 16
+    LTEXT "Don't offer files smaller than (&KB):", -1, 7, 93, 150, 8
+    EDITTEXT IDC_MEDIA_MINIMUM, 160, 91, 60, 12, ES_NUMBER | WS_TABSTOP
+    LTEXT "Don't show the button on these &sites:", -1, 7, 111, 276, 8
+    EDITTEXT IDC_MEDIA_SITES, 7, 122, 276, 30, ES_MULTILINE | ES_AUTOVSCROLL | WS_VSCROLL | WS_TABSTOP
+    LTEXT "(separate names by spaces; * matches any text, so *.example.com covers its subdomains)", -1, 7, 155, 276, 16
+    AUTOCHECKBOX "Say so when a video is &protected (DRM) and cannot be downloaded", IDC_MEDIA_DRM, 7, 179, 276, 10, WS_TABSTOP
+    CONTROL "", -1, "Static", SS_ETCHEDHORZ, 7, 200, 276, 1
+    DEFPUSHBUTTON "OK", IDOK, 177, 208, 50, 14
+    PUSHBUTTON "Cancel", IDCANCEL, 233, 208, 50, 14
 END
 
 IDD_ALL_LINKS DIALOGEX 0, 0, 532, 318

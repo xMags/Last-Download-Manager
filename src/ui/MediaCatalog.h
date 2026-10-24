@@ -36,6 +36,9 @@ struct MediaItem {
     std::string finalUrl;  // of the manifest, after redirects
     std::optional<std::string> mimeType;
     std::optional<std::int64_t> fileSize;
+    // What the browser would send to `url`; the manifest and the media playlist for the length
+    // are fetched with them.
+    std::vector<model::Cookie> cookies;
     State state = State::Fetching;
     std::optional<media::MediaOffer> offer;  // streams, once ready
     std::optional<double> seconds;           // the stream's length, when known
@@ -51,7 +54,6 @@ struct TabMedia {
     std::string pageTitle;
     bool incognito = false;
     std::string userAgent;
-    std::vector<model::Cookie> cookies;  // those of the last report: each item's own
     std::vector<MediaItem> items;
 };
 

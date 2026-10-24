@@ -88,6 +88,7 @@ private:
     std::vector<std::wstring> addressExceptions_;  // edited in their own dialog
     model::CaptureKeys captureKeys_;               // edited in their own dialog
     BrowserMenus browserMenus_;                    // likewise
+    MediaPanelSettings mediaPanel_;                // likewise
     HHOOK pageKeyHook_ = nullptr;
     core::SecretProtector& secrets_;
     SystemActions& system_;

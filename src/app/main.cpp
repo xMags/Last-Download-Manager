@@ -5,6 +5,8 @@
 #include "core/LaunchRequest.h"
 #include "engine/CurlEngine.h"
 #include "platform/win/BrowserBridge.h"
+#include "platform/win/WinBrowserWindows.h"
+#include "platform/win/XmlLiteReader.h"
 #include "platform/win/BrowserHostRegistration.h"
 #include "platform/win/InstanceChannel.h"
 #include "platform/win/SystemPorts.h"
@@ -207,11 +209,13 @@ int WINAPI wWinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int sho
     ldm::ui::MainWindow* browserTarget = nullptr;
     ldm::platform::BrowserBridge browserBridge(
         [&browserTarget](ldm::ui::BrowserEvent event) { browserTarget->PostBrowserEvent(std::move(event)); });
+    ldm::platform::WinBrowserWindows browserWindows;
 
     int exitCode = 0;
     {
         ldm::ui::MainWindow window(
             ldm::ui::MainWindow::Services{&core, &bridge, &shell, &system, &secrets, &startup, &browserBridge,
+                                          &browserWindows, &ldm::platform::ReadXml,
                                           ldm::platform::IsProcessElevated()});
         auto snapshot = bridge.TakeSnapshot();
         // --tray (Launch on startup) starts hidden, unless the tray icon is hidden too.

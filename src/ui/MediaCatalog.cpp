@@ -68,9 +68,8 @@ void MediaCatalog::OnMediaFound(BrowserConnectionId connection, browser::MediaFo
     item.finalUrl = media.url;
     item.mimeType = media.mimeType;
     item.fileSize = media.fileSize;
+    item.cookies = std::move(media.cookies);
     item.state = media.kind == browser::MediaKind::File ? MediaItem::State::Ready : MediaItem::State::Fetching;
-    // Cookies belong to the address they were read for; manifests are fetched with them.
-    tab.cookies = std::move(media.cookies);
     tab.items.push_back(std::move(item));
     const MediaItem& added = tab.items.back();
     if (added.kind != browser::MediaKind::File) {
@@ -173,7 +172,7 @@ void MediaCatalog::StartFetch(const TabMedia& tab, const MediaItem& item, const 
     command.url = url;
     command.referer = tab.pageUrl;
     command.userAgent = tab.userAgent;
-    command.cookies = tab.cookies;
+    command.cookies = item.cookies;
     command.maxBytes = media::kMaxManifestBytes;
     hooks_.fetch(std::move(command));
 }

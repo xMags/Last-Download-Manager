@@ -347,6 +347,8 @@ void OptionsDialog::Load()
 
     captureKeys_ = s.captureKeys;
     browserMenus_ = BrowserMenus{s.chromiumMenu, s.firefoxMenu};
+    mediaPanel_ = MediaPanelSettings{s.mediaPanelEnabled, s.mediaTypes, s.mediaMinimumKilobytes, s.mediaSiteExceptions,
+                                     s.mediaDrmNotice};
     Put(IDC_OPT_TYPES, base::ToUtf16(s.capturedExtensions));
     Put(IDC_OPT_SITES, base::ToUtf16(s.captureSiteExceptions));
     Check(IDC_OPT_OFFER_EXCEPTIONS, s.offerCaptureExceptions);
@@ -576,6 +578,13 @@ void OptionsDialog::OnPageCommand(int id, int code)
         }
         break;
     }
+    case IDC_OPT_MEDIA: {
+        MediaPanelDialog dialog(CurrentTheme(), mediaPanel_);
+        if (auto edited = dialog.Run(Handle())) {
+            mediaPanel_ = std::move(*edited);
+        }
+        break;
+    }
     case IDC_OPT_TYPES_DEFAULT:
         Put(IDC_OPT_TYPES, base::ToUtf16(model::DefaultCapturedExtensions()));
         break;
@@ -751,6 +760,11 @@ bool OptionsDialog::Store()
     s.captureKeys = captureKeys_;
     s.chromiumMenu = browserMenus_.chromium;
     s.firefoxMenu = browserMenus_.firefox;
+    s.mediaPanelEnabled = mediaPanel_.enabled;
+    s.mediaTypes = mediaPanel_.types;
+    s.mediaMinimumKilobytes = mediaPanel_.minimumKilobytes;
+    s.mediaSiteExceptions = mediaPanel_.siteExceptions;
+    s.mediaDrmNotice = mediaPanel_.drmNotice;
 
     StoreCategory(currentCategory_);
     for (const model::Category& category : categories_) {
@@ -878,6 +892,11 @@ void OptionsDialog::ApplyEditedFields(const model::Settings& edited, model::Sett
     current.captureKeys = edited.captureKeys;
     current.chromiumMenu = edited.chromiumMenu;
     current.firefoxMenu = edited.firefoxMenu;
+    current.mediaPanelEnabled = edited.mediaPanelEnabled;
+    current.mediaTypes = edited.mediaTypes;
+    current.mediaMinimumKilobytes = edited.mediaMinimumKilobytes;
+    current.mediaSiteExceptions = edited.mediaSiteExceptions;
+    current.mediaDrmNotice = edited.mediaDrmNotice;
     current.temporaryDirectory = edited.temporaryDirectory;
     current.setFileDateFromServer = edited.setFileDateFromServer;
     current.showStartDialog = edited.showStartDialog;
