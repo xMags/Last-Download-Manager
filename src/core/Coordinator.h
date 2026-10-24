@@ -159,6 +159,8 @@ private:
     void Delete(const std::vector<model::DownloadId>& ids, bool deleteFiles);
     void DeleteCompleted();
     void Redownload(model::DownloadId id);
+    // Shows Site Grabber downloads in the main list.
+    void SetListed(const std::vector<model::DownloadId>& ids);
     void SetDownloadSpeedLimit(model::DownloadId id, std::optional<std::int64_t> bytesPerSecond);
     void SetSpeedLimiter(bool enabled, std::optional<int> kilobytesPerSecond);
     void Update(const UpdateDownloadCommand& command);

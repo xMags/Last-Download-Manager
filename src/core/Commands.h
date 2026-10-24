@@ -93,6 +93,10 @@ struct AddDownloadCommand {
     std::optional<MediaChoice> media;
     // The download queue to join. AddMode::Later without one joins the main queue.
     std::optional<model::QueueId> queue;
+    // A Site Grabber download (M4 design section 6.3): the project it belongs to, and whether it
+    // shows in the main list; one that does not joins it with SetListedCommand.
+    std::optional<model::GrabberProjectId> projectId;
+    bool listed = true;
 };
 
 // The user pressed Start Download or Download Later in the info dialog of a speculative add.
@@ -241,6 +245,10 @@ struct ReorderQueueCommand {
     model::QueueId queue;
     std::vector<model::DownloadId> order;
 };
+// Shows Site Grabber downloads in the main list (Add to main list).
+struct SetListedCommand {
+    std::vector<model::DownloadId> ids;
+};
 struct StartQueueCommand {
     model::QueueId id;
 };
@@ -270,7 +278,7 @@ using Command = std::variant<AddDownloadCommand, ConfirmDownloadCommand, ResumeC
                              ModifySettingsCommand, ReplaceSiteLoginsCommand, ReplaceServerLimitsCommand,
                              QuotaDecisionCommand, WaitForAddressCommand, ReplaceAddressCommand, FetchManifestCommand,
                              SaveQueueCommand, DeleteQueueCommand, SetQueueCommand, ReorderQueueCommand,
-                             StartQueueCommand, StopQueueCommand, ClockChangedCommand>;
+                             StartQueueCommand, StopQueueCommand, ClockChangedCommand, SetListedCommand>;
 
 // Where front ends send commands. Thread-safe; returns at once.
 class CommandSink {

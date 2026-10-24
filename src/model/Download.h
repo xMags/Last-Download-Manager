@@ -105,6 +105,11 @@ struct Download {
     std::int64_t queuePosition = 0;
     int queueFailures = 0;
 
+    // A Site Grabber download (M4 design section 6.3): its project, and whether the main list
+    // shows it. A project's downloads are hidden until the user adds them to the main list.
+    std::optional<GrabberProjectId> projectId;
+    bool listed = true;
+
     // A file's byte ranges. Empty for a stream, whose progress is in `tracks`.
     std::vector<Segment> segments;
 

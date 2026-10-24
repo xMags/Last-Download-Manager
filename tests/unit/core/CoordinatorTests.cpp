@@ -96,6 +96,11 @@ public:
         removedFolders.push_back(path);
         return {};
     }
+    ldm::base::Status WriteFile(const fs::path& path, std::string_view bytes, bool) override
+    {
+        Put(path, static_cast<std::int64_t>(bytes.size()));
+        return {};
+    }
 
     void Put(const fs::path& path, std::int64_t size) { files[ldm::base::PathComparisonKey(path)] = size; }
 

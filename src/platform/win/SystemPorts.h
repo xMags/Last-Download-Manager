@@ -20,6 +20,7 @@ public:
     base::Status Recycle(const std::filesystem::path& path) override;
     base::Status CreateDirectories(const std::filesystem::path& path) override;
     base::Status RemoveFolder(const std::filesystem::path& path) override;
+    base::Status WriteFile(const std::filesystem::path& path, std::string_view bytes, bool replace) override;
 };
 
 // Random version 4 UUIDs from the system's cryptographic generator.

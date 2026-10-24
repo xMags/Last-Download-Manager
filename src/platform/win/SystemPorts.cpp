@@ -9,6 +9,7 @@
 #include <shobjidl.h>
 #include <wrl/client.h>
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstdio>
@@ -135,6 +136,43 @@ base::Status WinFileSystem::RemoveFolder(const std::filesystem::path& path)
     std::filesystem::remove_all(std::filesystem::path(base::ToExtendedLengthPath(path)), error);
     if (error) {
         return base::MakeError(base::ErrorCode::Io, error.message());
+    }
+    return {};
+}
+
+base::Status WinFileSystem::WriteFile(const std::filesystem::path& path, std::string_view bytes, bool replace)
+{
+    // Written beside the target and moved over it, so a reader never sees half a file.
+    std::filesystem::path temporary = path;
+    temporary += L".ldmtmp";
+    const std::wstring temporaryPath = base::ToExtendedLengthPath(temporary);
+    const std::wstring targetPath = base::ToExtendedLengthPath(path);
+    HANDLE file = ::CreateFileW(temporaryPath.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
+                                FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE) {
+        return base::MakeError(base::ErrorCode::Io, Win32ErrorText(::GetLastError()));
+    }
+    std::size_t written = 0;
+    bool ok = true;
+    while (ok && written < bytes.size()) {
+        const DWORD chunk = static_cast<DWORD>(std::min<std::size_t>(bytes.size() - written, 1u << 20));
+        DWORD done = 0;
+        ok = ::WriteFile(file, bytes.data() + written, chunk, &done, nullptr) != FALSE && done == chunk;
+        written += done;
+    }
+    const DWORD writeError = ok ? ERROR_SUCCESS : ::GetLastError();
+    ::CloseHandle(file);
+    if (!ok) {
+        ::DeleteFileW(temporaryPath.c_str());
+        return base::MakeError(writeError == ERROR_DISK_FULL ? base::ErrorCode::DiskFull : base::ErrorCode::Io,
+                               Win32ErrorText(writeError));
+    }
+    if (!::MoveFileExW(temporaryPath.c_str(), targetPath.c_str(), replace ? MOVEFILE_REPLACE_EXISTING : 0)) {
+        const DWORD error = ::GetLastError();
+        ::DeleteFileW(temporaryPath.c_str());
+        return base::MakeError(error == ERROR_ALREADY_EXISTS || error == ERROR_FILE_EXISTS ? base::ErrorCode::AlreadyExists
+                                                                                          : base::ErrorCode::Io,
+                               Win32ErrorText(error));
     }
     return {};
 }

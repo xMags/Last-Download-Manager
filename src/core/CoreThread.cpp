@@ -1,5 +1,6 @@
 #include "core/CoreThread.h"
 
+#include <algorithm>
 #include <future>
 #include <optional>
 #include <utility>
@@ -12,7 +13,7 @@ CoreThread::~CoreThread()
     Shutdown(std::chrono::milliseconds(0));
 }
 
-base::Status CoreThread::Start(Coordinator& coordinator)
+base::Status CoreThread::Start(Coordinator& coordinator, GrabberComponent* grabber)
 {
     std::promise<base::Status> initialized;
     std::future<base::Status> result = initialized.get_future();
@@ -20,12 +21,15 @@ base::Status CoreThread::Start(Coordinator& coordinator)
         std::lock_guard lock(mutex_);
         accepting_ = true;
     }
-    thread_ = std::thread([this, &coordinator, &initialized] {
+    thread_ = std::thread([this, &coordinator, grabber, &initialized] {
         base::Status status = coordinator.Initialize();
         const bool ok = status.Ok();
+        if (ok && grabber != nullptr) {
+            grabber->Initialize();
+        }
         initialized.set_value(std::move(status));  // `initialized` is not touched after this line
         if (ok) {
-            Run(coordinator);
+            Run(coordinator, grabber);
         }
     });
     base::Status status = result.get();
@@ -39,6 +43,18 @@ base::Status CoreThread::Start(Coordinator& coordinator)
 }
 
 void CoreThread::Post(Command command)
+{
+    {
+        std::lock_guard lock(mutex_);
+        if (!accepting_ || shutdownRequested_) {
+            return;
+        }
+        inbox_.emplace_back(std::move(command));
+    }
+    wake_.notify_one();
+}
+
+void CoreThread::Post(GrabberCommand command)
 {
     {
         std::lock_guard lock(mutex_);
@@ -81,16 +97,33 @@ void CoreThread::Shutdown(std::chrono::milliseconds timeout)
     inbox_.clear();
 }
 
-void CoreThread::Run(Coordinator& coordinator)
+namespace {
+
+// Fetch answers and proxy lookups that belong to the Grabber's explorer.
+bool IsGrabberEvent(const EngineEvent& event)
+{
+    if (const auto* fetched = std::get_if<FetchFinished>(&event.payload)) {
+        return IsGrabberFetch(fetched->fetchId);
+    }
+    return std::holds_alternative<ProxyResolved>(event.payload) && IsGrabberFetch(event.id.value);
+}
+
+}  // namespace
+
+void CoreThread::Run(Coordinator& coordinator, GrabberComponent* grabber)
 {
     using Clock = std::chrono::steady_clock;
     std::optional<Clock::time_point> shutdownDeadline;
+    bool grabberShutDown = false;
     std::deque<Input> batch;
     while (true) {
         bool shutdownRequested = false;
         {
             std::unique_lock lock(mutex_);
             auto deadline = coordinator.NextDeadline();
+            if (grabber != nullptr && !shutdownDeadline) {
+                deadline = std::min(deadline, grabber->NextDeadline());
+            }
             if (shutdownDeadline) {
                 deadline = std::min(deadline, *shutdownDeadline);
             }
@@ -109,11 +142,26 @@ void CoreThread::Run(Coordinator& coordinator)
         for (Input& input : batch) {
             if (auto* command = std::get_if<Command>(&input)) {
                 coordinator.Handle(std::move(*command));
+            } else if (auto* grabberCommand = std::get_if<GrabberCommand>(&input)) {
+                if (grabber != nullptr && !shutdownRequested) {
+                    grabber->Handle(std::move(*grabberCommand));
+                }
             } else {
-                coordinator.OnEngineEvent(std::move(std::get<EngineEvent>(input)));
+                auto& event = std::get<EngineEvent>(input);
+                if (IsGrabberEvent(event)) {
+                    if (grabber != nullptr) {
+                        grabber->OnEngineEvent(std::move(event));
+                    }
+                } else {
+                    coordinator.OnEngineEvent(std::move(event));
+                }
             }
         }
         batch.clear();
+        if (shutdownRequested && grabber != nullptr && !grabberShutDown) {
+            grabber->Shutdown();
+            grabberShutDown = true;
+        }
         if (shutdownRequested) {
             // Idempotent: stops whatever is running, including runs started by commands that were
             // queued before the shutdown request. Engine acknowledgements keep arriving above.
@@ -126,6 +174,9 @@ void CoreThread::Run(Coordinator& coordinator)
             }
         }
         coordinator.Tick();
+        if (grabber != nullptr && !grabberShutDown) {
+            grabber->Tick();
+        }
     }
 }
 

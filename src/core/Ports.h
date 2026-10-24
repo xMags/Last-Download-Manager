@@ -42,6 +42,11 @@ public:
     // Deletes a folder with everything in it: a stream's parts folder. A folder that does not
     // exist counts as deleted.
     [[nodiscard]] virtual base::Status RemoveFolder(const std::filesystem::path& path) = 0;
+    // Writes a small file whole: a web page the Site Grabber saves (M4 design decision 11). An
+    // existing file is replaced only with `replace`; otherwise the call fails with AlreadyExists
+    // and the file stays as it was.
+    [[nodiscard]] virtual base::Status WriteFile(const std::filesystem::path& path, std::string_view bytes,
+                                                 bool replace) = 0;
 };
 
 // Protects passwords at rest (DPAPI for the current user in production).
