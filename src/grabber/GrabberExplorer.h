@@ -48,6 +48,8 @@ struct ExplorerConfig {
     std::size_t maxItems = 200'000;
     std::size_t maxLinksPerPage = 5'000;
     int maxFileAttempts = 2;  // the reference's two attempts per file
+    // Pages to save are kept until exploring ends, up to this many bytes per project.
+    std::size_t maxPendingPageBytes = 256 * 1024 * 1024;
     std::chrono::milliseconds snapshotInterval{500};
     std::chrono::milliseconds saveInterval{2000};
 };
@@ -81,6 +83,14 @@ public:
     static constexpr std::uint64_t kTokenBase = std::uint64_t{1} << 62;
 
 private:
+    // A page read for saving, written when exploring ends.
+    struct PendingPage {
+        std::int64_t itemId = 0;
+        std::string body;
+        std::string base;  // what its relative links resolve against
+        std::vector<HtmlLink> links;
+    };
+
     struct Item {
         model::GrabberItem data;
         std::shared_ptr<const model::GrabberItem> view;  // rebuilt when `viewDirty`
@@ -113,6 +123,8 @@ private:
         int fetching = 0;
         int pagesExplored = 0;
         bool limitReached = false;
+        std::vector<PendingPage> pendingPages;
+        std::size_t pendingBytes = 0;
         std::vector<std::string> cookieLines;  // this run's browser cookies, in memory only
         std::vector<model::Cookie> cookies;
 
@@ -148,8 +160,8 @@ private:
     void OnPageRead(Project& project, Item& item, const core::FetchFinished& finished);
     void AddLink(Project& project, const Item& parent, const HtmlLink& link, const std::string& base);
     void ClassifyFile(Project& project, Item& item, std::optional<std::int64_t> size);
-    void SavePage(Project& project, const Item& page, const core::FetchFinished& finished, const PageLinks& links,
-                  const std::string& base);
+    void WritePage(Project& project, const PendingPage& page);
+    void WritePendingPages(Project& project);
     void FinishExploreIfDone(Project& project);
 
     // Downloading.
