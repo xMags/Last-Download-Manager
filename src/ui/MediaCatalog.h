@@ -41,6 +41,8 @@ struct MediaItem {
     std::vector<model::Cookie> cookies;
     State state = State::Fetching;
     std::optional<media::MediaOffer> offer;  // streams, once ready
+    // The manifest came from a loopback or private address, so its pieces may be on one too.
+    bool fromPrivateNetwork = false;
     std::optional<double> seconds;           // the stream's length, when known
     media::QualityList qualities;            // what the panel lists for a stream
     std::string failure;                     // why it failed, for the log

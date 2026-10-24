@@ -337,6 +337,18 @@ void MainController::OnBrowserCapture(browser::Capture capture)
     adds_.AddAddress(add);
 }
 
+void MainController::OnStreamCapture(StreamCapture capture)
+{
+    ExternalAdd add;
+    add.url = std::move(capture.manifestUrl);
+    add.fileName = std::move(capture.fileName);
+    // Picked by the user: cancelling it says nothing about the capture rules.
+    add.browser = BrowserRequest{std::move(capture.pageUrl), std::move(capture.userAgent), std::move(capture.cookies),
+                                 std::nullopt, std::nullopt, true};
+    add.media = std::move(capture.media);
+    adds_.AddAddress(add);
+}
+
 void MainController::WarnElevated()
 {
     (void)ShowMessage(context_.owner, *context_.theme,

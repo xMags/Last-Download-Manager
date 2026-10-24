@@ -127,7 +127,13 @@ void DownloadInfoDialog::Update(const core::DownloadView& view)
     settingText_ = false;
 
     std::wstring size = L"Size: ";
-    size += d.totalSize ? FormatSize(*d.totalSize) : (view.receivedBytes > 0 ? L"unknown" : L"checking...");
+    if (d.totalSize) {
+        size += FormatSize(*d.totalSize);
+    } else if (view.stream && view.stream->estimatedBytes) {
+        size += L"about " + FormatSize(*view.stream->estimatedBytes);
+    } else {
+        size += view.receivedBytes > 0 ? L"unknown" : L"checking...";
+    }
     if (d.status == model::DownloadStatus::Failed && d.lastResult) {
         size = base::ToUtf16(*d.lastResult);
     }

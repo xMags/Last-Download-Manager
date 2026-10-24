@@ -1,5 +1,6 @@
 #include "ui/MediaPanelController.h"
 
+#include "base/Utf.h"
 #include "core/FileNames.h"
 #include "core/Url.h"
 #include "ui/Handles.h"
@@ -238,21 +239,32 @@ void MediaPanelController::Run(const PanelAction& action, const TabKey& key)
         return;
     case PanelAction::Kind::DownloadStream:
     case PanelAction::Kind::DownloadSubtitles:
-        if (hooks_.tell) {
-            hooks_.tell(L"LDM cannot download HLS and DASH streams yet: that comes with the next update. "
-                        L"Plain video files already download from this panel.");
-        }
-        return;
     case PanelAction::Kind::DownloadFile:
         break;
     }
     const TabMedia* tab = catalog_.Find(key.first, key.second);
-    if (tab == nullptr || !hooks_.downloadFile) {
+    if (tab == nullptr) {
         return;
     }
     const auto item = std::find_if(tab->items.begin(), tab->items.end(),
                                    [&action](const MediaItem& candidate) { return candidate.key == action.itemKey; });
     if (item == tab->items.end()) {
+        return;
+    }
+    if (action.kind != PanelAction::Kind::DownloadFile) {
+        auto capture = BuildStreamCapture(*tab, *item, action);
+        if (!capture) {
+            if (hooks_.tell) {
+                hooks_.tell(base::ToUtf16(capture.GetError().message));
+            }
+            return;
+        }
+        if (hooks_.downloadStream) {
+            hooks_.downloadStream(std::move(capture).Value());
+        }
+        return;
+    }
+    if (!hooks_.downloadFile) {
         return;
     }
     browser::Capture capture;

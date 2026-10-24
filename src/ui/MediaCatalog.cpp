@@ -185,6 +185,7 @@ void MediaCatalog::ReadManifest(TabMedia& tab, MediaItem& item, const core::Fetc
         return;
     }
     item.finalUrl = fetched.finalUrl.empty() ? item.url : fetched.finalUrl;
+    item.fromPrivateNetwork = fetched.fromPrivateNetwork;
     if (item.kind == browser::MediaKind::Dash) {
         auto root = hooks_.readXml ? hooks_.readXml(fetched.body)
                                    : base::Result<media::XmlElement>(base::MakeError(base::ErrorCode::Unsupported,

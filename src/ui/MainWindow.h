@@ -17,6 +17,7 @@
 #include "ui/StatusBar.h"
 #include "ui/SystemActions.h"
 #include "ui/Theme.h"
+#include "ui/StreamChoice.h"
 #include "ui/Toolbar.h"
 #include "ui/TrayIcon.h"
 #include "ui/UiBridge.h"
@@ -115,7 +116,7 @@ private:
     // The warning that browsers cannot reach an elevated LDM, shown once the window is up.
     struct ElevationNotice {};
     using ExternalInput = std::variant<core::LaunchRequest, std::vector<std::string>, browser::Capture,
-                                       BrowserSessions::LinksRequest, ElevationNotice>;
+                                       BrowserSessions::LinksRequest, ElevationNotice, StreamCapture>;
     void QueueExternalInput(ExternalInput input);
 
     Services services_;

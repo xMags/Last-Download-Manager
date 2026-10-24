@@ -35,6 +35,7 @@ add_executable(ldm_unit_tests
     ui/MediaPanelMenuTests.cpp
     ui/PageLinksTests.cpp
     ui/PanelPlacementTests.cpp
+    ui/StreamChoiceTests.cpp
     # The app's own manifest: the UI code under test needs version 6 of the common controls
     # (SetWindowSubclass and LoadIconMetric exist only there), as ldm.exe gets it.
     ${PROJECT_SOURCE_DIR}/resources/ldm.manifest)

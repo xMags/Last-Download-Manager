@@ -45,6 +45,9 @@ std::wstring FormatSizeColumn(const core::DownloadView& view)
     if (view.download.totalSize) {
         return FormatSize(*view.download.totalSize);
     }
+    if (view.stream && view.stream->estimatedBytes) {
+        return L"~" + FormatSize(*view.stream->estimatedBytes);  // a stream's size is known once it is joined
+    }
     if (view.receivedBytes > 0) {
         return FormatSize(view.receivedBytes);
     }
@@ -83,6 +86,16 @@ std::wstring FormatTimeLeft(std::optional<std::int64_t> seconds)
 
 std::optional<double> ProgressFraction(const core::DownloadView& view)
 {
+    if (view.stream) {
+        // By the pieces on disk, as the size is not known before the end.
+        if (view.download.status == model::DownloadStatus::Completed) {
+            return 1.0;
+        }
+        if (view.stream->piecesTotal == 0) {
+            return std::nullopt;
+        }
+        return std::clamp(view.stream->fraction, 0.0, 1.0);
+    }
     const auto& total = view.download.totalSize;
     if (!total) {
         return std::nullopt;
