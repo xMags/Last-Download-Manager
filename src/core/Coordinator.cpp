@@ -443,7 +443,9 @@ void Coordinator::Add(const AddDownloadCommand& command)
     const auto duplicate = std::find_if(entries_.begin(), entries_.end(), [&](const auto& item) {
         const model::Download& existing = item.second.download;
         const bool same = command.media ? SameStream(existing, command) : !existing.IsStream();
-        return existing.url == address && same && !item.second.deleteWhenStopped;
+        // A Grabber project's hidden download is no duplicate of one the user adds.
+        const bool visibleToCaller = existing.InMainList() || !command.listed;
+        return existing.url == address && same && visibleToCaller && !item.second.deleteWhenStopped;
     });
     if (duplicate != entries_.end()) {
         Entry& existing = duplicate->second;
@@ -790,7 +792,8 @@ void Coordinator::DeleteCompleted()
 {
     std::vector<model::DownloadId> completed;
     for (const auto& [id, entry] : entries_) {
-        if (entry.download.status == DownloadStatus::Completed) {
+        // A Grabber project's hidden downloads are its own to remove.
+        if (entry.download.status == DownloadStatus::Completed && entry.download.InMainList()) {
             completed.push_back(id);
         }
     }

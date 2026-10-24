@@ -149,6 +149,9 @@ int Compare(const core::DownloadView& a, const core::DownloadView& b, SortKey ke
 
 bool Matches(const core::DownloadView& view, const ListFilter& filter)
 {
+    if (!view.download.InMainList()) {
+        return false;
+    }
     if (filter.status == StatusFilter::Queued) {
         return view.download.queueId && (!filter.queue || view.download.queueId == filter.queue);
     }

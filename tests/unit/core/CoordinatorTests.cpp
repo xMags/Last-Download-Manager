@@ -524,6 +524,47 @@ TEST_F(CoordinatorTest, DeleteCompletedKeepsOrRemovesTheFile)
     EXPECT_FALSE(InSnapshot(removed));
 }
 
+TEST_F(CoordinatorTest, GrabberDownloadsStayHiddenUntilListed)
+{
+    ldm::model::GrabberProject project;
+    project.name = "Site";
+    const auto projectId = store_->InsertGrabberProject(project, "{}");
+    ASSERT_TRUE(projectId);
+    const DownloadId hidden = *Add("http://x.test/grabbed.dat", AddMode::StartNow, [&](AddDownloadCommand& command) {
+                                   command.projectId = projectId.Value();
+                                   command.listed = false;
+                               }).id;
+    EXPECT_FALSE(View(hidden).download.listed);
+    EXPECT_EQ(View(hidden).download.projectId, projectId.Value());
+    EXPECT_FALSE(View(hidden).download.InMainList());
+    EXPECT_FALSE(Stored(hidden)->listed);
+
+    // The same address added by the user is a download of its own, not a duplicate of the hidden one.
+    const AddResult own = Add("http://x.test/grabbed.dat", AddMode::Later, [](AddDownloadCommand& command) {
+        command.duplicatePolicy = ldm::model::DuplicatePolicy::Ask;
+    });
+    ASSERT_TRUE(own.id);
+    EXPECT_FALSE(own.duplicateOf);
+    EXPECT_NE(*own.id, hidden);
+    EXPECT_TRUE(View(*own.id).download.InMainList());
+
+    // Delete completed leaves the project's downloads alone.
+    Finish(hidden, 1, TransferOutcome::Completed, {{0, 1, 1}}, std::nullopt, 1);
+    Send(hidden, 1, ldm::core::FinalizeFinished{});
+    coordinator_->Handle(ldm::core::DeleteCompletedCommand{});
+    EXPECT_TRUE(InSnapshot(hidden));
+
+    coordinator_->Handle(ldm::core::SetListedCommand{{hidden}});
+    EXPECT_TRUE(View(hidden).download.listed);
+    EXPECT_TRUE(Stored(hidden)->listed);
+
+    // Only a Grabber download can start hidden.
+    const DownloadId plain = *Add("http://x.test/plain.dat", AddMode::Later, [](AddDownloadCommand& command) {
+                                  command.listed = false;
+                              }).id;
+    EXPECT_TRUE(View(plain).download.listed);
+}
+
 TEST_F(CoordinatorTest, InconsistentServerRestartsOnceWithOneConnection)
 {
     const DownloadId id = *Add("http://x.test/a.dat").id;

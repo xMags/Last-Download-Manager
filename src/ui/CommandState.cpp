@@ -45,7 +45,8 @@ CommandState ComputeCommandState(std::span<const core::DownloadView* const> sele
     }
     for (const auto& view : snapshot.downloads) {
         state.stopAll = state.stopAll || Running(*view);
-        state.deleteCompleted = state.deleteCompleted || view->download.status == DownloadStatus::Completed;
+        state.deleteCompleted = state.deleteCompleted ||
+                                (view->download.status == DownloadStatus::Completed && view->download.InMainList());
     }
     return state;
 }

@@ -45,7 +45,9 @@ std::set<std::string> ListedAddresses(const core::Snapshot& snapshot)
 {
     std::set<std::string> listed;
     for (const auto& view : snapshot.downloads) {
-        listed.insert(view->download.url);
+        if (view->download.InMainList()) {
+            listed.insert(view->download.url);
+        }
     }
     return listed;
 }
