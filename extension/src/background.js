@@ -266,13 +266,12 @@ api.runtime.onMessage.addListener((message, sender, reply) => {
   if (sender.id !== api.runtime.id || message === null || typeof message !== 'object') {
     return false;
   }
-  if (sender.tab) {
-    return onPageMessage(message, sender, reply) === true;
+  // The extension's own pages come first: they open in tabs too, so they have a sender.tab.
+  const ownPage = String(sender.url ?? '').startsWith(api.runtime.getURL(''));
+  if (!ownPage) {
+    return sender.tab ? onPageMessage(message, sender, reply) === true : false;
   }
   // Status for the extension's own pages.
-  if (!String(sender.url ?? '').startsWith(api.runtime.getURL(''))) {
-    return false;
-  }
   if (message?.type === 'status') {
     api.storage.local.get('config').then(({ config }) => {
       reply({ enabled, connection: connection.state, appVersion: config?.appVersion ?? '' });
