@@ -14,6 +14,7 @@ add_executable(ldm_unit_tests
     core/QuotaTests.cpp
     core/SchedulerTests.cpp
     core/SegmentPlannerTests.cpp
+    core/UpdateCheckTests.cpp
     core/UrlAndNamesTests.cpp
     engine/Aes128CbcTests.cpp
     grabber/GrabberExplorerTests.cpp

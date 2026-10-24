@@ -37,6 +37,11 @@ add_library(ldm_core STATIC
     Snapshot.h
     Store.h
     TransferEngine.h
+    UpdateCheck.cpp
+    UpdateCheck.h
     Url.cpp
     Url.h)
-target_link_libraries(ldm_core PUBLIC ldm_model ldm_media)
+find_package(nlohmann_json CONFIG REQUIRED)
+target_link_libraries(ldm_core
+    PUBLIC ldm_model ldm_media
+    PRIVATE nlohmann_json::nlohmann_json)
