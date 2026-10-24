@@ -3,7 +3,10 @@
 #include "core/Store.h"
 #include "storage/Sqlite.h"
 
+#include <cstdint>
+#include <span>
 #include <string>
+#include <vector>
 
 namespace ldm::storage {
 
@@ -20,6 +23,9 @@ public:
     base::Result<std::vector<model::Download>> LoadDownloads() override;
     base::Result<model::DownloadId> InsertDownload(const model::Download& download) override;
     base::Status SaveDownload(const model::Download& download) override;
+    base::Status MarkMediaPiecesDone(model::DownloadId id, std::span<const core::MediaPieceDone> pieces) override;
+    base::Status ReplaceMediaTrack(model::DownloadId id, std::uint32_t track,
+                                   const model::MediaTrack& replacement) override;
     base::Status DeleteDownload(model::DownloadId id) override;
 
     base::Result<std::vector<model::Category>> LoadCategories() override;
@@ -40,7 +46,11 @@ private:
     explicit SqliteStore(Connection connection) noexcept : connection_(std::move(connection)) {}
 
     base::Status WriteSegments(const model::Download& download);
+    base::Status WriteRanges(model::DownloadId id, std::uint32_t track, const std::vector<model::Segment>& ranges);
+    base::Status WriteTrack(model::DownloadId id, std::uint32_t index, const model::MediaTrack& track);
+    base::Status DeleteTrack(model::DownloadId id, std::uint32_t track);
     base::Status LoadSegments(std::vector<model::Download>& downloads);
+    base::Status LoadTracks(std::vector<model::Download>& downloads);
 
     Connection connection_;
 };

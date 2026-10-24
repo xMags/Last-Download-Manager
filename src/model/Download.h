@@ -1,6 +1,8 @@
 #pragma once
 
 #include "model/Ids.h"
+#include "model/Media.h"
+#include "model/Segment.h"
 
 #include <cstdint>
 #include <optional>
@@ -40,17 +42,6 @@ enum class CompletionAction {
 
 [[nodiscard]] std::string_view ToString(CompletionAction action) noexcept;
 [[nodiscard]] std::optional<CompletionAction> ParseCompletionAction(std::string_view text) noexcept;
-
-// A byte range of the file assigned to one connection. `end` is exclusive and absent while the
-// total size is unknown. `done` counts bytes from `start` that are durably on disk.
-struct Segment {
-    std::int64_t start = 0;
-    std::optional<std::int64_t> end;
-    std::int64_t done = 0;
-
-    [[nodiscard]] std::int64_t WriteOffset() const noexcept { return start + done; }
-    [[nodiscard]] bool IsComplete() const noexcept { return end.has_value() && start + done >= *end; }
-};
 
 // Server-provided identity of the remote file, used to refuse resuming a changed resource.
 struct Validators {
@@ -108,8 +99,17 @@ struct Download {
     std::optional<std::string> lastResult;
     std::int64_t sortOrder = 0;
 
+    // A file's byte ranges. Empty for a stream, whose progress is in `tracks`.
     std::vector<Segment> segments;
 
+    DownloadKind kind = DownloadKind::File;
+    // A stream whose manifest came from a loopback or private address: its pieces may be on such
+    // addresses too. Otherwise LDM refuses them, so a hostile manifest cannot make LDM send
+    // requests into the home network.
+    bool mediaFromPrivateNetwork = false;
+    std::vector<MediaTrack> tracks;  // a stream's tracks, in order; empty for a file
+
+    [[nodiscard]] bool IsStream() const noexcept { return kind != DownloadKind::File; }
     [[nodiscard]] std::int64_t DownloadedBytes() const noexcept;
 };
 

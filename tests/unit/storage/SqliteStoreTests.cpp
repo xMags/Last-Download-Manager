@@ -183,6 +183,188 @@ TEST(SqliteStore, ConnectionRulesRoundTrip)
     EXPECT_EQ(store.LoadServerLimits().Value().size(), 2u);
 }
 
+Download SampleStream(std::string publicId)
+{
+    Download d = SampleDownload(std::move(publicId));
+    d.kind = ldm::model::DownloadKind::Hls;
+    d.mediaFromPrivateNetwork = true;
+    d.segments.clear();
+    d.totalSize.reset();
+
+    ldm::model::MediaTrack video;
+    video.role = ldm::model::TrackRole::Video;
+    video.sourceUrl = "https://cdn.example.test/v/index.m3u8";
+    video.codecs = "avc1.64001f,mp4a.40.2";
+    video.keys.push_back({"https://cdn.example.test/key", std::nullopt});
+    video.keys.push_back({"", ldm::model::AesKey{1, 2, 3}});
+    ldm::model::MediaPiece init;
+    init.kind = ldm::model::MediaPiece::Kind::Init;
+    init.url = "https://cdn.example.test/v/init.mp4";
+    init.rangeOffset = 0;
+    init.rangeLength = 700;
+    video.pieces.push_back(init);
+    for (std::uint32_t i = 0; i < 3; ++i) {
+        ldm::model::MediaPiece piece;
+        piece.url = "https://cdn.example.test/v/" + std::to_string(i) + ".m4s";
+        piece.durationUs = 4'000'000;
+        piece.sequence = 0xFFFF'FFFF'FFFF'FFF0ull + i;  // above INT64_MAX: stored as two's complement
+        piece.discontinuity = i == 2;
+        piece.init = 0;
+        piece.key = i % 2;
+        piece.iv = ldm::model::AesKey{static_cast<std::uint8_t>(i)};
+        video.pieces.push_back(piece);
+    }
+    video.pieces[1].done = true;
+    video.pieces[1].bytes = 1234;
+    d.tracks.push_back(video);
+
+    ldm::model::MediaTrack audio;
+    audio.role = ldm::model::TrackRole::Audio;
+    audio.sourceUrl = "https://cdn.example.test/a.mpd";
+    audio.language = "en";
+    audio.name = "English";
+    audio.wholeFile = true;
+    ldm::model::MediaPiece whole;
+    whole.url = "https://cdn.example.test/a.mp4";
+    audio.pieces.push_back(whole);
+    audio.ranges = {{0, 5000, 5000}, {5000, 9000, 10}};
+    d.tracks.push_back(audio);
+    return d;
+}
+
+TEST(SqliteStore, StreamRoundTripsWithTracksKeysPiecesAndRanges)
+{
+    SqliteStore store = OpenMemoryStore();
+    const Download original = SampleStream("s");
+    auto id = store.InsertDownload(original);
+    ASSERT_TRUE(id.Ok()) << id.GetError().message;
+
+    auto loaded = store.LoadDownloads();
+    ASSERT_TRUE(loaded.Ok()) << loaded.GetError().message;
+    const Download& d = loaded.Value().front();
+    EXPECT_EQ(d.kind, ldm::model::DownloadKind::Hls);
+    EXPECT_TRUE(d.mediaFromPrivateNetwork);
+    EXPECT_TRUE(d.segments.empty());
+    ASSERT_EQ(d.tracks.size(), 2u);
+    const auto& video = d.tracks[0];
+    EXPECT_EQ(video.codecs, "avc1.64001f,mp4a.40.2");
+    ASSERT_EQ(video.keys.size(), 2u);
+    EXPECT_EQ(video.keys[0].url, "https://cdn.example.test/key");
+    EXPECT_FALSE(video.keys[0].value.has_value());
+    EXPECT_EQ(video.keys[1].value, (ldm::model::AesKey{1, 2, 3}));
+    ASSERT_EQ(video.pieces.size(), 4u);
+    EXPECT_EQ(video.pieces[0].kind, ldm::model::MediaPiece::Kind::Init);
+    EXPECT_EQ(video.pieces[0].rangeLength, 700);
+    EXPECT_EQ(video.pieces[2].sequence, 0xFFFF'FFFF'FFFF'FFF1ull);
+    EXPECT_EQ(video.pieces[2].init, 0u);
+    EXPECT_EQ(video.pieces[2].key, 1u);
+    EXPECT_EQ(video.pieces[2].iv, (ldm::model::AesKey{1}));
+    EXPECT_EQ(video.pieces[1].done, true);
+    EXPECT_EQ(video.pieces[1].bytes, 1234);
+    EXPECT_TRUE(video.pieces[3].discontinuity);
+    EXPECT_EQ(video.pieces[3].durationUs, 4'000'000);
+    const auto& audio = d.tracks[1];
+    EXPECT_EQ(audio.role, ldm::model::TrackRole::Audio);
+    EXPECT_EQ(audio.language, "en");
+    EXPECT_TRUE(audio.wholeFile);
+    ASSERT_EQ(audio.ranges.size(), 2u);
+    EXPECT_EQ(audio.ranges[1].done, 10);
+    EXPECT_EQ(d.DownloadedBytes(), 1234 + 5010);
+}
+
+TEST(SqliteStore, StreamProgressIsWrittenPieceByPiece)
+{
+    SqliteStore store = OpenMemoryStore();
+    Download d = SampleStream("s");
+    d.id = store.InsertDownload(d).Value();
+
+    const std::vector<ldm::core::MediaPieceDone> done{{0, 2, 77}, {0, 3, 88}};
+    ASSERT_TRUE(store.MarkMediaPiecesDone(d.id, done).Ok());
+    // A checkpoint writes the row and the whole-file ranges, and leaves pieces alone.
+    d.tracks[1].ranges[1].done = 4000;
+    d.tracks[0].pieces[1].done = false;  // the store must not rewrite pieces from here
+    ASSERT_TRUE(store.SaveDownload(d).Ok());
+
+    const Download loaded = store.LoadDownloads().Value().front();
+    EXPECT_TRUE(loaded.tracks[0].pieces[1].done);
+    EXPECT_EQ(loaded.tracks[0].pieces[2].bytes, 77);
+    EXPECT_EQ(loaded.tracks[0].pieces[3].bytes, 88);
+    EXPECT_EQ(loaded.tracks[1].ranges[1].done, 4000);
+
+    const std::vector<ldm::core::MediaPieceDone> missing{{0, 9, 1}};
+    EXPECT_FALSE(store.MarkMediaPiecesDone(d.id, missing).Ok());
+    EXPECT_FALSE(store.LoadDownloads().Value().front().tracks[0].pieces[0].done);  // rolled back
+}
+
+TEST(SqliteStore, ReplacingATrackRewritesItsPiecesAndKeys)
+{
+    SqliteStore store = OpenMemoryStore();
+    Download d = SampleStream("s");
+    d.id = store.InsertDownload(d).Value();
+
+    ldm::model::MediaTrack listed = d.tracks[0];
+    listed.keys.clear();
+    listed.pieces.resize(1);
+    listed.pieces[0].kind = ldm::model::MediaPiece::Kind::Media;
+    listed.pieces[0].key.reset();
+    listed.pieces[0].init.reset();
+    ASSERT_TRUE(store.ReplaceMediaTrack(d.id, 0, listed).Ok());
+    ldm::model::MediaTrack reset = d.tracks[1];
+    reset.ranges.clear();
+    ASSERT_TRUE(store.ReplaceMediaTrack(d.id, 1, reset).Ok());
+
+    const Download loaded = store.LoadDownloads().Value().front();
+    ASSERT_EQ(loaded.tracks.size(), 2u);
+    EXPECT_TRUE(loaded.tracks[0].keys.empty());
+    EXPECT_EQ(loaded.tracks[0].pieces.size(), 1u);
+    EXPECT_TRUE(loaded.tracks[1].ranges.empty());
+}
+
+TEST(SqliteStore, DeletingAStreamRemovesEverythingOfIt)
+{
+    SqliteStore store = OpenMemoryStore();
+    const DownloadId kept = store.InsertDownload(SampleStream("keep")).Value();
+    const DownloadId removed = store.InsertDownload(SampleStream("remove")).Value();
+    ASSERT_TRUE(store.DeleteDownload(removed).Ok());
+    const auto loaded = store.LoadDownloads().Value();
+    ASSERT_EQ(loaded.size(), 1u);
+    EXPECT_EQ(loaded[0].id, kept);
+    EXPECT_EQ(loaded[0].tracks.size(), 2u);
+}
+
+TEST(Migrations, SchemaFiveKeepsTheSegmentsOfEarlierDownloads)
+{
+    auto connection = ldm::storage::Connection::Open(":memory:");
+    ASSERT_TRUE(connection.Ok());
+    ASSERT_TRUE(connection.Value().Execute("PRAGMA foreign_keys = ON").Ok());
+    ASSERT_TRUE(ldm::storage::MigrateTo(connection.Value(), 4).Ok());
+    ASSERT_TRUE(connection.Value()
+                    .Execute("INSERT INTO downloads (id, public_id, url, file_name, save_dir, status, created_at, "
+                             "sort_order) VALUES (7, 'p', 'https://x.test/f', 'f', 'C:\\\\D', 'paused', 1, 1);"
+                             "INSERT INTO segments (download_id, idx, start_offset, end_offset, done_bytes) "
+                             "VALUES (7, 0, 0, 50, 50), (7, 1, 50, 100, 3);")
+                    .Ok());
+    const auto migrated = ldm::storage::Migrate(connection.Value());
+    ASSERT_TRUE(migrated.Ok()) << migrated.GetError().message;
+
+    auto query = connection.Value().Prepare(
+        "SELECT d.kind, s.track, s.idx, s.done_bytes FROM downloads d JOIN segments s ON s.download_id = d.id "
+        "ORDER BY s.idx");
+    ASSERT_TRUE(query.Ok());
+    ASSERT_TRUE(query.Value().Step().Value());
+    EXPECT_EQ(query.Value().Text(0), "file");
+    EXPECT_EQ(query.Value().Int64(1), 0);
+    ASSERT_TRUE(query.Value().Step().Value());
+    EXPECT_EQ(query.Value().Int64(2), 1);
+    EXPECT_EQ(query.Value().Int64(3), 3);
+    EXPECT_FALSE(query.Value().Step().Value());
+    // The rebuilt table still goes with its download.
+    ASSERT_TRUE(connection.Value().Execute("DELETE FROM downloads WHERE id = 7").Ok());
+    auto count = connection.Value().Prepare("SELECT count(*) FROM segments");
+    ASSERT_TRUE(count.Value().Step().Value());
+    EXPECT_EQ(count.Value().Int64(0), 0);
+}
+
 TEST(Migrations, RefusesNewerSchema)
 {
     auto connection = ldm::storage::Connection::Open(":memory:");

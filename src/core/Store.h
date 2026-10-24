@@ -1,11 +1,14 @@
 #pragma once
 
 #include "base/Result.h"
+#include "core/MediaProgress.h"
 #include "model/Category.h"
 #include "model/ConnectionRules.h"
 #include "model/Download.h"
 #include "model/Settings.h"
 
+#include <cstdint>
+#include <span>
 #include <vector>
 
 namespace ldm::core {
@@ -17,10 +20,20 @@ public:
     virtual ~Store() = default;
 
     [[nodiscard]] virtual base::Result<std::vector<model::Download>> LoadDownloads() = 0;
-    // Inserts a new download with its segments and returns the assigned id. `download.id` is ignored.
+    // Inserts a new download with its segments, and a stream's tracks with their keys and pieces,
+    // and returns the assigned id. `download.id` is ignored.
     [[nodiscard]] virtual base::Result<model::DownloadId> InsertDownload(const model::Download& download) = 0;
-    // Replaces the stored row and all its segments (a checkpoint).
+    // Replaces the stored row and all its byte ranges (a checkpoint): a file's segments, or the
+    // ranges of a stream's whole-file tracks. A stream's tracks and pieces are not written here;
+    // there can be many thousands of them, so they change through the two calls below.
     [[nodiscard]] virtual base::Status SaveDownload(const model::Download& download) = 0;
+    // Marks pieces of a stream as on disk, with the sizes of their files.
+    [[nodiscard]] virtual base::Status MarkMediaPiecesDone(model::DownloadId id,
+                                                           std::span<const MediaPieceDone> pieces) = 0;
+    // Replaces one track of a stream with its keys, pieces and ranges: its list was read, or its
+    // progress reset.
+    [[nodiscard]] virtual base::Status ReplaceMediaTrack(model::DownloadId id, std::uint32_t track,
+                                                         const model::MediaTrack& replacement) = 0;
     [[nodiscard]] virtual base::Status DeleteDownload(model::DownloadId id) = 0;
 
     [[nodiscard]] virtual base::Result<std::vector<model::Category>> LoadCategories() = 0;
