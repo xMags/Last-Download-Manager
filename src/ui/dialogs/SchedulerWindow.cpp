@@ -39,6 +39,17 @@ constexpr std::array<ActionChoice, 5> kActions{{
     {model::CompletionAction::Hibernate, L"Hibernate the computer"},
 }};
 
+struct ProjectModeChoice {
+    model::GrabberScheduleMode mode;
+    const wchar_t* text;
+};
+
+constexpr std::array<ProjectModeChoice, 3> kProjectModes{{
+    {model::GrabberScheduleMode::Explore, L"Explore the site"},
+    {model::GrabberScheduleMode::ExploreDownload, L"Explore, then download the checked files"},
+    {model::GrabberScheduleMode::DownloadChecked, L"Download the checked files"},
+}};
+
 constexpr int kDefaultRepeatMinutes = 60;
 constexpr int kMaxQuotaMegabytes = 10'000'000;
 constexpr int kMaxQuotaHours = 23;
@@ -166,6 +177,9 @@ bool SchedulerWindow::OnInit()
     for (const ActionChoice& choice : kActions) {
         ComboBox_AddString(Item(IDC_SCHED_ACTION), choice.text);
     }
+    for (const ProjectModeChoice& choice : kProjectModes) {
+        ComboBox_AddString(Item(IDC_SCHED_PROJECT_MODE), choice.text);
+    }
     // Schedules count in minutes, so the times show no seconds.
     DateTime_SetFormat(Item(IDC_SCHED_START_TIME), L"HH:mm");
     DateTime_SetFormat(Item(IDC_SCHED_STOP_TIME), L"HH:mm");
@@ -261,21 +275,32 @@ void SchedulerWindow::RefreshQueueList()
         return;
     }
     std::vector<std::wstring> texts;
-    std::vector<model::QueueId> ids;
+    std::vector<Row> rows;
     for (const core::QueueView& view : snapshot_->queues) {
         texts.push_back(base::ToUtf16(view.queue.name) + (view.running ? L"  (running)" : L""));
-        ids.push_back(view.queue.id);
+        rows.push_back(Row{view.queue.id, std::nullopt});
+    }
+    if (projects_ && callbacks_.postGrabber) {
+        for (const grabber::GrabberProjectView& view : projects_->projects) {
+            if (view.project.isTemplate || view.damaged) {
+                continue;
+            }
+            texts.push_back(L"Grabber: " + base::ToUtf16(view.project.name) +
+                            (view.exploring || view.downloading ? L"  (running)" : L""));
+            rows.push_back(Row{std::nullopt, view.project.id});
+        }
     }
     const HWND list = Item(IDC_SCHED_QUEUES);
-    if (texts != listTexts_) {
+    if (texts != listTexts_ || rows != listed_) {
         ListBox_ResetContent(list);
         for (const std::wstring& text : texts) {
             ListBox_AddString(list, text.c_str());
         }
         listTexts_ = std::move(texts);
-        listed_ = std::move(ids);
+        listed_ = std::move(rows);
     }
-    const auto row = std::find(listed_.begin(), listed_.end(), chosen_.value_or(model::QueueId{}));
+    const Row current = chosenProject_ ? Row{std::nullopt, chosenProject_} : Row{chosen_, std::nullopt};
+    const auto row = std::find(listed_.begin(), listed_.end(), current);
     ListBox_SetCurSel(list, row == listed_.end() ? -1 : static_cast<int>(row - listed_.begin()));
 }
 
@@ -321,6 +346,15 @@ void SchedulerWindow::RefreshFiles()
 
 void SchedulerWindow::RefreshButtons()
 {
+    if (chosenProject_) {
+        const grabber::GrabberProjectView* project = ChosenProject();
+        const bool running = project != nullptr && (project->exploring || project->downloading);
+        Enable(IDC_SCHED_START_NOW, project != nullptr && !running);
+        Enable(IDC_SCHED_STOP, running);
+        Enable(IDC_SCHED_DELETE, false);
+        Enable(IDC_SCHED_APPLY, edited_);
+        return;
+    }
     const core::QueueView* view = Chosen();
     Enable(IDC_SCHED_START_NOW, view != nullptr && !view->running);
     Enable(IDC_SCHED_STOP, view != nullptr && view->running);
@@ -332,11 +366,24 @@ void SchedulerWindow::RefreshButtons()
     Enable(IDC_SCHED_REMOVE, anySelected);
 }
 
-void SchedulerWindow::LoadQueue(const core::QueueView& view)
+void SchedulerWindow::ShowKind(bool project)
 {
-    loading_ = true;
-    const model::Queue& queue = view.queue;
-    const model::Schedule& schedule = queue.schedule;
+    // A project has its schedule only: no files, no limits, no completion action.
+    for (const int id : {IDC_SCHED_ON_STARTUP, IDC_SCHED_ACTION_LABEL, IDC_SCHED_ACTION, IDC_SCHED_FORCE,
+                         IDC_SCHED_OPEN_ON, IDC_SCHED_OPEN_FILE, IDC_SCHED_OPEN_BROWSE}) {
+        Show(id, !project);
+    }
+    Show(IDC_SCHED_PROJECT_MODE_LABEL, project);
+    Show(IDC_SCHED_PROJECT_MODE, project);
+    SetText(IDC_SCHED_START_AT, project ? L"Start the project &at" : L"Start the queue &at");
+    SetText(IDC_SCHED_STOP_AT, project ? L"&Stop the project at" : L"&Stop the queue at");
+    if (project) {
+        ShowPage(kSchedulePage);
+    }
+}
+
+void SchedulerWindow::LoadSchedule(const model::Schedule& schedule)
+{
     SetChecked(IDC_SCHED_ON_STARTUP, schedule.startOnAppStart);
     SetChecked(IDC_SCHED_START_AT, schedule.enabled);
     SetTimeOfDay(Item(IDC_SCHED_START_TIME), schedule.startMinutes);
@@ -351,6 +398,43 @@ void SchedulerWindow::LoadQueue(const core::QueueView& view)
     SetNumber(IDC_SCHED_REPEAT_MINUTES, schedule.repeatMinutes > 0 ? schedule.repeatMinutes : kDefaultRepeatMinutes);
     SetChecked(IDC_SCHED_STOP_AT, schedule.stopEnabled);
     SetTimeOfDay(Item(IDC_SCHED_STOP_TIME), schedule.stopMinutes);
+}
+
+void SchedulerWindow::LoadProject(const grabber::GrabberProjectView& view)
+{
+    loading_ = true;
+    ShowKind(true);
+    LoadSchedule(view.project.schedule);
+    const auto mode = std::find_if(kProjectModes.begin(), kProjectModes.end(),
+                                   [&view](const ProjectModeChoice& c) { return c.mode == view.project.scheduleMode; });
+    ComboBox_SetCurSel(Item(IDC_SCHED_PROJECT_MODE), mode == kProjectModes.end() ? 0 : static_cast<int>(mode - kProjectModes.begin()));
+    loadedProject_ = view.project;
+    loaded_.reset();
+    loading_ = false;
+    edited_ = false;
+    EnableScheduleFields();
+    RefreshButtons();
+}
+
+const grabber::GrabberProjectView* SchedulerWindow::ChosenProject() const
+{
+    if (!projects_ || !chosenProject_) {
+        return nullptr;
+    }
+    for (const grabber::GrabberProjectView& view : projects_->projects) {
+        if (view.project.id == *chosenProject_) {
+            return &view;
+        }
+    }
+    return nullptr;
+}
+
+void SchedulerWindow::LoadQueue(const core::QueueView& view)
+{
+    loading_ = true;
+    ShowKind(false);
+    const model::Queue& queue = view.queue;
+    LoadSchedule(queue.schedule);
     const auto action = std::find_if(kActions.begin(), kActions.end(),
                                      [&queue](const ActionChoice& c) { return c.action == queue.completionAction; });
     ComboBox_SetCurSel(Item(IDC_SCHED_ACTION), action == kActions.end() ? 0 : static_cast<int>(action - kActions.begin()));
@@ -360,6 +444,7 @@ void SchedulerWindow::LoadQueue(const core::QueueView& view)
     SetNumber(IDC_SCHED_CONCURRENT, queue.concurrent);
     SetNumber(IDC_SCHED_RETRIES, queue.retriesPerFile);
     loaded_ = queue;
+    loadedProject_.reset();
     loading_ = false;
     edited_ = false;
     EnableScheduleFields();
@@ -416,8 +501,78 @@ void SchedulerWindow::MarkEdited()
     RefreshButtons();
 }
 
+bool SchedulerWindow::ReadSchedule(model::Schedule& schedule)
+{
+    const auto fail = [this](int control, const wchar_t* message) {
+        ShowPage(kSchedulePage);
+        Warn(message);
+        ::SetFocus(Item(control));
+        return false;
+    };
+    schedule.startOnAppStart = Checked(IDC_SCHED_ON_STARTUP);
+    schedule.enabled = Checked(IDC_SCHED_START_AT);
+    schedule.mode = Checked(IDC_SCHED_ONCE) ? model::ScheduleMode::Once : model::ScheduleMode::Daily;
+    schedule.startMinutes = TimeOfDay(Item(IDC_SCHED_START_TIME));
+    schedule.startDay = Day(Item(IDC_SCHED_DATE));
+    std::uint8_t weekdays = 0;
+    for (int day = 0; day < 7; ++day) {
+        if (Checked(IDC_SCHED_DAY_FIRST + day)) {
+            weekdays = static_cast<std::uint8_t>(weekdays | (1u << day));
+        }
+    }
+    schedule.weekdays = weekdays;
+    const bool daily = schedule.mode == model::ScheduleMode::Daily;
+    if (schedule.enabled && daily && weekdays == 0) {
+        return fail(IDC_SCHED_DAY_FIRST, L"Choose at least one day of the week.");
+    }
+    if (schedule.enabled && !daily) {
+        const SYSTEMTIME now = LocalNow();
+        const std::int64_t today = Today();
+        const int minutes = now.wHour * 60 + now.wMinute;
+        if (*schedule.startDay < today || (*schedule.startDay == today && schedule.startMinutes <= minutes)) {
+            return fail(IDC_SCHED_DATE, L"That day and time have passed. Choose a later one.");
+        }
+    }
+    schedule.repeatMinutes = 0;
+    if (daily && Checked(IDC_SCHED_REPEAT)) {
+        const auto repeat = Number(IDC_SCHED_REPEAT_MINUTES);
+        if (!repeat || *repeat < 1 || *repeat > model::kMinutesPerDay) {
+            return fail(IDC_SCHED_REPEAT_MINUTES, L"The schedule can start again every 1 to 1440 minutes.");
+        }
+        schedule.repeatMinutes = *repeat;
+    }
+    schedule.stopEnabled = Checked(IDC_SCHED_STOP_AT);
+    schedule.stopMinutes = TimeOfDay(Item(IDC_SCHED_STOP_TIME));
+    return true;
+}
+
+bool SchedulerWindow::ApplyProject()
+{
+    const grabber::GrabberProjectView* view = ChosenProject();
+    if (view == nullptr || !callbacks_.postGrabber) {
+        return false;
+    }
+    model::GrabberProject project = view->project;
+    if (!ReadSchedule(project.schedule)) {
+        return false;
+    }
+    project.schedule.startOnAppStart = false;  // projects start by time only
+    const int mode = ComboBox_GetCurSel(Item(IDC_SCHED_PROJECT_MODE));
+    project.scheduleMode = mode >= 0 ? kProjectModes[static_cast<size_t>(mode)].mode : model::GrabberScheduleMode::Explore;
+    core::GrabberSaveProjectCommand save;
+    save.project = project;
+    callbacks_.postGrabber(std::move(save));
+    loadedProject_ = project;
+    edited_ = false;
+    RefreshButtons();
+    return true;
+}
+
 bool SchedulerWindow::Apply()
 {
+    if (chosenProject_) {
+        return ApplyProject();
+    }
     const core::QueueView* view = Chosen();
     if (view == nullptr || !snapshot_) {
         return false;
@@ -440,41 +595,9 @@ bool SchedulerWindow::Apply()
     queue.concurrent = *concurrent;
     queue.retriesPerFile = *retries;
 
-    model::Schedule& schedule = queue.schedule;
-    schedule.startOnAppStart = Checked(IDC_SCHED_ON_STARTUP);
-    schedule.enabled = Checked(IDC_SCHED_START_AT);
-    schedule.mode = Checked(IDC_SCHED_ONCE) ? model::ScheduleMode::Once : model::ScheduleMode::Daily;
-    schedule.startMinutes = TimeOfDay(Item(IDC_SCHED_START_TIME));
-    schedule.startDay = Day(Item(IDC_SCHED_DATE));
-    std::uint8_t weekdays = 0;
-    for (int day = 0; day < 7; ++day) {
-        if (Checked(IDC_SCHED_DAY_FIRST + day)) {
-            weekdays = static_cast<std::uint8_t>(weekdays | (1u << day));
-        }
+    if (!ReadSchedule(queue.schedule)) {
+        return false;
     }
-    schedule.weekdays = weekdays;
-    const bool daily = schedule.mode == model::ScheduleMode::Daily;
-    if (schedule.enabled && daily && weekdays == 0) {
-        return fail(kSchedulePage, IDC_SCHED_DAY_FIRST, L"Choose at least one day of the week.");
-    }
-    if (schedule.enabled && !daily) {
-        const SYSTEMTIME now = LocalNow();
-        const std::int64_t today = Today();
-        const int minutes = now.wHour * 60 + now.wMinute;
-        if (*schedule.startDay < today || (*schedule.startDay == today && schedule.startMinutes <= minutes)) {
-            return fail(kSchedulePage, IDC_SCHED_DATE, L"That day and time have passed. Choose a later one.");
-        }
-    }
-    schedule.repeatMinutes = 0;
-    if (daily && Checked(IDC_SCHED_REPEAT)) {
-        const auto repeat = Number(IDC_SCHED_REPEAT_MINUTES);
-        if (!repeat || *repeat < 1 || *repeat > model::kMinutesPerDay) {
-            return fail(kSchedulePage, IDC_SCHED_REPEAT_MINUTES, L"The queue can start again every 1 to 1440 minutes.");
-        }
-        schedule.repeatMinutes = *repeat;
-    }
-    schedule.stopEnabled = Checked(IDC_SCHED_STOP_AT);
-    schedule.stopMinutes = TimeOfDay(Item(IDC_SCHED_STOP_TIME));
 
     const int action = ComboBox_GetCurSel(Item(IDC_SCHED_ACTION));
     queue.completionAction = action >= 0 ? kActions[static_cast<size_t>(action)].action : model::CompletionAction::None;
@@ -522,8 +645,11 @@ bool SchedulerWindow::SettleChanges()
     if (!edited_) {
         return true;
     }
-    const core::QueueView* view = Chosen();
-    const std::wstring name = view != nullptr ? base::ToUtf16(view->queue.name) : std::wstring(L"the queue");
+    const core::QueueView* view = chosenProject_ ? nullptr : Chosen();
+    const grabber::GrabberProjectView* project = ChosenProject();
+    const std::wstring name = project != nullptr ? base::ToUtf16(project->project.name)
+                              : view != nullptr  ? base::ToUtf16(view->queue.name)
+                                                 : std::wstring(L"the queue");
     const int answer = ShowMessage(Handle(), CurrentTheme(),
                                    MessageRequest{L"Apply the changes to \"" + name + L"\" first?", MessageKind::Question,
                                                   MessageButtons::YesNoCancel});
@@ -537,9 +663,27 @@ bool SchedulerWindow::SettleChanges()
     return true;
 }
 
+bool SchedulerWindow::ChooseProject(model::GrabberProjectId project)
+{
+    if (chosenProject_ == project) {
+        RefreshQueueList();
+        return true;
+    }
+    if (!SettleChanges()) {
+        RefreshQueueList();
+        return false;
+    }
+    chosenProject_ = project;
+    RefreshQueueList();
+    if (const grabber::GrabberProjectView* view = ChosenProject()) {
+        LoadProject(*view);
+    }
+    return true;
+}
+
 bool SchedulerWindow::Choose(model::QueueId queue)
 {
-    if (chosen_ == queue) {
+    if (chosen_ == queue && !chosenProject_) {
         RefreshQueueList();
         return true;
     }
@@ -547,6 +691,7 @@ bool SchedulerWindow::Choose(model::QueueId queue)
         RefreshQueueList();  // the list box shows the queue the fields belong to again
         return false;
     }
+    chosenProject_.reset();
     chosen_ = queue;
     RefreshQueueList();
     if (const core::QueueView* view = Chosen()) {
@@ -570,6 +715,10 @@ void SchedulerWindow::Update(std::shared_ptr<const core::Snapshot> snapshot)
             Choose(added->queue.id);
         }
     }
+    if (chosenProject_) {
+        RefreshQueueList();
+        return;  // the projects follow UpdateProjects
+    }
     const core::QueueView* view = Chosen();
     if (view == nullptr && !snapshot_->queues.empty()) {
         // The chosen queue was deleted: its edits go with it.
@@ -587,6 +736,35 @@ void SchedulerWindow::Update(std::shared_ptr<const core::Snapshot> snapshot)
         LoadQuota();
     }
     RefreshFiles();
+    RefreshButtons();
+}
+
+void SchedulerWindow::UpdateProjects(std::shared_ptr<const grabber::GrabberSnapshot> projects)
+{
+    projects_ = std::move(projects);
+    if (Handle() == nullptr) {
+        return;
+    }
+    RefreshQueueList();
+    if (!chosenProject_) {
+        return;
+    }
+    const grabber::GrabberProjectView* view = ChosenProject();
+    if (view == nullptr) {
+        // The project was deleted: back to the first queue.
+        edited_ = false;
+        chosenProject_.reset();
+        if (snapshot_ && !snapshot_->queues.empty()) {
+            chosen_ = snapshot_->queues.front().queue.id;
+            RefreshQueueList();
+            LoadQueue(snapshot_->queues.front());
+        }
+        return;
+    }
+    if (!edited_ && loadedProject_ &&
+        (loadedProject_->schedule != view->project.schedule || loadedProject_->scheduleMode != view->project.scheduleMode)) {
+        LoadProject(*view);
+    }
     RefreshButtons();
 }
 
@@ -675,8 +853,18 @@ bool SchedulerWindow::OnCommand(int id, int code, HWND control)
         if (code == LBN_SELCHANGE) {
             const int row = ListBox_GetCurSel(Item(IDC_SCHED_QUEUES));
             if (row >= 0 && static_cast<size_t>(row) < listed_.size()) {
-                Choose(listed_[static_cast<size_t>(row)]);
+                const Row chosen = listed_[static_cast<size_t>(row)];
+                if (chosen.project) {
+                    ChooseProject(*chosen.project);
+                } else if (chosen.queue) {
+                    Choose(*chosen.queue);
+                }
             }
+        }
+        return true;
+    case IDC_SCHED_PROJECT_MODE:
+        if (code == CBN_SELCHANGE) {
+            MarkEdited();
         }
         return true;
     case IDC_SCHED_NEW:
@@ -687,12 +875,25 @@ bool SchedulerWindow::OnCommand(int id, int code, HWND control)
         return true;
     case IDC_SCHED_START_NOW:
         // A queue runs with its saved settings, so changes are settled first.
-        if (chosen_ && SettleChanges()) {
+        if (chosenProject_) {
+            const grabber::GrabberProjectView* project = ChosenProject();
+            if (project != nullptr && SettleChanges() && callbacks_.postGrabber) {
+                const model::GrabberScheduleMode mode = project->project.scheduleMode;
+                if (mode == model::GrabberScheduleMode::DownloadChecked) {
+                    callbacks_.postGrabber(core::GrabberDownloadCommand{*chosenProject_});
+                } else {
+                    callbacks_.postGrabber(core::GrabberExploreCommand{
+                        *chosenProject_, true, {}, mode == model::GrabberScheduleMode::ExploreDownload});
+                }
+            }
+        } else if (chosen_ && SettleChanges()) {
             callbacks_.post(core::StartQueueCommand{*chosen_});
         }
         return true;
     case IDC_SCHED_STOP:
-        if (chosen_) {
+        if (chosenProject_ && callbacks_.postGrabber) {
+            callbacks_.postGrabber(core::GrabberStopCommand{*chosenProject_});
+        } else if (chosen_) {
             callbacks_.post(core::StopQueueCommand{*chosen_});
         }
         return true;
@@ -735,7 +936,8 @@ bool SchedulerWindow::OnNotify(const NMHDR& header, LRESULT& result)
     switch (header.idFrom) {
     case IDC_SCHED_TAB:
         if (header.code == TCN_SELCHANGE) {
-            ShowPage(TabCtrl_GetCurSel(Item(IDC_SCHED_TAB)));
+            // A project has only its schedule.
+            ShowPage(chosenProject_ ? kSchedulePage : TabCtrl_GetCurSel(Item(IDC_SCHED_TAB)));
             result = 0;
             return true;
         }

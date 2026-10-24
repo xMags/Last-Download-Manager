@@ -480,6 +480,13 @@ void MainController::OnSelectionChanged()
     toolbar.SetEnabled(ID_DOWNLOADS_DELETE_COMPLETED, state.deleteCompleted);
 }
 
+void MainController::OnGrabberSnapshot(std::shared_ptr<const grabber::GrabberSnapshot> snapshot)
+{
+    if (scheduler_) {
+        scheduler_->UpdateProjects(std::move(snapshot));
+    }
+}
+
 void MainController::OnSnapshot(const core::Snapshot& snapshot)
 {
     if (scheduler_) {
@@ -894,11 +901,17 @@ void MainController::OpenScheduler(std::optional<model::QueueId> select)
         scheduler_->Activate(select);
         return;
     }
-    scheduler_ = std::make_unique<SchedulerWindow>(
-        *context_.theme,
-        SchedulerWindow::Callbacks{[this](core::Command command) { Post(std::move(command)); },
-                                   [this] { scheduler_.reset(); },  // from the window's WM_DESTROY, after which it touches nothing
-                                   [this] { return context_.system->WakeTimersAllowed(); }});
+    SchedulerWindow::Callbacks callbacks{[this](core::Command command) { Post(std::move(command)); },
+                                         [this] { scheduler_.reset(); },  // from the window's WM_DESTROY, after which it touches nothing
+                                         [this] { return context_.system->WakeTimersAllowed(); },
+                                         {}};
+    if (context_.grabber != nullptr) {
+        callbacks.postGrabber = [this](core::GrabberCommand command) { context_.grabber->Post(std::move(command)); };
+    }
+    scheduler_ = std::make_unique<SchedulerWindow>(*context_.theme, std::move(callbacks));
+    if (context_.grabberSnapshot) {
+        scheduler_->UpdateProjects(context_.grabberSnapshot());
+    }
     scheduler_->Open(context_.owner, Snapshot(), select);
     if (scheduler_ && scheduler_->Handle() == nullptr) {
         scheduler_.reset();

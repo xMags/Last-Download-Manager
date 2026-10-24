@@ -2,9 +2,11 @@
 
 #include "browser/Protocol.h"
 #include "core/Commands.h"
+#include "core/GrabberCommands.h"
 #include "core/LaunchRequest.h"
 #include "core/Ports.h"
 #include "core/Snapshot.h"
+#include "grabber/GrabberSnapshot.h"
 #include "ui/AddFlow.h"
 #include "ui/BrowserSessions.h"
 #include "ui/CaptureFollowUp.h"
@@ -62,6 +64,9 @@ public:
         std::function<void(BrowserConnectionId, const std::string&)> linksDone;
         // Opens a page in a connected browser (Refresh download address); false without one.
         std::function<bool(const std::string&)> openPage;
+        // Site Grabber projects in the Scheduler window; optional.
+        core::GrabberSink* grabber = nullptr;
+        std::function<std::shared_ptr<const grabber::GrabberSnapshot>()> grabberSnapshot;
     };
 
     explicit MainController(Context context);
@@ -74,6 +79,7 @@ public:
     void OnMenuPopup(HMENU menu);
     void OnSelectionChanged();
     void OnSnapshot(const core::Snapshot& snapshot);
+    void OnGrabberSnapshot(std::shared_ptr<const grabber::GrabberSnapshot> snapshot);
     void OnNotifications(std::vector<core::Notification> notifications);
     bool PreTranslate(MSG& message);
 

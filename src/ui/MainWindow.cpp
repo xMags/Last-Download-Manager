@@ -242,6 +242,10 @@ void MainWindow::OnCreate()
     context.openPage = [this](const std::string& url) {
         return browserSessions_ && browserSessions_->OpenPage(url);
     };
+    if (services_.grabber != nullptr && services_.grabberBridge != nullptr) {
+        context.grabber = services_.grabber;
+        context.grabberSnapshot = [this] { return grabberSnapshot_; };
+    }
     controller_ = std::make_unique<MainController>(std::move(context));
     if (browserSessions_ && services_.browserWindows != nullptr && services_.readXml) {
         CreateMediaPanel();
@@ -854,7 +858,9 @@ LRESULT MainWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
     }
     case kGrabberSnapshotMessage:
         if (grabber_) {
-            grabber_->OnSnapshot(services_.grabberBridge->TakeSnapshot());
+            grabberSnapshot_ = services_.grabberBridge->TakeSnapshot();
+            grabber_->OnSnapshot(grabberSnapshot_);
+            controller_->OnGrabberSnapshot(grabberSnapshot_);
         }
         return 0;
     case kGrabberNotificationMessage:
