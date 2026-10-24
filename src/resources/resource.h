@@ -68,6 +68,8 @@
 #define ID_HELP_ABOUT 40081
 #define ID_HELP_CHECK_UPDATES 40082
 #define ID_HELP_AUTO_UPDATES 40083
+#define ID_HELP_QUEUES 40084
+#define ID_HELP_GRABBER 40085
 
 // Download list row menu (checklist L-05, gap G-1)
 #define ID_ROW_OPEN 40100

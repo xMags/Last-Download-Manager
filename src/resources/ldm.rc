@@ -156,6 +156,8 @@ BEGIN
     POPUP "&Help"
     BEGIN
         MENUITEM "&Help contents", ID_HELP_CONTENTS
+        MENUITEM "&Queues and Scheduler help", ID_HELP_QUEUES
+        MENUITEM "&Site Grabber help", ID_HELP_GRABBER
         MENUITEM SEPARATOR
         MENUITEM "Check for &updates now", ID_HELP_CHECK_UPDATES
         MENUITEM "Check for updates every &two weeks", ID_HELP_AUTO_UPDATES
