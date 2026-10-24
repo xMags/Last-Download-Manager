@@ -86,6 +86,8 @@ struct SoundEvent {
 [[nodiscard]] std::string DefaultCapturedExtensions();
 // Sites whose downloads the browser keeps (checklist O-02), space separated, '*' wildcards.
 [[nodiscard]] std::string DefaultCaptureSiteExceptions();
+// The media types the download panel offers (checklist B-07), space separated, as the reference lists them.
+[[nodiscard]] std::string DefaultMediaTypes();
 
 // Keys that change what happens to a link clicked in the browser (checklist B-03). A set counts as
 // held when every key checked in it is down.
@@ -134,6 +136,13 @@ struct Settings {
     CaptureKeys captureKeys;               // Options > General > Keys
     BrowserMenu chromiumMenu;              // Options > General > Context menu: Chrome and Edge
     BrowserMenu firefoxMenu;               // ... and Firefox
+
+    // Media panel over web players (checklists B-07, B-09): Options > General > Media panel
+    bool mediaPanelEnabled = true;
+    std::string mediaTypes = DefaultMediaTypes();
+    int mediaMinimumKilobytes = 1024;  // plain media files smaller than this are not offered
+    std::string mediaSiteExceptions;   // host patterns where the panel never shows, space separated
+    bool mediaDrmNotice = true;        // say so when a video is protected and cannot be downloaded
 
     // Download All Links dialog (checklist B-05): the choices last made there
     bool allLinksUseLinkText = false;  // link texts become download descriptions

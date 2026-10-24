@@ -33,6 +33,11 @@ TEST(Settings, RoundTripsEveryChangedField)
     original.httpProxy.secret = {0x00, 0x7F, 0xFF};
     original.socks.version = 4;
     original.temporaryDirectory = "D:\\\xE2\x82\xAC temp";
+    original.mediaPanelEnabled = false;
+    original.mediaTypes = "MP4 WEBM";
+    original.mediaMinimumKilobytes = 0;
+    original.mediaSiteExceptions = "*.example.test";
+    original.mediaDrmNotice = false;
 
     const auto loaded = SettingsFromMap(SettingsToMap(original));
     ASSERT_TRUE(loaded.warnings.empty());

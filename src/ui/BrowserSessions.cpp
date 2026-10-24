@@ -24,11 +24,13 @@ std::string ConfigInputs(const model::Settings& settings)
     for (const bool flag : {k.preventEnabled, k.preventAlt, k.preventShift, k.preventCtrl, k.forceEnabled, k.forceAlt,
                             k.forceShift, k.forceCtrl, k.forceInsert, k.forceDelete, k.forceNeedsLinkClick,
                             k.skipWebContent, settings.chromiumMenu.downloadLink, settings.chromiumMenu.downloadAll,
-                            settings.firefoxMenu.downloadLink, settings.firefoxMenu.downloadAll}) {
+                            settings.firefoxMenu.downloadLink, settings.firefoxMenu.downloadAll,
+                            settings.mediaPanelEnabled}) {
         keys += flag ? '1' : '0';
     }
     return settings.capturedExtensions + kSeparator + settings.captureSiteExceptions + kSeparator +
-           settings.captureAddressExceptions + kSeparator + keys;
+           settings.captureAddressExceptions + kSeparator + keys + kSeparator + settings.mediaTypes + kSeparator +
+           std::to_string(settings.mediaMinimumKilobytes) + kSeparator + settings.mediaSiteExceptions;
 }
 
 std::vector<std::string> Words(const std::string& text)
@@ -155,14 +157,22 @@ void BrowserSessions::OnSettingsChanged(const model::Settings& settings)
 
 browser::Config BrowserSessions::MakeConfig(const model::Settings& settings, browser::BrowserFamily family) const
 {
+    const auto lowerWords = [](const std::string& text) {
+        std::vector<std::string> words = Words(text);
+        for (std::string& word : words) {
+            for (char& c : word) {
+                c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            }
+        }
+        return words;
+    };
     browser::Config config;
     config.appVersion = appVersion_;
-    for (std::string word : Words(settings.capturedExtensions)) {
-        for (char& c : word) {
-            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-        }
-        config.capturedExtensions.push_back(std::move(word));
-    }
+    config.capturedExtensions = lowerWords(settings.capturedExtensions);
+    config.media.enabled = settings.mediaPanelEnabled;
+    config.media.types = lowerWords(settings.mediaTypes);
+    config.media.minimumBytes = std::int64_t{settings.mediaMinimumKilobytes} * 1024;
+    config.media.siteExceptions = lowerWords(settings.mediaSiteExceptions);
     config.siteExceptions = Words(settings.captureSiteExceptions);
     // Address patterns hold no spaces, so whitespace separates them as well as line breaks do.
     config.addressExceptions = Words(settings.captureAddressExceptions);
