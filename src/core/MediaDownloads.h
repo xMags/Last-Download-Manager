@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/MediaPieces.h"
 #include "core/MediaProgress.h"
 #include "core/MediaTools.h"
 #include "core/Ports.h"
@@ -24,8 +25,23 @@ inline constexpr std::string_view kPartsFolderExtension = ".ldmparts";
 [[nodiscard]] std::vector<std::uint32_t> UnlistedTracks(const model::Download& download);
 
 // Reads a fetched HLS media playlist into `track`. Fails, with the reason to show, for a master
-// playlist, a live stream or protected content.
+// playlist or protected content. A live playlist makes `track` a live recording.
 [[nodiscard]] std::optional<TransferFailure> ListTrack(model::MediaTrack& track, const FetchFinished& fetched);
+
+// A live recording's playlist read again: adds what is new to `track` (AppendTrack).
+struct TrackReload {
+    std::optional<TransferFailure> failure;  // the playlist could not be read; `track` is unchanged
+    TrackAppend append;
+};
+[[nodiscard]] TrackReload ReloadTrack(model::MediaTrack& track, const FetchFinished& fetched);
+
+// True while a track of the stream is a live recording.
+[[nodiscard]] bool IsRecording(const model::Download& download);
+
+// Gives up on the pieces of `track` that are not on disk (MediaPiece::skipped): a live
+// recording's pieces left over from an earlier run, gone from the stream by now, or those not
+// fetched when the recording was finished. Returns whether anything changed.
+bool SkipUnfetchedPieces(model::MediaTrack& track);
 
 // For a stream from a public host: the first address of a track, key or piece that names a
 // loopback or private host (core::IsPrivateHost). The engine checks the addresses it connects to;
@@ -35,6 +51,10 @@ inline constexpr std::string_view kPartsFolderExtension = ".ldmparts";
 // The engine request of a run: the pieces not on disk yet, and the whole-file tracks with their
 // ranges. Connection limits and credentials are the caller's.
 [[nodiscard]] MediaRequest BuildMediaRequest(const model::Download& download, const std::filesystem::path& parts);
+// What a reload added to track `track` of a running live recording, for the engine.
+[[nodiscard]] MediaTrackExtension BuildTrackExtension(const model::Download& download,
+                                                      const std::filesystem::path& parts, std::uint32_t track,
+                                                      const TrackAppend& append);
 
 // Applies what a run reported. Returns the pieces newly marked done, to store.
 std::vector<MediaPieceDone> ApplyPiecesDone(model::Download& download, std::span<const MediaPieceDone> done);
@@ -50,15 +70,20 @@ std::vector<std::uint32_t> ResetMediaProgress(model::Download& download);
 std::vector<std::uint32_t> VerifyMediaProgress(model::Download& download, const std::filesystem::path& parts,
                                                FileSystem& fileSystem);
 
-// What to join once every piece is on disk.
+// What to join once every piece is on disk. Skipped pieces are left out, and so are media pieces
+// whose init section was skipped; the piece after a gap starts a new timeline (a discontinuity).
 [[nodiscard]] MuxRequest BuildMuxRequest(const model::Download& download, const std::filesystem::path& parts);
 
 // How far a stream is, for the list (it has no total size until it is joined).
+// Skipped pieces count neither as done nor as to do.
 struct StreamSummary {
     int piecesDone = 0;
     int piecesTotal = 0;  // 0 while a track's list is unknown
     double fraction = 0;  // 0..1, by duration where pieces have one
     std::int64_t bytesDone = 0;
+    bool live = false;  // a live recording, whose total is not known
+    // The length on disk: the done media pieces of the first video track, or of the first track.
+    std::int64_t recordedUs = 0;
 };
 [[nodiscard]] StreamSummary SummarizeStream(const model::Download& download);
 

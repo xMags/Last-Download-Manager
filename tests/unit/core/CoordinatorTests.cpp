@@ -1042,27 +1042,281 @@ TEST_F(CoordinatorTest, AnHlsStreamReadsItsPlaylistsBeforeTheRun)
     EXPECT_EQ(engine_.mediaStarts.size(), 1u);
 }
 
-TEST_F(CoordinatorTest, ALiveHlsStreamFailsWithAClearReason)
+// ---- live recordings ----
+
+// A live playlist of two-second segments `first` to `first + count - 1`.
+std::string LivePlaylist(int first, int count, bool ended = false)
 {
-    const AddResult result = Add("https://cdn.test/live.m3u8", AddMode::StartNow, [](AddDownloadCommand& c) {
-        ldm::core::MediaChoice media;
-        ldm::core::MediaTrackChoice video;
-        video.sourceUrl = "https://cdn.test/live.m3u8";
-        media.tracks = {video};
+    std::string text = "#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXT-X-MEDIA-SEQUENCE:" + std::to_string(first) + "\n";
+    for (int i = first; i < first + count; ++i) {
+        text += "#EXTINF:2,\nseg" + std::to_string(i) + ".ts\n";
+    }
+    return ended ? text + "#EXT-X-ENDLIST\n" : text;
+}
+
+class LiveRecordingTest : public CoordinatorTest {
+protected:
+    // Adds a live stream and answers its first playlist with segments 10 to 12.
+    DownloadId StartRecording()
+    {
+        const AddResult result = Add("https://cdn.test/live/master.m3u8", AddMode::StartNow, [](AddDownloadCommand& c) {
+            c.fileName = "Live.mp4";
+            ldm::core::MediaChoice media;
+            ldm::core::MediaTrackChoice video;
+            video.sourceUrl = "https://cdn.test/live/index.m3u8";
+            media.tracks = {video};
+            c.media = media;
+        });
+        EXPECT_TRUE(result.id) << result.error.value_or("");
+        Answer(LivePlaylist(10, 3));
+        return result.id.value_or(DownloadId{});
+    }
+
+    // Answers the latest playlist fetch.
+    void Answer(const std::string& body)
+    {
+        ASSERT_FALSE(engine_.fetches.empty());
+        ldm::core::FetchFinished answer;
+        answer.fetchId = engine_.fetches.back().fetchId;
+        answer.finalUrl = "https://cdn.test/live/index.m3u8";
+        answer.body = body;
+        Send(DownloadId{}, 0, answer);
+    }
+
+    void FailFetch()
+    {
+        ASSERT_FALSE(engine_.fetches.empty());
+        ldm::core::FetchFinished answer;
+        answer.fetchId = engine_.fetches.back().fetchId;
+        answer.failure = TransferFailure{FailureReason::HttpError, FailureClass::Retryable, 503, "busy"};
+        Send(DownloadId{}, 0, answer);
+    }
+
+    // Lets `by` pass and lets the coordinator act on it, without publishing a snapshot.
+    void Wait(std::chrono::milliseconds by)
+    {
+        clock_.Advance(by);
+        coordinator_->Tick();
+    }
+};
+
+TEST_F(LiveRecordingTest, ALiveStreamIsRecordedAndItsPlaylistReadAgainUntilItEnds)
+{
+    const DownloadId id = StartRecording();
+    ASSERT_EQ(engine_.mediaStarts.size(), 1u);
+    const auto& start = engine_.mediaStarts[0];
+    ASSERT_EQ(start.tracks.size(), 1u);
+    EXPECT_TRUE(start.tracks[0].live);
+    EXPECT_EQ(start.tracks[0].pieces.size(), 3u);
+    EXPECT_TRUE(Stored(id)->tracks[0].live);
+    EXPECT_LE(coordinator_->NextDeadline(), clock_.Steady() + std::chrono::seconds(2)) << "the core wakes for it";
+
+    Wait(std::chrono::milliseconds(1900));
+    EXPECT_EQ(engine_.fetches.size(), 1u) << "not before one target duration";
+    Wait(std::chrono::milliseconds(100));
+    ASSERT_EQ(engine_.fetches.size(), 2u);
+    EXPECT_EQ(engine_.fetches[1].url, "https://cdn.test/live/index.m3u8");
+
+    Answer(LivePlaylist(11, 3));
+    ASSERT_EQ(engine_.extensions.size(), 1u);
+    EXPECT_EQ(engine_.extensions[0].first, 1);
+    const auto& added = engine_.extensions[0].second.tracks;
+    ASSERT_EQ(added.size(), 1u);
+    EXPECT_TRUE(added[0].live);
+    ASSERT_EQ(added[0].pieces.size(), 1u);
+    EXPECT_EQ(added[0].pieces[0].url, "https://cdn.test/live/seg13.ts");
+    EXPECT_EQ(added[0].pieces[0].index, 3u);
+    EXPECT_EQ(added[0].pieces[0].path, kRoot / L"Video" / L"Live.mp4.ldmparts" / L"t0" / L"000003.ts");
+    EXPECT_EQ(Stored(id)->tracks[0].pieces.size(), 4u) << "the new piece is stored as it comes";
+
+    const auto& view = View(id);
+    ASSERT_TRUE(view.stream);
+    EXPECT_TRUE(view.stream->live);
+    EXPECT_FALSE(view.secondsLeft) << "a recording has no end to count down to";
+
+    Wait(std::chrono::seconds(2));
+    ASSERT_EQ(engine_.fetches.size(), 3u);
+    Answer(LivePlaylist(12, 3, true));
+    ASSERT_EQ(engine_.extensions.size(), 2u);
+    EXPECT_FALSE(engine_.extensions[1].second.tracks[0].live) << "the stream ended";
+    EXPECT_EQ(engine_.extensions[1].second.tracks[0].pieces.size(), 1u);
+    EXPECT_FALSE(Stored(id)->tracks[0].live);
+    Wait(std::chrono::seconds(10));
+    EXPECT_EQ(engine_.fetches.size(), 3u) << "an ended stream is not read again";
+
+    ldm::core::MediaFinished finished;
+    finished.outcome = TransferOutcome::Completed;
+    finished.done = {{0, 0, 10}, {0, 1, 10}, {0, 2, 10}, {0, 3, 10}, {0, 4, 10}};
+    Send(id, 1, finished);
+    ASSERT_EQ(media_.muxes.size(), 1u) << "it is joined without a question";
+    EXPECT_EQ(media_.muxes[0].inputs[0].pieces.size(), 5u);
+}
+
+TEST_F(LiveRecordingTest, APlaylistWithNothingNewIsReadAgainSooner)
+{
+    StartRecording();
+    Wait(std::chrono::seconds(2));
+    ASSERT_EQ(engine_.fetches.size(), 2u);
+    Answer(LivePlaylist(10, 3));
+    EXPECT_TRUE(engine_.extensions.empty());
+    Wait(std::chrono::milliseconds(1000));
+    EXPECT_EQ(engine_.fetches.size(), 3u) << "half the target duration";
+}
+
+TEST_F(LiveRecordingTest, SegmentsMissedInBetweenAreMarkedAsAGap)
+{
+    const DownloadId id = StartRecording();
+    Wait(std::chrono::seconds(2));
+    Answer(LivePlaylist(20, 3));
+    const auto stored = Stored(id);
+    ASSERT_EQ(stored->tracks[0].pieces.size(), 6u);
+    EXPECT_TRUE(stored->tracks[0].pieces[3].discontinuity);
+    EXPECT_FALSE(stored->tracks[0].pieces[4].discontinuity);
+}
+
+TEST_F(LiveRecordingTest, FinishingARunningRecordingJoinsWhatIsOnDisk)
+{
+    const DownloadId id = StartRecording();
+    ldm::core::MediaProgress progress;
+    progress.done = {{0, 0, 100}};
+    Send(id, 1, progress);
+    coordinator_->Handle(ldm::core::FinishRecordingCommand{{id}});
+    ASSERT_EQ(engine_.stops.size(), 1u);
+    ldm::core::MediaFinished stopped;
+    stopped.outcome = TransferOutcome::Stopped;
+    stopped.done = {{0, 1, 100}};
+    Send(id, 1, stopped);
+
+    ASSERT_EQ(media_.muxes.size(), 1u);
+    ASSERT_EQ(media_.muxes[0].inputs[0].pieces.size(), 2u) << "the piece not fetched is left out";
+    const auto stored = Stored(id);
+    EXPECT_FALSE(stored->tracks[0].live);
+    EXPECT_TRUE(stored->tracks[0].pieces[2].skipped);
+    EXPECT_EQ(View(id).download.status, DownloadStatus::Finalizing);
+    Wait(std::chrono::seconds(10));
+    EXPECT_EQ(engine_.fetches.size(), 1u) << "a finished recording is not read again";
+}
+
+TEST_F(LiveRecordingTest, FinishingBeforeAnythingWasRecordedOnlyStops)
+{
+    const DownloadId id = StartRecording();
+    coordinator_->Handle(ldm::core::FinishRecordingCommand{{id}});
+    ldm::core::MediaFinished stopped;
+    stopped.outcome = TransferOutcome::Stopped;
+    Send(id, 1, stopped);
+    EXPECT_TRUE(media_.muxes.empty());
+    const auto& view = View(id);
+    EXPECT_EQ(view.download.status, DownloadStatus::Paused);
+    EXPECT_EQ(view.download.lastResult, "Nothing was recorded yet");
+    EXPECT_TRUE(Stored(id)->tracks[0].live) << "Resume records on";
+}
+
+TEST_F(LiveRecordingTest, FinishingAPausedRecordingJoinsItAtOnce)
+{
+    const DownloadId id = StartRecording();
+    coordinator_->Handle(ldm::core::StopCommand{{id}});
+    ldm::core::MediaFinished stopped;
+    stopped.outcome = TransferOutcome::Stopped;
+    stopped.done = {{0, 0, 100}};
+    Send(id, 1, stopped);
+    EXPECT_EQ(View(id).download.status, DownloadStatus::Paused);
+    EXPECT_TRUE(media_.muxes.empty()) << "a plain Stop keeps recording later";
+
+    coordinator_->Handle(ldm::core::FinishRecordingCommand{{id}});
+    ASSERT_EQ(media_.muxes.size(), 1u);
+    EXPECT_EQ(media_.muxes[0].inputs[0].pieces.size(), 1u);
+}
+
+TEST_F(LiveRecordingTest, ResumingAPausedRecordingContinuesAtTheLiveEdge)
+{
+    const DownloadId id = StartRecording();
+    coordinator_->Handle(ldm::core::StopCommand{{id}});
+    ldm::core::MediaFinished stopped;
+    stopped.outcome = TransferOutcome::Stopped;
+    stopped.done = {{0, 0, 100}};
+    Send(id, 1, stopped);
+
+    coordinator_->Handle(ldm::core::ResumeCommand{{id}});
+    ASSERT_EQ(engine_.mediaStarts.size(), 2u);
+    EXPECT_TRUE(engine_.mediaStarts[1].tracks[0].pieces.empty()) << "what it listed before is gone by now";
+    EXPECT_TRUE(engine_.mediaStarts[1].tracks[0].live);
+    EXPECT_TRUE(Stored(id)->tracks[0].pieces[2].skipped);
+    coordinator_->Tick();
+    ASSERT_EQ(engine_.fetches.size(), 2u) << "the playlist is read again at once";
+
+    Answer(LivePlaylist(40, 3));
+    ASSERT_EQ(engine_.extensions.size(), 1u);
+    EXPECT_EQ(engine_.extensions[0].first, 2);
+    EXPECT_EQ(engine_.extensions[0].second.tracks[0].pieces.size(), 3u);
+    EXPECT_TRUE(Stored(id)->tracks[0].pieces[3].discontinuity);
+}
+
+TEST_F(LiveRecordingTest, ARecordingWhosePlaylistKeepsFailingFails)
+{
+    const DownloadId id = StartRecording();
+    for (int i = 0; i < 5; ++i) {
+        Wait(std::chrono::seconds(2));
+        FailFetch();
+    }
+    EXPECT_TRUE(engine_.stops.empty()) << "five failures in a row are survived";
+    Wait(std::chrono::seconds(2));
+    FailFetch();
+    ASSERT_EQ(engine_.stops.size(), 1u);
+    ldm::core::MediaFinished stopped;
+    stopped.outcome = TransferOutcome::Stopped;
+    stopped.done = {{0, 0, 100}};
+    Send(id, 1, stopped);
+    EXPECT_EQ(View(id).download.status, DownloadStatus::Failed);
+    ASSERT_EQ(observer_.All<ldm::core::DownloadFailed>().size(), 1u);
+    EXPECT_TRUE(Stored(id)->tracks[0].pieces[0].done) << "what was recorded stays";
+}
+
+TEST_F(LiveRecordingTest, ASuccessfulReadResetsTheFailureCount)
+{
+    StartRecording();
+    for (int i = 0; i < 5; ++i) {
+        Wait(std::chrono::seconds(2));
+        FailFetch();
+    }
+    Wait(std::chrono::seconds(2));
+    Answer(LivePlaylist(10, 3));
+    for (int i = 0; i < 5; ++i) {
+        Wait(std::chrono::seconds(2));
+        FailFetch();
+    }
+    EXPECT_TRUE(engine_.stops.empty());
+}
+
+TEST_F(LiveRecordingTest, APlaylistAnswerForAnEarlierRunIsDropped)
+{
+    const DownloadId id = StartRecording();
+    Wait(std::chrono::seconds(2));
+    ASSERT_EQ(engine_.fetches.size(), 2u);
+    const std::int64_t earlier = engine_.fetches.back().fetchId;
+    coordinator_->Handle(ldm::core::StopCommand{{id}});
+    ldm::core::MediaFinished stopped;
+    stopped.outcome = TransferOutcome::Stopped;
+    Send(id, 1, stopped);
+    coordinator_->Handle(ldm::core::ResumeCommand{{id}});
+
+    ldm::core::FetchFinished late;
+    late.fetchId = earlier;
+    late.finalUrl = "https://cdn.test/live/index.m3u8";
+    late.body = LivePlaylist(11, 3);
+    Send(DownloadId{}, 0, late);
+    EXPECT_TRUE(engine_.extensions.empty());
+}
+
+TEST_F(LiveRecordingTest, ALiveDashStreamIsRefusedWithTheReason)
+{
+    const AddResult result = Add("https://cdn.test/v.mpd", AddMode::StartNow, [](AddDownloadCommand& c) {
+        ldm::core::MediaChoice media = DashChoice();
+        media.tracks[0].segments->live = true;
         c.media = media;
     });
-    ASSERT_TRUE(result.id);
-    ASSERT_EQ(engine_.fetches.size(), 1u);
-    ldm::core::FetchFinished answer;
-    answer.fetchId = engine_.fetches[0].fetchId;
-    answer.finalUrl = "https://cdn.test/live.m3u8";
-    answer.body = "#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXTINF:4,\na.ts\n";
-    Send(DownloadId{}, 0, answer);
-    EXPECT_TRUE(engine_.mediaStarts.empty());
-    const auto failed = observer_.All<ldm::core::DownloadFailed>();
-    ASSERT_EQ(failed.size(), 1u);
-    EXPECT_EQ(failed[0].failure.reason, FailureReason::UnsupportedStream);
-    EXPECT_EQ(View(*result.id).download.status, DownloadStatus::Failed);
+    EXPECT_FALSE(result.id);
+    ASSERT_TRUE(result.error);
+    EXPECT_NE(result.error->find("live DASH"), std::string::npos) << *result.error;
 }
 
 TEST_F(CoordinatorTest, StoppingWhilePlaylistsAreFetchedPausesAtOnce)

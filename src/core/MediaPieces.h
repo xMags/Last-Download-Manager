@@ -19,6 +19,21 @@ namespace ldm::core {
 // `wholeFile` and that one piece. Durations become microseconds.
 void FillTrack(model::MediaTrack& track, const media::TrackSegments& segments);
 
+// What AppendTrack added to a track.
+struct TrackAppend {
+    std::uint32_t firstNewKey = 0;    // the track's key count before the call
+    std::uint32_t firstNewPiece = 0;  // the track's piece count before the call
+    bool changed = false;             // keys or pieces were added, or `live` changed
+};
+
+// Adds to a live recording's track what its reloaded playlist lists after the track's last
+// segment (RFC 8216 section 6.3.4): segments with a higher sequence number, with the init sections
+// and keys they need that the track does not have yet. Marks a discontinuity on the first new
+// piece when segments were missed in between (LDM fell behind the stream's window, or was paused),
+// and when the playlist started its numbering over, in which case everything it lists is new.
+// Takes over `live`; a track that reaches media::kMaxSegmentsPerTrack pieces stops being live.
+TrackAppend AppendTrack(model::MediaTrack& track, const media::TrackSegments& reloaded);
+
 // The parts folder's file for a piece: "t<track>\<index>.<extension>". The extension is the
 // address's when it is a short alphanumeric one and the piece is not an init section; otherwise
 // "mp4" for init sections, "vtt" for subtitles and "ts" for the rest. FFmpeg reads the files by

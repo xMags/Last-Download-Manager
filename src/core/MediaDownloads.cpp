@@ -79,14 +79,53 @@ std::optional<TransferFailure> ListTrack(model::MediaTrack& track, const FetchFi
     if (segments->drm) {
         return Unsupported("the stream is protected (DRM), which LDM does not download");
     }
-    if (segments->live) {
-        return Unsupported("this is a live stream; LDM does not download live streams yet");
-    }
-    if (segments->segments.empty()) {
+    // A live playlist may list nothing yet (RFC 8216 section 6.2.1); its reloads bring segments.
+    if (segments->segments.empty() && !segments->live) {
         return TransferFailure{FailureReason::Protocol, FailureClass::Fatal, 0, "the stream's playlist lists no segments"};
     }
     FillTrack(track, *segments);
     return std::nullopt;
+}
+
+TrackReload ReloadTrack(model::MediaTrack& track, const FetchFinished& fetched)
+{
+    TrackReload reload;
+    const std::string& base = fetched.finalUrl.empty() ? track.sourceUrl : fetched.finalUrl;
+    auto parsed = media::ParseHls(fetched.body, base);
+    if (!parsed) {
+        reload.failure = TransferFailure{FailureReason::Protocol, FailureClass::Fatal, 0,
+                                         "the stream's playlist could not be read: " + parsed.GetError().message};
+        return reload;
+    }
+    const auto* segments = std::get_if<media::TrackSegments>(&parsed.Value());
+    if (segments == nullptr) {
+        reload.failure = TransferFailure{FailureReason::Protocol, FailureClass::Fatal, 0,
+                                         "the track's address now leads to a list of qualities"};
+        return reload;
+    }
+    if (segments->drm) {
+        reload.failure = Unsupported("the stream became protected (DRM), which LDM does not download");
+        return reload;
+    }
+    reload.append = AppendTrack(track, *segments);
+    return reload;
+}
+
+bool IsRecording(const model::Download& download)
+{
+    return std::any_of(download.tracks.begin(), download.tracks.end(), [](const model::MediaTrack& t) { return t.live; });
+}
+
+bool SkipUnfetchedPieces(model::MediaTrack& track)
+{
+    bool changed = false;
+    for (model::MediaPiece& piece : track.pieces) {
+        if (!piece.done && !piece.skipped) {
+            piece.skipped = true;
+            changed = true;
+        }
+    }
+    return changed;
 }
 
 std::optional<TransferFailure> CheckPrivateAddresses(const model::Download& download)
@@ -116,6 +155,25 @@ std::optional<TransferFailure> CheckPrivateAddresses(const model::Download& down
     return std::nullopt;
 }
 
+namespace {
+
+MediaPieceRequest PieceRequest(const std::filesystem::path& parts, std::uint32_t t, const model::MediaTrack& track,
+                               std::uint32_t i)
+{
+    const model::MediaPiece& piece = track.pieces[i];
+    MediaPieceRequest request;
+    request.index = i;
+    request.url = piece.url;
+    request.rangeOffset = piece.rangeOffset;
+    request.rangeLength = piece.rangeLength;
+    request.key = piece.key;
+    request.iv = piece.iv.value_or(model::AesKey{});
+    request.path = PiecePath(parts, t, track, i);
+    return request;
+}
+
+}  // namespace
+
 MediaRequest BuildMediaRequest(const model::Download& download, const std::filesystem::path& parts)
 {
     MediaRequest request;
@@ -135,24 +193,35 @@ MediaRequest BuildMediaRequest(const model::Download& download, const std::files
             continue;
         }
         trackRequest.keys = track.keys;
+        trackRequest.live = track.live;
         for (std::uint32_t i = 0; i < track.pieces.size(); ++i) {
             const model::MediaPiece& piece = track.pieces[i];
-            if (piece.done) {
-                continue;
+            if (!piece.done && !piece.skipped) {
+                trackRequest.pieces.push_back(PieceRequest(parts, t, track, i));
             }
-            MediaPieceRequest pieceRequest;
-            pieceRequest.index = i;
-            pieceRequest.url = piece.url;
-            pieceRequest.rangeOffset = piece.rangeOffset;
-            pieceRequest.rangeLength = piece.rangeLength;
-            pieceRequest.key = piece.key;
-            pieceRequest.iv = piece.iv.value_or(model::AesKey{});
-            pieceRequest.path = PiecePath(parts, t, track, i);
-            trackRequest.pieces.push_back(std::move(pieceRequest));
         }
         request.tracks.push_back(std::move(trackRequest));
     }
     return request;
+}
+
+MediaTrackExtension BuildTrackExtension(const model::Download& download, const std::filesystem::path& parts,
+                                        std::uint32_t track, const TrackAppend& append)
+{
+    MediaTrackExtension extension;
+    extension.track = track;
+    const model::MediaTrack& owner = download.tracks.at(track);
+    extension.live = owner.live;
+    for (size_t k = append.firstNewKey; k < owner.keys.size(); ++k) {
+        extension.keys.push_back(owner.keys[k]);
+    }
+    for (std::uint32_t i = append.firstNewPiece; i < owner.pieces.size(); ++i) {
+        const model::MediaPiece& piece = owner.pieces[i];
+        if (!piece.done && !piece.skipped) {
+            extension.pieces.push_back(PieceRequest(parts, track, owner, i));
+        }
+    }
+    return extension;
 }
 
 std::vector<MediaPieceDone> ApplyPiecesDone(model::Download& download, std::span<const MediaPieceDone> done)
@@ -194,10 +263,12 @@ std::vector<std::uint32_t> ResetMediaProgress(model::Download& download)
             track.keys.clear();
             track.pieces.clear();
             track.wholeFile = false;
+            track.live = false;
         } else {
             for (model::MediaPiece& piece : track.pieces) {
                 piece.done = false;
                 piece.bytes.reset();
+                piece.skipped = false;
             }
         }
         changed.push_back(t);
@@ -262,14 +333,29 @@ MuxRequest BuildMuxRequest(const model::Download& download, const std::filesyste
         if (track.wholeFile) {
             input.wholeFile = WholeFilePath(parts, t, track);
         } else {
+            // The place in input.pieces of each piece of the track that is kept.
+            std::vector<std::optional<std::uint32_t>> kept(track.pieces.size());
+            bool gap = false;  // media pieces were left out since the last one kept
             for (std::uint32_t i = 0; i < track.pieces.size(); ++i) {
                 const model::MediaPiece& piece = track.pieces[i];
+                const bool init = piece.kind == model::MediaPiece::Kind::Init;
+                const bool initMissing = piece.init && (*piece.init >= kept.size() || !kept[*piece.init]);
+                if (piece.skipped || (!init && initMissing)) {
+                    gap = gap || !init;
+                    continue;
+                }
                 MuxPiece muxPiece;
                 muxPiece.file = PiecePath(parts, t, track, i);
-                muxPiece.init = piece.kind == model::MediaPiece::Kind::Init;
+                muxPiece.init = init;
                 muxPiece.durationUs = piece.durationUs;
-                muxPiece.discontinuity = piece.discontinuity;
-                muxPiece.initPiece = piece.init;
+                muxPiece.discontinuity = !init && (piece.discontinuity || gap);
+                if (piece.init) {
+                    muxPiece.initPiece = kept[*piece.init];
+                }
+                if (!init) {
+                    gap = false;
+                }
+                kept[i] = static_cast<std::uint32_t>(input.pieces.size());
                 input.pieces.push_back(std::move(muxPiece));
             }
         }
@@ -281,6 +367,13 @@ MuxRequest BuildMuxRequest(const model::Download& download, const std::filesyste
 StreamSummary SummarizeStream(const model::Download& download)
 {
     StreamSummary summary;
+    summary.live = IsRecording(download);
+    const auto video = std::find_if(download.tracks.begin(), download.tracks.end(), [](const model::MediaTrack& t) {
+        return t.role == model::TrackRole::Video;
+    });
+    const model::MediaTrack* measured = video != download.tracks.end() ? &*video
+                                        : download.tracks.empty()     ? nullptr
+                                                                      : &download.tracks.front();
     double fractions = 0;
     bool allListed = true;
     for (const model::MediaTrack& track : download.tracks) {
@@ -301,7 +394,12 @@ StreamSummary SummarizeStream(const model::Download& download)
         std::int64_t totalUs = 0;
         std::int64_t doneUs = 0;
         int done = 0;
+        int wanted = 0;
         for (const model::MediaPiece& piece : track.pieces) {
+            if (piece.skipped) {
+                continue;
+            }
+            ++wanted;
             totalUs += piece.durationUs;
             if (piece.done) {
                 ++done;
@@ -309,10 +407,15 @@ StreamSummary SummarizeStream(const model::Download& download)
                 summary.bytesDone += piece.bytes.value_or(0);
             }
         }
+        if (&track == measured) {
+            summary.recordedUs = doneUs;
+        }
         summary.piecesDone += done;
-        summary.piecesTotal += static_cast<int>(track.pieces.size());
-        fractions += totalUs > 0 ? static_cast<double>(doneUs) / static_cast<double>(totalUs)
-                                 : static_cast<double>(done) / static_cast<double>(track.pieces.size());
+        summary.piecesTotal += wanted;
+        if (wanted > 0) {
+            fractions += totalUs > 0 ? static_cast<double>(doneUs) / static_cast<double>(totalUs)
+                                     : static_cast<double>(done) / static_cast<double>(wanted);
+        }
     }
     if (!allListed) {
         summary.piecesTotal = 0;

@@ -116,6 +116,16 @@ private:
         bool muxing = false;              // a Mux for download.epoch has not answered
         std::optional<std::filesystem::path> muxOutput;  // the joined file, until it is moved
 
+        // Live recordings: the playlists are read again while the run lasts.
+        bool listedThisRun = false;       // the run read the playlists itself, so its pieces are fresh
+        std::optional<std::chrono::steady_clock::time_point> nextPlaylistReload;
+        int pendingReloads = 0;           // playlists of the current reload still being fetched
+        bool reloadChanged = false;       // the current reload added something
+        std::optional<TransferFailure> reloadFailure;  // of the current reload
+        int reloadFailures = 0;           // reloads in a row that failed
+        std::optional<TransferFailure> recordingFailure;  // the run stops, then the download fails
+        bool finishRecording = false;     // join what is on disk once the run stopped
+
         std::shared_ptr<const DownloadView> view;  // rebuilt when `viewDirty`
         bool viewDirty = true;
     };
@@ -126,6 +136,7 @@ private:
     void Resume(const std::vector<model::DownloadId>& ids);
     void Stop(const std::vector<model::DownloadId>& ids);
     void StopAll();
+    void FinishRecording(const std::vector<model::DownloadId>& ids);
     void Delete(const std::vector<model::DownloadId>& ids, bool deleteFiles);
     void DeleteCompleted();
     void Redownload(model::DownloadId id);
@@ -155,6 +166,7 @@ private:
     void OnMediaFinished(Entry& entry, const MediaFinished& finished);
     void OnMuxFinished(Entry& entry, const MuxFinished& finished);
     void OnPlaylistFetched(const FetchFinished& fetched);
+    void OnPlaylistReloaded(Entry& entry, std::uint32_t track, const FetchFinished& fetched);
     // What follows the end of any run, file or stream, once its own results are applied.
     void OnRunEnded(Entry& entry, TransferOutcome outcome, const std::optional<TransferFailure>& failure);
 
@@ -163,6 +175,11 @@ private:
     void StartEngine(Entry& entry, std::optional<std::string> proxy);
     // A stream's run: its HLS playlists first when they are not read yet, then the engine.
     void StartStream(Entry& entry);
+    [[nodiscard]] std::vector<std::string> StreamCookieLines(const model::Download& download);
+    // A live recording's playlists, read again (RFC 8216 section 6.3.4).
+    void ReloadPlaylists(Entry& entry);
+    // Ends a live recording that is not running: joins what is on disk, if anything.
+    void FinishRecordingNow(Entry& entry);
     // A finished run's next step: the final move, or joining a stream's pieces first.
     void CompleteRun(Entry& entry);
     void BeginMux(Entry& entry);
@@ -229,15 +246,21 @@ private:
     // and an observer.
     std::unique_ptr<ManifestFetches> manifests_;
 
-    // HLS playlists fetched at a stream's start, by fetch id. Their ids are negative, apart from
-    // the media panel's, which are at least 1.
+    // HLS playlists fetched at a stream's start or a live recording's reload, by fetch id. Their
+    // ids are negative, apart from the media panel's, which are at least 1.
+    enum class PlaylistPurpose {
+        Initial,  // the track's list, before the run
+        Reload,   // a live recording's list, read again while it runs
+    };
     struct PlaylistFetch {
         model::DownloadId id;
         std::int64_t epoch = 0;
         std::uint32_t track = 0;
+        PlaylistPurpose purpose = PlaylistPurpose::Initial;
     };
     std::map<std::int64_t, PlaylistFetch> playlistFetches_;
     std::int64_t lastPlaylistFetchId_ = 0;
+    void FetchPlaylist(Entry& entry, std::uint32_t track, PlaylistPurpose purpose);
 
     // Refresh download address: the one download waiting for a new address, and since when.
     std::optional<model::DownloadId> waitingForAddress_;
