@@ -3,6 +3,7 @@
 #include "browser/Protocol.h"
 #include "core/Commands.h"
 #include "core/Snapshot.h"
+#include "media/M3uList.h"
 #include "model/Cookie.h"
 #include "ui/BrowserLink.h"
 #include "ui/Theme.h"
@@ -94,6 +95,10 @@ public:
     void ExpectLinks(BrowserConnectionId connection);
     void OnLinkInfo(BrowserConnectionId connection, browser::LinkInfo info);
     void OnBrowserClosed(BrowserConnectionId connection);
+    // The links of a downloaded playlist file (checklist A-12): the Download All Links dialog
+    // with every link checked, then the checked ones added without starting, with the playlist's
+    // address as their referrer.
+    void AddPlaylistLinks(const std::vector<media::M3uEntry>& entries, const std::string& playlistUrl);
 
     void OnSnapshot(const core::Snapshot& snapshot);
     void OnAddResult(const core::AddResult& result);
@@ -117,6 +122,17 @@ private:
         std::optional<BrowserRequest> browser;
         std::optional<core::MediaChoice> media;
     };
+
+    // Where the links in a Download All Links dialog came from, sent along with each.
+    struct LinkSource {
+        std::optional<std::string> referrer;
+        std::optional<std::string> userAgent;  // the browser's; LDM's own when absent
+        std::vector<model::Cookie> cookies;
+    };
+    // Runs the Download All Links dialog, calls `closed` once it is closed, remembers its options,
+    // then adds the checked links without starting.
+    void RunLinksDialog(AllLinksDialog& dialog, const model::Settings& settings, const LinkSource& source,
+                        const std::function<void()>& closed);
 
     void AddWithInfoDialog(InfoDialogInput input);
     // Asks about an address already in the list when Options say so (checklist A-05). Returns false

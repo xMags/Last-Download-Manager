@@ -54,7 +54,11 @@ MainController::MainController(Context context)
                              [this](model::DownloadId id) { context_.list->SelectOnly(id); }, context_.linksDone,
                              [this](model::DownloadId id) { captures_.OnCapturedAdded(id); },
                              [this](const std::string& url) { captures_.OnCaptureCancelled(url); }}),
-      importExport_(ImportExportFlow::Context{context_.owner, context_.theme, &adds_, context_.snapshot, [this] { return Selection(); }})
+      importExport_(ImportExportFlow::Context{context_.owner, context_.theme, &adds_, context_.snapshot, [this] { return Selection(); }}),
+      playlists_(PlaylistOffer::Context{context_.owner, context_.theme,
+                                        [this](const std::vector<media::M3uEntry>& entries, const std::string& url) {
+                                            adds_.AddPlaylistLinks(entries, url);
+                                        }})
 {
 }
 
@@ -461,6 +465,7 @@ void MainController::OnSnapshot(const core::Snapshot& snapshot)
 {
     transfers_.OnSnapshot(snapshot);
     adds_.OnSnapshot(snapshot);
+    playlists_.OfferWaiting();
 }
 
 void MainController::OnNotifications(std::vector<core::Notification> notifications)
@@ -470,6 +475,7 @@ void MainController::OnNotifications(std::vector<core::Notification> notificatio
             adds_.OnAddResult(*added);
         } else if (const auto* completed = std::get_if<core::DownloadCompleted>(&notification)) {
             transfers_.OnCompleted(*completed);
+            playlists_.OnCompleted(*completed);
         } else if (const auto* failed = std::get_if<core::DownloadFailed>(&notification)) {
             transfers_.OnFailed(*failed);
             captures_.OnFailed(*failed);

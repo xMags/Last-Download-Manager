@@ -39,6 +39,39 @@ std::optional<model::CategoryId> GeneralCategory(const std::vector<model::Catego
     return categories.empty() ? std::nullopt : std::optional<model::CategoryId>(categories.front().id);
 }
 
+// The addresses already in the download list.
+std::set<std::string> ListedAddresses(const core::Snapshot& snapshot)
+{
+    std::set<std::string> listed;
+    for (const auto& view : snapshot.downloads) {
+        listed.insert(view->download.url);
+    }
+    return listed;
+}
+
+// The Download All Links dialog as the user left it last: its filters, the General category and
+// the latest folder. The caller adds the rows.
+AllLinksDialog::Initial LinksDialogDefaults(const core::Snapshot& snapshot)
+{
+    const model::Settings& settings = snapshot.settings;
+    AllLinksDialog::Initial initial;
+    initial.filter = LinkFilter{settings.allLinksHideHtml, settings.allLinksHideImages, settings.allLinksHideRepeated};
+    initial.useLinkText = settings.allLinksUseLinkText;
+    initial.categories = snapshot.categories;
+    initial.category = GeneralCategory(snapshot.categories);
+    const std::vector<std::string> folders = HistoryEntries(settings.recentFolders);
+    if (!folders.empty()) {
+        initial.folder = folders.front();
+    } else {
+        for (const model::Category& category : snapshot.categories) {
+            if (initial.category == category.id) {
+                initial.folder = category.folder;
+            }
+        }
+    }
+    return initial;
+}
+
 }  // namespace
 
 AddFlow::AddFlow(Context context) : context_(std::move(context)) {}
@@ -448,32 +481,12 @@ void AddFlow::AddPageLinks(browser::Links links, BrowserConnectionId connection,
         }
         return;
     }
-    const model::Settings& settings = snapshot->settings;
-
-    std::set<std::string> listed;
-    for (const auto& view : snapshot->downloads) {
-        listed.insert(view->download.url);
-    }
-    AllLinksDialog::Initial initial;
-    initial.rows = MakeLinkRows(links, listed);
+    AllLinksDialog::Initial initial = LinksDialogDefaults(*snapshot);
+    initial.rows = MakeLinkRows(links, ListedAddresses(*snapshot));
     for (const browser::LinkDetails& details : early.items) {
         (void)ApplyLinkDetails(initial.rows, details);
     }
     initial.selection = links.selection;
-    initial.filter = LinkFilter{settings.allLinksHideHtml, settings.allLinksHideImages, settings.allLinksHideRepeated};
-    initial.useLinkText = settings.allLinksUseLinkText;
-    initial.categories = snapshot->categories;
-    initial.category = GeneralCategory(snapshot->categories);
-    const std::vector<std::string> folders = HistoryEntries(settings.recentFolders);
-    if (!folders.empty()) {
-        initial.folder = folders.front();
-    } else {
-        for (const model::Category& category : snapshot->categories) {
-            if (initial.category == category.id) {
-                initial.folder = category.folder;
-            }
-        }
-    }
 
     AllLinksDialog dialog(*context_.theme, std::move(initial));
     if (early.closed) {
@@ -481,11 +494,42 @@ void AddFlow::AddPageLinks(browser::Links links, BrowserConnectionId connection,
     }
     linksConnection_ = connection;
     linksDialog_ = &dialog;
+    const LinkSource source{links.referrer, links.userAgent, std::move(links.cookies)};
+    RunLinksDialog(dialog, snapshot->settings, source, [this, connection, &requestId] {
+        linksDialog_ = nullptr;
+        linksConnection_ = 0;
+        if (context_.linksDone) {
+            context_.linksDone(connection, requestId);
+        }
+    });
+}
+
+void AddFlow::AddPlaylistLinks(const std::vector<media::M3uEntry>& entries, const std::string& playlistUrl)
+{
+    const auto snapshot = context_.snapshot();
+    if (!snapshot || snapshot->categories.empty() || entries.empty()) {
+        return;
+    }
+    browser::Links links;
+    links.selection = true;  // the user already said yes to them: they start checked
+    for (const media::M3uEntry& entry : entries) {
+        links.links.push_back(browser::PageLink{entry.url, entry.title, std::nullopt, browser::LinkKind::Link});
+    }
+    AllLinksDialog::Initial initial = LinksDialogDefaults(*snapshot);
+    initial.rows = MakeLinkRows(links, ListedAddresses(*snapshot));
+    initial.selection = true;
+    initial.title = L"Download the Playlist's Links with LDM";
+    AllLinksDialog dialog(*context_.theme, std::move(initial));
+    dialog.StopChecking();  // no browser checks these links; their types show by their names
+    RunLinksDialog(dialog, snapshot->settings, LinkSource{playlistUrl, std::nullopt, {}}, {});
+}
+
+void AddFlow::RunLinksDialog(AllLinksDialog& dialog, const model::Settings& settings, const LinkSource& source,
+                             const std::function<void()>& closed)
+{
     const auto choice = dialog.Run(context_.owner);
-    linksDialog_ = nullptr;
-    linksConnection_ = 0;
-    if (context_.linksDone) {
-        context_.linksDone(connection, requestId);
+    if (closed) {
+        closed();
     }
 
     const LinkFilter filter = dialog.Filter();
@@ -517,10 +561,10 @@ void AddFlow::AddPageLinks(browser::Links links, BrowserConnectionId connection,
         } else if (choice->saveTo == AllLinksDialog::SaveTo::OneFolder) {
             command.saveDir = choice->folder;
         }
-        command.referer = links.referrer;
-        command.parentPage = links.referrer;
-        command.userAgent = links.userAgent;
-        command.cookies = CookiesForAddress(links.cookies, pick.url);
+        command.referer = source.referrer;
+        command.parentPage = source.referrer;
+        command.userAgent = source.userAgent;
+        command.cookies = CookiesForAddress(source.cookies, pick.url);
         // Added to the list without starting.
         command.mode = core::AddMode::Later;
         command.duplicatePolicy = model::DuplicatePolicy::AddNumbered;

@@ -19,4 +19,8 @@ namespace ldm::media {
 // data, javascript, ...), a missing host, or control characters in either input.
 [[nodiscard]] std::optional<std::string> ResolveMediaUrl(std::string_view base, std::string_view reference);
 
+// The same for a link LDM may add as a download (a playlist file's entries): http, https, ftp or
+// ftps with a host.
+[[nodiscard]] std::optional<std::string> ResolveLinkUrl(std::string_view base, std::string_view reference);
+
 }  // namespace ldm::media

@@ -1,6 +1,7 @@
 #include "media/UrlReference.h"
 
 #include <algorithm>
+#include <initializer_list>
 
 namespace ldm::media {
 
@@ -175,7 +176,11 @@ std::optional<std::string> ResolveReference(std::string_view base, std::string_v
     return result;
 }
 
-std::optional<std::string> ResolveMediaUrl(std::string_view base, std::string_view reference)
+namespace {
+
+// ResolveMediaUrl's rules, with the schemes `allowed` says.
+std::optional<std::string> ResolveWithSchemes(std::string_view base, std::string_view reference,
+                                              std::initializer_list<std::string_view> allowed)
 {
     if (HasControlCharacter(base) || HasControlCharacter(reference)) {
         return std::nullopt;
@@ -186,7 +191,7 @@ std::optional<std::string> ResolveMediaUrl(std::string_view base, std::string_vi
     }
     const Parts parts = Split(*resolved);
     const std::string scheme = LowerAscii(parts.scheme.value_or(""));
-    if (scheme != "http" && scheme != "https") {
+    if (std::find(allowed.begin(), allowed.end(), scheme) == allowed.end()) {
         return std::nullopt;
     }
     // The host is what follows any user information and precedes any port.
@@ -202,6 +207,18 @@ std::optional<std::string> ResolveMediaUrl(std::string_view base, std::string_vi
         url += *parts.query;
     }
     return url;
+}
+
+}  // namespace
+
+std::optional<std::string> ResolveMediaUrl(std::string_view base, std::string_view reference)
+{
+    return ResolveWithSchemes(base, reference, {"http", "https"});
+}
+
+std::optional<std::string> ResolveLinkUrl(std::string_view base, std::string_view reference)
+{
+    return ResolveWithSchemes(base, reference, {"http", "https", "ftp", "ftps"});
 }
 
 }  // namespace ldm::media

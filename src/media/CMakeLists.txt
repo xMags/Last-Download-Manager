@@ -7,6 +7,8 @@ add_library(ldm_media STATIC
     DrmSystems.h
     HlsPlaylist.cpp
     HlsPlaylist.h
+    M3uList.cpp
+    M3uList.h
     MediaModel.cpp
     MediaModel.h
     NumberText.cpp

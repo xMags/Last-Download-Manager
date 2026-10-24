@@ -62,7 +62,11 @@ add_library(ldm_ui STATIC
     PageLinks.h
     PanelPlacement.cpp
     PanelPlacement.h
+    PlaylistOffer.cpp
+    PlaylistOffer.h
     ShellActions.h
+    SmallFile.cpp
+    SmallFile.h
     StartupRegistration.h
     StatusBar.cpp
     StreamChoice.cpp

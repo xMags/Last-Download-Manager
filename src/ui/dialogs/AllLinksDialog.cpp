@@ -75,8 +75,14 @@ std::optional<AllLinksDialog::Choice> AllLinksDialog::Run(HWND owner)
 
 bool AllLinksDialog::OnInit()
 {
-    if (initial_.selection) {
+    if (!initial_.title.empty()) {
+        ::SetWindowTextW(Handle(), initial_.title.c_str());
+    } else if (initial_.selection) {
         ::SetWindowTextW(Handle(), L"Download Selected Links with LDM");
+    }
+    if (checkingStopped_) {
+        // No browser checks these links: types come from their names, sizes are not known.
+        SetText(IDC_LINKS_INTRO, L"Check the links you want to add to Last Download Manager's list, then press OK.");
     }
     const HWND list = Item(IDC_LINKS_LIST);
     ListView_SetExtendedListViewStyle(list, LVS_EX_CHECKBOXES | LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER |

@@ -38,6 +38,7 @@ public:
     struct Initial {
         std::vector<LinkRow> rows;
         bool selection = false;  // "Download selected links": the title says so
+        std::wstring title;      // replaces the title when set
         LinkFilter filter;
         bool useLinkText = false;
         std::vector<model::Category> categories;

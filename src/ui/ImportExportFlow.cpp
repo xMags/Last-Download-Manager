@@ -4,6 +4,7 @@
 #include "core/Url.h"
 #include "ui/ExportFormat.h"
 #include "ui/FileDialogs.h"
+#include "ui/SmallFile.h"
 #include "ui/dialogs/MessageDialog.h"
 
 #include <cstring>
@@ -15,26 +16,6 @@
 namespace ldm::ui {
 
 namespace {
-
-// Reads the whole file when it is at most `limit` bytes.
-std::optional<std::string> ReadSmallFile(const std::filesystem::path& path, size_t limit)
-{
-    std::error_code error;
-    const auto size = std::filesystem::file_size(path, error);
-    if (error || size > limit) {
-        return std::nullopt;
-    }
-    std::ifstream file(path, std::ios::binary);
-    if (!file) {
-        return std::nullopt;
-    }
-    std::string bytes(static_cast<size_t>(size), '\0');
-    file.read(bytes.data(), static_cast<std::streamsize>(bytes.size()));
-    if (static_cast<size_t>(file.gcount()) != bytes.size()) {
-        return std::nullopt;
-    }
-    return bytes;
-}
 
 // Writes next to the target, then replaces it, so a failed export never leaves half a file.
 bool WriteFileReplacing(const std::filesystem::path& path, std::string_view bytes)
