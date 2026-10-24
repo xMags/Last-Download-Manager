@@ -17,12 +17,15 @@ enum class StatusFilter {
     All,
     Unfinished,
     Finished,
+    Queued,  // members of the download queues (M4 design section 7)
 };
 
-// A node of the category tree: a status view, optionally narrowed to one category.
+// A node of the category tree: a status view, optionally narrowed to one category, or the
+// members of the queues, optionally of one queue.
 struct ListFilter {
     StatusFilter status = StatusFilter::All;
     std::optional<model::CategoryId> category;
+    std::optional<model::QueueId> queue;  // with StatusFilter::Queued
 
     auto operator<=>(const ListFilter&) const = default;
 };
@@ -52,7 +55,8 @@ struct SortSpec {
 [[nodiscard]] SortSpec ParseSort(std::string_view text);
 
 // Positions into snapshot.downloads, filtered and in display order. Unknown sizes sort before
-// every known size; ties keep the order of addition.
+// every known size; ties keep the order of addition. One queue's members in the order of addition
+// are in their queue order instead.
 [[nodiscard]] std::vector<size_t> BuildIndex(const core::Snapshot& snapshot, const ListFilter& filter,
                                              const SortSpec& sort);
 

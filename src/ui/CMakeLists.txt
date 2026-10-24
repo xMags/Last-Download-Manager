@@ -64,6 +64,10 @@ add_library(ldm_ui STATIC
     PanelPlacement.h
     PlaylistOffer.cpp
     PlaylistOffer.h
+    QueueChoice.cpp
+    QueueChoice.h
+    QueueCommands.cpp
+    QueueCommands.h
     ShellActions.h
     SmallFile.cpp
     SmallFile.h
@@ -113,7 +117,9 @@ add_library(ldm_ui STATIC
     dialogs/ProgressWindow.cpp
     dialogs/ProgressWindow.h
     dialogs/PropertiesDialog.cpp
-    dialogs/PropertiesDialog.h)
+    dialogs/PropertiesDialog.h
+    dialogs/QueueDialogs.cpp
+    dialogs/QueueDialogs.h)
 target_link_libraries(ldm_ui
     PUBLIC ldm_browser ldm_core ldm_media
     PRIVATE nlohmann_json::nlohmann_json comctl32 uxtheme dwmapi shell32 comdlg32 ole32 shcore)

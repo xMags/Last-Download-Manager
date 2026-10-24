@@ -10,6 +10,7 @@
 #include <array>
 #include <charconv>
 #include <stdexcept>
+#include <string_view>
 
 namespace ldm::ui {
 
@@ -26,11 +27,14 @@ constexpr wchar_t kArrowDown = 0xE74B;
 constexpr wchar_t kRoundedSquare = 0xE71A;
 constexpr wchar_t kCheck = 0xE73E;
 constexpr wchar_t kGear = 0xE713;
+constexpr wchar_t kCalendar = 0xE787;
+constexpr wchar_t kList = 0xE8FD;
+constexpr wchar_t kPlay = 0xE768;
 
 // LDM's buttons in their default order (gap G-1), as thin gradient outlines. Five download
-// actions use embedded icons (src/resources/toolbar); other icons use local drawings. Scheduler and
-// queue buttons join in M4, when those features exist; "Tell a Friend" is excluded by the checklist.
-constexpr std::array<ButtonInfo, 7> kButtons{{
+// actions use embedded icons (src/resources/toolbar); other icons use local drawings. "Tell a
+// Friend" is excluded by the checklist.
+constexpr std::array<ButtonInfo, 10> kButtons{{
     {ID_TASKS_ADD_URL, {{}, RGB(0x4C, 0xB8, 0x6E), RGB(0x2F, 0x8C, 0xC4), IconShape::OutlinePlus}, L"Add URL"},
     {ID_FILE_DOWNLOAD_NOW, {{{{kArrowDown, 46}}}, RGB(0x34, 0xA8, 0xE0), RGB(0x3A, 0x6F, 0xD8), IconShape::Ring}, L"Resume"},
     {ID_FILE_STOP, {{{{kRoundedSquare, 34}}}, RGB(0xF5, 0xA6, 0x23), RGB(0xE0, 0x5A, 0x3A), IconShape::Ring}, L"Stop"},
@@ -39,7 +43,25 @@ constexpr std::array<ButtonInfo, 7> kButtons{{
     {ID_DOWNLOADS_DELETE_COMPLETED, {{{{kCheck, 40, 0, 9}}}, RGB(0xE8, 0x3E, 0x9A), RGB(0x8A, 0x4F, 0xD8), IconShape::EmptyTrash},
      L"Delete Completed"},
     {ID_DOWNLOADS_OPTIONS, {{{{kGear, 86}}}, RGB(0x3F, 0x7A, 0xE8), RGB(0x9B, 0x51, 0xE0)}, L"Options"},
+    {ID_DOWNLOADS_SCHEDULER, {{{{kCalendar, 80}}}, RGB(0x26, 0xA6, 0x9A), RGB(0x3A, 0x6F, 0xD8)}, L"Scheduler"},
+    {ID_DOWNLOADS_START_QUEUE, {{{{kList, 70, -12, -6}, {kPlay, 46, 22, 20}}}, RGB(0x4C, 0xB8, 0x6E), RGB(0x2F, 0x8C, 0xC4)},
+     L"Start Queue"},
+    {ID_DOWNLOADS_STOP_QUEUE,
+     {{{{kList, 70, -12, -6}, {kRoundedSquare, 38, 22, 20}}}, RGB(0xF5, 0xA6, 0x23), RGB(0xE0, 0x5A, 0x3A)},
+     L"Stop Queue"},
 }};
+
+// The buttons that open a menu of the queues.
+bool IsDropDown(int command)
+{
+    return command == ID_DOWNLOADS_START_QUEUE || command == ID_DOWNLOADS_STOP_QUEUE;
+}
+
+// A stored layout starts with this when it was written by a toolbar that has the queue buttons;
+// older layouts get them added after the others, so they are not lost to a layout saved before.
+constexpr std::string_view kLayoutVersion = "2|";
+constexpr std::array<int, 3> kButtonsSinceVersion2{ID_DOWNLOADS_SCHEDULER, ID_DOWNLOADS_START_QUEUE,
+                                                   ID_DOWNLOADS_STOP_QUEUE};
 
 struct ResourceIcon {
     int command;
@@ -83,8 +105,12 @@ std::vector<int> DefaultOrder()
     return order;
 }
 
-std::vector<int> ParseOrder(const std::string& layout)
+std::vector<int> ParseOrder(std::string_view layout)
 {
+    const bool current = layout.starts_with(kLayoutVersion);
+    if (current) {
+        layout.remove_prefix(kLayoutVersion.size());
+    }
     std::vector<int> order;
     size_t pos = 0;
     while (pos < layout.size()) {
@@ -105,7 +131,17 @@ std::vector<int> ParseOrder(const std::string& layout)
             order.push_back(command);
         }
     }
-    return std::any_of(order.begin(), order.end(), [](int command) { return command != 0; }) ? order : DefaultOrder();
+    if (!std::any_of(order.begin(), order.end(), [](int command) { return command != 0; })) {
+        return DefaultOrder();
+    }
+    if (!current) {
+        for (const int command : kButtonsSinceVersion2) {
+            if (std::find(order.begin(), order.end(), command) == order.end()) {
+                order.push_back(command);
+            }
+        }
+    }
+    return order;
 }
 
 // Large buttons all share one width; longer labels end in "..." and show whole in the tooltip.
@@ -123,6 +159,9 @@ TBBUTTON MakeButton(int command, bool autosize)
     button.idCommand = command;
     button.fsState = TBSTATE_ENABLED;
     button.fsStyle = autosize ? BTNS_BUTTON | BTNS_AUTOSIZE : BTNS_BUTTON;
+    if (IsDropDown(command)) {
+        button.fsStyle |= BTNS_WHOLEDROPDOWN;
+    }
     button.iString = reinterpret_cast<INT_PTR>(it->label);  // TBBUTTON stores strings as INT_PTR
     return button;
 }
@@ -176,7 +215,8 @@ void Toolbar::Refresh(bool largeButtons, const Theme& theme)
     style = large_ ? (style & ~static_cast<LONG_PTR>(TBSTYLE_LIST)) : (style | TBSTYLE_LIST);
     ::SetWindowLongPtrW(window_, GWL_STYLE, style);
     ::SendMessageW(window_, TB_SETEXTENDEDSTYLE, 0,
-                   large_ ? TBSTYLE_EX_DOUBLEBUFFER : (TBSTYLE_EX_DOUBLEBUFFER | TBSTYLE_EX_MIXEDBUTTONS));
+                   TBSTYLE_EX_DRAWDDARROWS |
+                       (large_ ? TBSTYLE_EX_DOUBLEBUFFER : (TBSTYLE_EX_DOUBLEBUFFER | TBSTYLE_EX_MIXEDBUTTONS)));
     ApplyImages(theme);
     const int padding = Scale(large_ ? 10 : 6, dpi);
     ::SendMessageW(window_, TB_SETPADDING, 0, MAKELPARAM(padding, Scale(large_ ? 6 : 6, dpi)));
@@ -232,14 +272,19 @@ void Toolbar::Customize()
     ::SendMessageW(window_, TB_CUSTOMIZE, 0, 0);
 }
 
+void Toolbar::SetDropDownHandler(std::function<void(int command, POINT screen)> handler)
+{
+    dropDown_ = std::move(handler);
+}
+
 std::string Toolbar::Layout() const
 {
-    std::string layout;
+    std::string layout(kLayoutVersion);
     const int count = static_cast<int>(::SendMessageW(window_, TB_BUTTONCOUNT, 0, 0));
     for (int i = 0; i < count; ++i) {
         TBBUTTON button{};
         ::SendMessageW(window_, TB_GETBUTTON, static_cast<WPARAM>(i), reinterpret_cast<LPARAM>(&button));
-        if (!layout.empty()) {
+        if (i > 0) {
             layout += ',';
         }
         layout += std::to_string((button.fsStyle & BTNS_SEP) != 0 ? 0 : button.idCommand);
@@ -274,10 +319,20 @@ bool Toolbar::HandleNotify(const NMHDR& header, LRESULT& result, bool& layoutCha
         result = TRUE;
         return true;
     }
+    case TBN_DROPDOWN: {
+        const auto& info = reinterpret_cast<const NMTOOLBARW&>(header);
+        if (dropDown_ && IsDropDown(info.iItem)) {
+            POINT below{info.rcButton.left, info.rcButton.bottom};
+            ::ClientToScreen(window_, &below);
+            dropDown_(info.iItem, below);
+        }
+        result = TBDDRET_DEFAULT;
+        return true;
+    }
     case TBN_RESET: {
-        std::string layout;
-        for (const int command : savedOrder_) {
-            layout += (layout.empty() ? "" : ",") + std::to_string(command);
+        std::string layout(kLayoutVersion);
+        for (size_t i = 0; i < savedOrder_.size(); ++i) {
+            layout += (i == 0 ? "" : ",") + std::to_string(savedOrder_[i]);
         }
         ApplyLayout(layout);
         result = TBNRF_ENDCUSTOMIZE;

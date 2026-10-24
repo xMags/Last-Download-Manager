@@ -26,6 +26,8 @@ enum Image {
     kImageMusic,
     kImagePrograms,
     kImageVideo,
+    kImageQueue,
+    kImageSyncQueue,
 };
 
 constexpr wchar_t kCloseGlyph = 0xE8BB;  // ChromeClose
@@ -36,7 +38,7 @@ constexpr int kTreeItemHeight96 = 21;
 constexpr int kTreeIcon96 = 14;  // tree icons sit inside short rows with room to spare
 
 // In Image order. Each built-in category has its own icon, drawn from the Windows icon font.
-constexpr std::array<Glyph, 9> kTreeGlyphs{{
+constexpr std::array<Glyph, 11> kTreeGlyphs{{
     {0xE838, RGB(0xE8, 0xA3, 0x17)},  // FolderOpen
     {0xE8B7, RGB(0xE8, 0xA3, 0x17)},  // Folder
     {0xE896, RGB(0x2E, 0xA0, 0x43)},  // Download
@@ -46,6 +48,8 @@ constexpr std::array<Glyph, 9> kTreeGlyphs{{
     {0xEC4F, RGB(0x1E, 0x88, 0xE5)},  // MusicNote
     {0xE737, RGB(0x45, 0x5A, 0x64)},  // Favicon (a window)
     {0xE714, RGB(0x26, 0x8C, 0x7A)},  // Video
+    {0xE8FD, RGB(0x1E, 0x88, 0xE5)},  // BulletedList
+    {0xE895, RGB(0x2E, 0xA0, 0x43)},  // Sync
 }};
 
 // Built-in categories are seeded with these names; renamed or user categories get a folder.
@@ -65,6 +69,13 @@ int CategoryImage(const model::Category& category)
         }
     }
     return kImageFolder;
+}
+
+bool SameQueues(const std::vector<model::Queue>& a, const std::vector<model::Queue>& b)
+{
+    return std::equal(a.begin(), a.end(), b.begin(), b.end(), [](const model::Queue& x, const model::Queue& y) {
+        return x.id == y.id && x.name == y.name;
+    });
 }
 
 bool SameCategories(const std::vector<model::Category>& a, const std::vector<model::Category>& b)
@@ -110,6 +121,16 @@ void CategoryPane::SetCategories(const std::vector<model::Category>& categories)
     Rebuild();
 }
 
+void CategoryPane::SetQueues(const std::vector<model::Queue>& queues)
+{
+    if (SameQueues(queues, queues_) && !nodes_.empty()) {
+        queues_ = queues;
+        return;
+    }
+    queues_ = queues;
+    Rebuild();
+}
+
 void CategoryPane::Rebuild()
 {
     const ListFilter selected = nodes_.empty() ? ListFilter{} : Selected();
@@ -147,8 +168,17 @@ void CategoryPane::Rebuild()
             TreeView_Expand(tree_, parent, TVE_EXPAND);
         }
     }
+    const HTREEITEM queues = insert(TVI_ROOT, L"Queues", kImageQueue, ListFilter{StatusFilter::Queued, std::nullopt, std::nullopt});
+    for (const model::Queue& queue : queues_) {
+        insert(queues, base::ToUtf16(queue.name), queue.kind == model::QueueKind::Sync ? kImageSyncQueue : kImageQueue,
+               ListFilter{StatusFilter::Queued, std::nullopt, queue.id});
+    }
+    TreeView_Expand(tree_, queues, TVE_EXPAND);
     Select(selected);
     rebuilding_ = false;
+    if (Selected() != selected && callbacks_.filterChanged) {
+        callbacks_.filterChanged(Selected());  // the node shown before is gone: show the one selected now
+    }
 }
 
 void CategoryPane::Select(const ListFilter& filter)
@@ -293,13 +323,13 @@ bool CategoryPane::HandleNotify(const NMHDR& header, LRESULT& result)
         TVHITTESTINFO hit{};
         hit.pt = screen;
         ::ScreenToClient(tree_, &hit.pt);
-        std::optional<model::CategoryId> category;
+        std::optional<ListFilter> node;
         if (const HTREEITEM item = TreeView_HitTest(tree_, &hit); item != nullptr) {
             TreeView_SelectItem(tree_, item);
-            category = Selected().category;
+            node = Selected();
         }
         if (callbacks_.contextMenu) {
-            callbacks_.contextMenu(category, screen);
+            callbacks_.contextMenu(node, screen);
         }
         result = TRUE;
         return true;

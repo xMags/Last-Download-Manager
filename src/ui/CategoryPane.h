@@ -1,6 +1,7 @@
 #pragma once
 
 #include "model/Category.h"
+#include "model/Queue.h"
 #include "ui/Handles.h"
 #include "ui/ListModel.h"
 #include "ui/Theme.h"
@@ -14,14 +15,15 @@
 namespace ldm::ui {
 
 // The left pane (checklist W-01, W-02, W-04): a "Categories" header with a close button over a tree
-// of All Downloads, Unfinished and Finished, each with the categories under it.
+// of All Downloads, Unfinished and Finished, each with the categories under it, and Queues with
+// the download queues under it.
 class CategoryPane {
 public:
     struct Callbacks {
         std::function<void(const ListFilter&)> filterChanged;
         std::function<void()> closeRequested;
-        // Right-click on the tree; the category under the cursor, if any, and the screen point.
-        std::function<void(std::optional<model::CategoryId>, POINT)> contextMenu;
+        // Right-click on the tree; the node under the cursor, if any, and the screen point.
+        std::function<void(std::optional<ListFilter>, POINT)> contextMenu;
     };
 
     CategoryPane() = default;
@@ -30,6 +32,8 @@ public:
 
     void Create(HWND parent, Callbacks callbacks);
     void SetCategories(const std::vector<model::Category>& categories);
+    // In their sort order.
+    void SetQueues(const std::vector<model::Queue>& queues);
     void ApplyTheme(const Theme& theme);
     void SetFont(HFONT font);
     void Layout(const RECT& area);
@@ -58,6 +62,7 @@ private:
     UniqueIcon closeIcon_;
     const Theme* theme_ = nullptr;
     std::vector<model::Category> categories_;
+    std::vector<model::Queue> queues_;
     std::vector<ListFilter> nodes_;  // a tree item's lParam is its index here
     bool rebuilding_ = false;
 };

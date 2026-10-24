@@ -92,6 +92,16 @@ BEGIN
         MENUITEM "&Find...\tCtrl+F", ID_DOWNLOADS_FIND
         MENUITEM "Find &next\tF3", ID_DOWNLOADS_FIND_NEXT
         MENUITEM SEPARATOR
+        MENUITEM "Sc&heduler...", ID_DOWNLOADS_SCHEDULER
+        POPUP "S&tart queue"
+        BEGIN
+            MENUITEM "(no queues)", ID_DOWNLOADS_START_QUEUE, GRAYED
+        END
+        POPUP "Stop &queue"
+        BEGIN
+            MENUITEM "(no queues)", ID_DOWNLOADS_STOP_QUEUE, GRAYED
+        END
+        MENUITEM SEPARATOR
         POPUP "Speed &limiter"
         BEGIN
             MENUITEM "Turn o&n", ID_DOWNLOADS_LIMITER_ON
@@ -819,6 +829,17 @@ BEGIN
     AUTOCHECKBOX "&Save the login for this server", IDC_LOGIN_SAVE, 55, 64, 198, 10, WS_TABSTOP
     DEFPUSHBUTTON "OK", IDOK, 149, 79, 50, 14
     PUSHBUTTON "Cancel", IDCANCEL, 203, 79, 50, 14
+END
+
+IDD_QUEUE_NAME DIALOGEX 0, 0, 230, 62
+STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "New queue"
+FONT 9, "Segoe UI", 400, 0, 0x1
+BEGIN
+    LTEXT "&Queue name:", -1, 7, 9, 50, 8
+    EDITTEXT IDC_QUEUE_NAME, 60, 7, 163, 13, ES_AUTOHSCROLL | WS_TABSTOP
+    DEFPUSHBUTTON "OK", IDOK, 119, 41, 50, 14
+    PUSHBUTTON "Cancel", IDCANCEL, 173, 41, 50, 14
 END
 
 // Sized to its text at run time (MessageDialog.cpp).

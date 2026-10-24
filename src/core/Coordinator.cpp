@@ -393,7 +393,7 @@ void Coordinator::Handle(Command command)
                     manifests_->Start(std::move(typed), settings_.userAgent);
                 }
             } else if constexpr (std::is_same_v<T, SaveQueueCommand>) {
-                SaveQueue(std::move(typed.queue));
+                SaveQueue(std::move(typed.queue), typed.members);
             } else if constexpr (std::is_same_v<T, DeleteQueueCommand>) {
                 DeleteQueue(typed.id);
             } else if constexpr (std::is_same_v<T, SetQueueCommand>) {

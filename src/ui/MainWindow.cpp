@@ -179,14 +179,19 @@ void MainWindow::OnCreate()
 {
     const model::Settings& settings = snapshot_->settings;
     toolbar_.Create(window_, kToolbarId, settings.largeToolbarButtons, settings.toolbarLayout, *theme_);
+    toolbar_.SetDropDownHandler([this](int command, POINT screen) { controller_->ShowQueueToolbarMenu(command, screen); });
     categories_.Create(window_, CategoryPane::Callbacks{
                                     [this](const ListFilter& filter) { list_.SetFilter(filter); },
                                     [this] {
                                         services_.commands->Post(core::ModifySettingsCommand{
                                             [](model::Settings& s) { s.hideCategories = true; }});
                                     },
-                                    [this](std::optional<model::CategoryId> category, POINT screen) {
-                                        controller_->ShowCategoryMenu(category, screen);
+                                    [this](std::optional<ListFilter> node, POINT screen) {
+                                        if (node && node->status == StatusFilter::Queued) {
+                                            controller_->ShowQueueMenu(node->queue, screen);
+                                        } else {
+                                            controller_->ShowCategoryMenu(node ? node->category : std::nullopt, screen);
+                                        }
                                     }});
     list_.Create(window_, DownloadListView::Callbacks{
                               [this] { controller_->OnSelectionChanged(); },
@@ -555,6 +560,11 @@ void MainWindow::ApplySnapshot(std::shared_ptr<const core::Snapshot> snapshot)
     }
     snapshot_ = std::move(snapshot);
     categories_.SetCategories(snapshot_->categories);
+    std::vector<model::Queue> queues;
+    for (const core::QueueView& view : snapshot_->queues) {
+        queues.push_back(view.queue);
+    }
+    categories_.SetQueues(queues);
     list_.SetSnapshot(snapshot_);
     ApplyViewSettings(snapshot_->settings, false);
     controller_->OnSnapshot(*snapshot_);

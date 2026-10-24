@@ -176,7 +176,7 @@ private:
     void StopWaitingForAddress(model::DownloadId id);
 
     // Download queues (M4 design section 3; CoordinatorQueues.cpp).
-    void SaveQueue(model::Queue queue);
+    void SaveQueue(model::Queue queue, const std::vector<model::DownloadId>& members);
     void DeleteQueue(model::QueueId id);
     void SetQueue(const std::vector<model::DownloadId>& ids, std::optional<model::QueueId> queue);
     void ReorderQueue(model::QueueId id, const std::vector<model::DownloadId>& order);

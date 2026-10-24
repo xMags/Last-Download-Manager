@@ -58,7 +58,9 @@ MainController::MainController(Context context)
       playlists_(PlaylistOffer::Context{context_.owner, context_.theme,
                                         [this](const std::vector<media::M3uEntry>& entries, const std::string& url) {
                                             adds_.AddPlaylistLinks(entries, url);
-                                        }})
+                                        }}),
+      queues_(QueueCommands::Context{context_.owner, context_.commands, context_.theme, context_.snapshot,
+                                     [this] { return Selection(); }, {}})
 {
 }
 
@@ -116,6 +118,9 @@ bool MainController::PreTranslate(MSG& message)
 
 bool MainController::OnCommand(int id)
 {
+    if (queues_.OnCommand(id)) {
+        return true;
+    }
     const auto selectedIds = [this] { return context_.list->SelectedIds(); };
     switch (id) {
     case ID_TASKS_ADD_URL:
@@ -321,9 +326,13 @@ bool MainController::OnCommand(int id)
 
 void MainController::OnLaunchRequest(const core::LaunchRequest& request)
 {
-    // startQueue waits for queues (M4); a launch without an address just shows LDM.
+    // --start-queue starts the main queue (checklist A-10); a launch with neither an address nor
+    // it just shows LDM.
+    if (request.startQueue) {
+        queues_.StartMainQueue();
+    }
     if (!request.url) {
-        if (!request.tray) {
+        if (!request.tray && !request.startQueue) {
             context_.restore();
         }
         return;
@@ -415,7 +424,7 @@ void MainController::SetSort(SortKey key)
 void MainController::OnMenuPopup(HMENU menu)
 {
     const auto snapshot = Snapshot();
-    if (!snapshot) {
+    if (!snapshot || queues_.FillPopup(menu)) {
         return;
     }
     const auto selection = Selection();
@@ -430,6 +439,7 @@ void MainController::OnMenuPopup(HMENU menu)
     enable(ID_DOWNLOADS_STOP_ALL, state.stopAll);
     enable(ID_DOWNLOADS_PAUSE_ALL, state.stopAll);
     enable(ID_DOWNLOADS_DELETE_COMPLETED, state.deleteCompleted);
+    enable(ID_DOWNLOADS_SCHEDULER, false);  // the Scheduler window comes with M4 step 5e
     enable(ID_DOWNLOADS_LIMITER_ON, !snapshot->speedLimiterOn);
     enable(ID_DOWNLOADS_LIMITER_OFF, snapshot->speedLimiterOn);
     check(ID_VIEW_HIDE_CATEGORIES, settings.hideCategories);
@@ -459,6 +469,7 @@ void MainController::OnSelectionChanged()
     toolbar.SetEnabled(ID_DOWNLOADS_STOP_ALL, state.stopAll);
     toolbar.SetEnabled(ID_FILE_REMOVE, state.remove);
     toolbar.SetEnabled(ID_DOWNLOADS_DELETE_COMPLETED, state.deleteCompleted);
+    toolbar.SetEnabled(ID_DOWNLOADS_SCHEDULER, false);  // the Scheduler window comes with M4 step 5e
 }
 
 void MainController::OnSnapshot(const core::Snapshot& snapshot)
@@ -819,7 +830,7 @@ void MainController::ShowRowMenu(POINT screen)
     AppendItem(doubleClick.get(), ID_ROW_DOUBLE_CLICK_OPEN, L"Open", true, openOnDoubleClick);
     AppendItem(doubleClick.get(), ID_ROW_DOUBLE_CLICK_PROPERTIES, L"Properties", true, !openOnDoubleClick);
 
-    // Order per gap G-1; queue entries arrive with queues in M4.
+    // Order per gap G-1.
     AppendItem(menu.get(), ID_ROW_OPEN, L"&Open", state.open);
     AppendItem(menu.get(), ID_ROW_OPEN_WITH, L"Open &with...", state.open);
     AppendItem(menu.get(), ID_ROW_OPEN_FOLDER, L"Open &folder", state.openFolder);
@@ -834,6 +845,8 @@ void MainController::ShowRowMenu(POINT screen)
     AppendItem(menu.get(), ID_ROW_REFRESH_ADDRESS, L"Refresh download &address", state.refreshAddress);
     AppendSeparator(menu.get());
     AppendItem(menu.get(), ID_FILE_REMOVE, L"Re&move\tDel", state.remove);
+    AppendSeparator(menu.get());
+    queues_.AppendRowItems(menu.get(), selection);
     AppendSeparator(menu.get());
     ::AppendMenuW(menu.get(), MF_POPUP, reinterpret_cast<UINT_PTR>(doubleClick.release()), L"On &double click");  // owned by `menu` now
     AppendSeparator(menu.get());
@@ -856,6 +869,16 @@ void MainController::ShowCategoryMenu(std::optional<model::CategoryId> category,
     AppendItem(menu.get(), ID_CATEGORY_EDIT, L"&Properties...", category.has_value());
     AppendItem(menu.get(), ID_CATEGORY_DELETE, L"&Delete category", deletable);
     ::TrackPopupMenuEx(menu.get(), TPM_RIGHTBUTTON, screen.x, screen.y, context_.owner, nullptr);
+}
+
+void MainController::ShowQueueMenu(std::optional<model::QueueId> queue, POINT screen)
+{
+    queues_.ShowTreeMenu(queue, screen);
+}
+
+void MainController::ShowQueueToolbarMenu(int command, POINT screen)
+{
+    queues_.ShowToolbarMenu(command, screen);
 }
 
 void MainController::ShowTrayMenu(POINT screen)

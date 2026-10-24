@@ -221,6 +221,8 @@ struct ReplaceAddressCommand {
 // built-in queues keep their names.
 struct SaveQueueCommand {
     model::Queue queue;
+    // A new queue only: downloads that join it at once (Add to queue > Create new queue).
+    std::vector<model::DownloadId> members;
 };
 // Deletes a custom queue, stopping it first; its members stay as downloads outside any queue.
 struct DeleteQueueCommand {
