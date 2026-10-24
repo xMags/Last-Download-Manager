@@ -175,6 +175,47 @@ ALTER TABLE media_tracks ADD COLUMN live INTEGER NOT NULL DEFAULT 0 CHECK (live 
     Migration{7, R"sql(
 ALTER TABLE media_segments ADD COLUMN skipped INTEGER NOT NULL DEFAULT 0 CHECK (skipped IN (0, 1));
 )sql"},
+    // Download queues and their schedules, with the two built-in queues. Whether a queue runs is
+    // not stored: every queue is stopped when LDM starts.
+    Migration{8, R"sql(
+CREATE TABLE schedules (
+  id                 INTEGER PRIMARY KEY,
+  enabled            INTEGER NOT NULL DEFAULT 0 CHECK (enabled IN (0, 1)),
+  mode               TEXT NOT NULL CHECK (mode IN ('once', 'daily')),
+  start_minutes      INTEGER NOT NULL CHECK (start_minutes BETWEEN 0 AND 1439),
+  start_day          INTEGER,
+  weekdays           INTEGER NOT NULL DEFAULT 127 CHECK (weekdays BETWEEN 0 AND 127),
+  repeat_minutes     INTEGER NOT NULL DEFAULT 0 CHECK (repeat_minutes >= 0),
+  stop_enabled       INTEGER NOT NULL DEFAULT 0 CHECK (stop_enabled IN (0, 1)),
+  stop_minutes       INTEGER NOT NULL DEFAULT 0 CHECK (stop_minutes BETWEEN 0 AND 1439),
+  start_on_app_start INTEGER NOT NULL DEFAULT 0 CHECK (start_on_app_start IN (0, 1)),
+  last_started_at    INTEGER
+) STRICT;
+
+CREATE TABLE queues (
+  id                  INTEGER PRIMARY KEY,
+  name                TEXT NOT NULL UNIQUE COLLATE NOCASE,
+  kind                TEXT NOT NULL CHECK (kind IN ('main', 'sync', 'custom')),
+  concurrent          INTEGER NOT NULL DEFAULT 1 CHECK (concurrent BETWEEN 1 AND 16),
+  retries_per_file    INTEGER NOT NULL DEFAULT 3 CHECK (retries_per_file BETWEEN 0 AND 99),
+  completion_action   TEXT NOT NULL DEFAULT 'none'
+                        CHECK (completion_action IN ('none','exit','shutdown','sleep','hibernate')),
+  force_terminate     INTEGER NOT NULL DEFAULT 0 CHECK (force_terminate IN (0, 1)),
+  open_file_when_done TEXT NOT NULL DEFAULT '',
+  schedule_id         INTEGER REFERENCES schedules(id) ON DELETE SET NULL,
+  sort_order          INTEGER NOT NULL
+) STRICT;
+
+CREATE UNIQUE INDEX queues_builtin ON queues(kind) WHERE kind <> 'custom';
+
+INSERT INTO queues (name, kind, sort_order) VALUES ('Main download queue', 'main', 0);
+INSERT INTO queues (name, kind, sort_order) VALUES ('Synchronization queue', 'sync', 1);
+
+ALTER TABLE downloads ADD COLUMN queue_id INTEGER REFERENCES queues(id) ON DELETE SET NULL;
+ALTER TABLE downloads ADD COLUMN queue_position INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE downloads ADD COLUMN queue_failures INTEGER NOT NULL DEFAULT 0 CHECK (queue_failures >= 0);
+CREATE INDEX downloads_queue ON downloads(queue_id, queue_position);
+)sql"},
 };
 
 base::Result<int> CurrentVersion(Connection& connection)

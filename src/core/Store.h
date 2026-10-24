@@ -5,6 +5,7 @@
 #include "model/Category.h"
 #include "model/ConnectionRules.h"
 #include "model/Download.h"
+#include "model/Queue.h"
 #include "model/Settings.h"
 
 #include <cstdint>
@@ -46,6 +47,15 @@ public:
     [[nodiscard]] virtual base::Result<model::CategoryId> InsertCategory(const model::Category& category) = 0;
     [[nodiscard]] virtual base::Status SaveCategory(const model::Category& category) = 0;
     [[nodiscard]] virtual base::Status DeleteCategory(model::CategoryId id) = 0;
+
+    // Queues come with their schedules, in their sort order.
+    [[nodiscard]] virtual base::Result<std::vector<model::Queue>> LoadQueues() = 0;
+    // Inserts a custom queue and its schedule and returns the assigned id. `queue.id` is ignored.
+    [[nodiscard]] virtual base::Result<model::QueueId> InsertQueue(const model::Queue& queue) = 0;
+    [[nodiscard]] virtual base::Status SaveQueue(const model::Queue& queue) = 0;
+    // Deletes a custom queue and its schedule; its members stay as downloads outside any queue.
+    // The built-in queues cannot be deleted.
+    [[nodiscard]] virtual base::Status DeleteQueue(model::QueueId id) = 0;
 
     [[nodiscard]] virtual base::Result<model::SettingsMap> LoadSettings() = 0;
     // Replaces every stored setting with the given map.

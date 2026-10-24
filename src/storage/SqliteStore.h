@@ -5,6 +5,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string>
 #include <vector>
@@ -36,6 +37,11 @@ public:
     base::Status SaveCategory(const model::Category& category) override;
     base::Status DeleteCategory(model::CategoryId id) override;
 
+    base::Result<std::vector<model::Queue>> LoadQueues() override;
+    base::Result<model::QueueId> InsertQueue(const model::Queue& queue) override;
+    base::Status SaveQueue(const model::Queue& queue) override;
+    base::Status DeleteQueue(model::QueueId id) override;
+
     base::Result<model::SettingsMap> LoadSettings() override;
     base::Status SaveSettings(const model::SettingsMap& settings) override;
 
@@ -55,6 +61,8 @@ private:
     base::Status WriteKeys(model::DownloadId id, std::uint32_t index, const model::MediaTrack& track, size_t first);
     base::Status WritePieces(model::DownloadId id, std::uint32_t index, const model::MediaTrack& track, size_t first);
     base::Status DeleteTrack(model::DownloadId id, std::uint32_t track);
+    // Writes a queue's schedule into its row, or a new row when it has none; returns the row's id.
+    base::Result<std::int64_t> WriteSchedule(std::optional<std::int64_t> id, const model::Schedule& schedule);
     base::Status LoadSegments(std::vector<model::Download>& downloads);
     base::Status LoadTracks(std::vector<model::Download>& downloads);
 
