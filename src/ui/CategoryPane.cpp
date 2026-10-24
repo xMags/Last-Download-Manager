@@ -33,10 +33,9 @@ constexpr int kHeaderHeight96 = 22;
 constexpr int kCloseButton96 = 18;
 constexpr int kCloseGlyph96 = 10;
 constexpr int kTreeItemHeight96 = 21;
-constexpr int kTreeIcon96 = 14;  // the reference's tree icons sit inside short rows with room to spare
+constexpr int kTreeIcon96 = 14;  // tree icons sit inside short rows with room to spare
 
-// In Image order. the reference gives each built-in category its own icon; LDM draws its own from the
-// Windows icon font.
+// In Image order. Each built-in category has its own icon, drawn from the Windows icon font.
 constexpr std::array<Glyph, 9> kTreeGlyphs{{
     {0xE838, RGB(0xE8, 0xA3, 0x17)},  // FolderOpen
     {0xE8B7, RGB(0xE8, 0xA3, 0x17)},  // Folder
@@ -91,7 +90,7 @@ void CategoryPane::Create(HWND parent, Callbacks callbacks)
                                parent, nullptr, instance, nullptr);
     closeButton_ = ::CreateWindowExW(0, WC_BUTTONW, L"Hide categories", WS_CHILD | WS_VISIBLE | BS_OWNERDRAW, 0, 0, 0, 0,
                                      parent, nullptr, instance, nullptr);
-    // the reference's tree: dotted lines and boxed expand buttons on every level, roots included.
+    // A classic tree: dotted lines and boxed expand buttons on every level, roots included.
     tree_ = ::CreateWindowExW(0, WC_TREEVIEWW, nullptr,
                               WS_CHILD | WS_VISIBLE | WS_TABSTOP | TVS_HASBUTTONS | TVS_HASLINES | TVS_LINESATROOT |
                                   TVS_SHOWSELALWAYS,
@@ -190,7 +189,7 @@ void CategoryPane::ApplyTheme(const Theme& theme)
     const UINT dpi = DpiOf(tree_);
     theme.ApplyToControl(tree_);
     if (!theme.IsDark()) {
-        // The plain tree theme draws the reference's dotted lines and boxed buttons; Explorer's hides them.
+        // The plain tree theme draws dotted lines and boxed buttons; Explorer's hides them.
         ::SetWindowTheme(tree_, nullptr, nullptr);
     }
     TreeView_SetBkColor(tree_, theme.Colors().window);

@@ -93,7 +93,7 @@ private:
     void UpdateStatus();
     [[nodiscard]] RECT SplitterRect() const;
     void UpdateDropTarget(const model::Settings& settings);
-    // Where the framed panes go, in client coordinates (the reference's layout: grey margins, framed panes).
+    // Where the framed panes go, in client coordinates (grey margins, framed panes).
     struct PaneRects {
         int toolbarBottom = 0;
         bool categoriesVisible = false;

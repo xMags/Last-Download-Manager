@@ -1,5 +1,5 @@
-// The items the extension adds to the browser's right-click menu (checklist B-04): the same as
-// the reference's extension, with LDM in place of the reference. Which appear is set per browser in LDM's Options >
+// The items the extension adds to the browser's right-click menu (checklist B-04). Which appear
+// is set per browser in LDM's Options >
 // General > Context menu and arrives in the config (protocol.js menuSettings).
 
 export const MenuId = Object.freeze({
@@ -12,9 +12,9 @@ export const MenuId = Object.freeze({
 const WEB_PAGES = ['http://*/*', 'https://*/*'];
 
 /**
- * The menu items to create, as contextMenus.create options. the reference's extension also adds "Transfer
- * download to the reference" to links in Chrome's downloads page; LDM leaves it out, because current Chrome
- * shows no link for a running download there, and a finished one links to the file on disk.
+ * The menu items to create, as contextMenus.create options. Nothing is added to links in Chrome's
+ * downloads page: current Chrome shows no link for a running download there, and a finished one
+ * links to the file on disk.
  * @param {{downloadLink: boolean, downloadAll: boolean}} menu
  */
 export function menuItems(menu) {

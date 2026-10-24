@@ -52,7 +52,7 @@ void DownloadListView::ApplyColumns()
         std::wstring title(ColumnTitle(column.id));
         LVCOLUMNW data{};
         data.mask = LVCF_TEXT | LVCF_WIDTH | LVCF_FMT;
-        data.fmt = LVCFMT_LEFT;  // the reference aligns every column, sizes and rates included, to the left
+        data.fmt = LVCFMT_LEFT;  // every column, sizes and rates included, aligns to the left
         data.cx = Scale(column.width, dpi);
         data.pszText = title.data();
         ListView_InsertColumn(list_, static_cast<int>(shown_.size()), &data);
@@ -191,7 +191,7 @@ void DownloadListView::ApplyTheme(const Theme& theme)
     ListView_SetBkColor(list_, theme.Colors().window);
     ListView_SetTextBkColor(list_, theme.Colors().window);
     ListView_SetTextColor(list_, theme.Colors().text);
-    // the reference's grid lines; the list control draws them in a light system color that glares in dark mode.
+    // Grid lines; the list control draws them in a light system color that glares in dark mode.
     ListView_SetExtendedListViewStyleEx(list_, LVS_EX_GRIDLINES, theme.IsDark() ? 0 : LVS_EX_GRIDLINES);
     ::InvalidateRect(list_, nullptr, TRUE);
 }

@@ -86,7 +86,7 @@ struct SoundEvent {
 [[nodiscard]] std::string DefaultCapturedExtensions();
 // Sites whose downloads the browser keeps (checklist O-02), space separated, '*' wildcards.
 [[nodiscard]] std::string DefaultCaptureSiteExceptions();
-// The media types the download panel offers (checklist B-07), space separated, as the reference lists them.
+// The media types the download panel offers (checklist B-07), space separated.
 [[nodiscard]] std::string DefaultMediaTypes();
 
 // Keys that change what happens to a link clicked in the browser (checklist B-03). A set counts as

@@ -34,7 +34,7 @@ struct BuiltinCategory {
     std::string_view extensions;
 };
 
-// the reference's built-in categories (checklist W-02) with LDM's extension lists.
+// The built-in categories (checklist W-02) with their extension lists.
 constexpr std::array<BuiltinCategory, 6> kBuiltinCategories{{
     {"General", ""},
     {"Compressed", "zip rar 7z arj gz sit sitx sea ace bz2 tar lzh lha z cab xz zst tgz"},

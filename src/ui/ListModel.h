@@ -82,7 +82,7 @@ struct ColumnState {
 [[nodiscard]] std::wstring_view ColumnTitle(Column column);
 // The sort key a click on this column's header selects, if any.
 [[nodiscard]] std::optional<SortKey> SortKeyForColumn(Column column);
-// Every column in the reference's default order, with default widths and visibility.
+// Every column in its default order, with default widths and visibility.
 [[nodiscard]] std::vector<ColumnState> DefaultColumns();
 // "id:width:visible" entries joined by ','; the stored form of View > Customize list columns.
 [[nodiscard]] std::string SerializeColumns(const std::vector<ColumnState>& columns);

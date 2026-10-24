@@ -23,8 +23,8 @@
 
 namespace ldm::engine {
 
-// Tunable constants of the connection strategy (design section 4). Defaults match the reference's measured
-// behavior; tests shorten the timings.
+// Tunable constants of the connection strategy (design section 4). Defaults come from measured
+// behavior of established download managers; tests shorten the timings.
 struct TransferTuning {
     int initialExtraConnections = 3;
     std::chrono::milliseconds rampInterval{250};

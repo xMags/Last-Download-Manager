@@ -24,7 +24,7 @@ struct ColumnInfo {
 };
 
 constexpr std::array<ColumnInfo, kColumnCount> kColumns{{
-    // Default widths follow the reference's (at 100% scaling); Last Try Date is wider so the date stays readable.
+    // Default widths at 100% scaling; Last Try Date is wider so the date stays readable.
     {Column::Queue, "queue", L"Q", 20, true, std::nullopt},
     {Column::FileName, "name", L"File Name", 152, true, SortKey::FileName},
     {Column::Size, "size", L"Size", 75, true, SortKey::Size},
@@ -233,7 +233,7 @@ std::optional<SortKey> SortKeyForColumn(Column column)
 
 std::vector<ColumnState> DefaultColumns()
 {
-    // the reference shows File Name first, then the queue marker; kColumns stays in Column order.
+    // File Name shows first, then the queue marker; kColumns stays in Column order.
     std::vector<ColumnState> columns;
     for (const ColumnInfo& info : kColumns) {
         columns.push_back(ColumnState{info.id, info.width, info.visible});

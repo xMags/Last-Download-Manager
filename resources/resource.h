@@ -66,7 +66,7 @@
 #define ID_HELP_CONTENTS 40080
 #define ID_HELP_ABOUT 40081
 
-// Download list row menu (checklist L-05, order captured from the reference, gap G-1)
+// Download list row menu (checklist L-05, gap G-1)
 #define ID_ROW_OPEN 40100
 #define ID_ROW_OPEN_WITH 40101
 #define ID_ROW_OPEN_FOLDER 40102

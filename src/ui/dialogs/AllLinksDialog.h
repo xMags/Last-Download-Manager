@@ -11,7 +11,7 @@
 
 namespace ldm::ui {
 
-// Download All Links (checklist B-05, the reference's dialog 228): the links of a page or of the selected
+// Download All Links (checklist B-05): the links of a page or of the selected
 // part of it, to check and add to the list. Types and sizes fill in through ApplyDetails while the
 // dialog is open, as the extension checks the links.
 class AllLinksDialog final : public Dialog {

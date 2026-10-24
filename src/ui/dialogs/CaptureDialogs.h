@@ -57,7 +57,7 @@ private:
     std::optional<model::CaptureKeys> result_;
 };
 
-// The browser right-click menu items, per browser family (checklist O-01, the reference's dialogs 334, 335).
+// The browser right-click menu items, per browser family (checklist O-01).
 struct BrowserMenus {
     model::BrowserMenu chromium;
     model::BrowserMenu firefox;
@@ -77,7 +77,7 @@ private:
     std::optional<BrowserMenus> result_;
 };
 
-// The media panel's settings (checklists B-07, B-09; the reference's panel settings).
+// The media panel's settings (checklists B-07, B-09).
 struct MediaPanelSettings {
     bool enabled = true;
     std::string types;           // space separated
@@ -100,8 +100,8 @@ private:
     std::optional<MediaPanelSettings> result_;
 };
 
-// Offered after two captured downloads from one site were cancelled (checklist B-06, the reference's dialog
-// 302): add the site or an address pattern to the capture exceptions.
+// Offered after two captured downloads from one site were cancelled (checklist B-06): add the site
+// or an address pattern to the capture exceptions.
 class ExceptionOfferDialog final : public Dialog {
 public:
     enum class Kind {

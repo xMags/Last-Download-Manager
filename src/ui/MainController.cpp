@@ -806,7 +806,7 @@ void MainController::ShowRowMenu(POINT screen)
     AppendItem(doubleClick.get(), ID_ROW_DOUBLE_CLICK_OPEN, L"Open", true, openOnDoubleClick);
     AppendItem(doubleClick.get(), ID_ROW_DOUBLE_CLICK_PROPERTIES, L"Properties", true, !openOnDoubleClick);
 
-    // Order captured from the reference (gap G-1); queue entries arrive with queues in M4.
+    // Order per gap G-1; queue entries arrive with queues in M4.
     AppendItem(menu.get(), ID_ROW_OPEN, L"&Open", state.open);
     AppendItem(menu.get(), ID_ROW_OPEN_WITH, L"Open &with...", state.open);
     AppendItem(menu.get(), ID_ROW_OPEN_FOLDER, L"Open &folder", state.openFolder);
@@ -847,7 +847,7 @@ void MainController::ShowCategoryMenu(std::optional<model::CategoryId> category,
 
 void MainController::ShowTrayMenu(POINT screen)
 {
-    // the reference's tray menu, in its order (gap G-2), without its registration and ordering items.
+    // The tray menu, in its order (gap G-2).
     const auto snapshot = Snapshot();
     const bool limiterOn = snapshot && snapshot->speedLimiterOn;
     const bool dropTargetShown = snapshot && snapshot->settings.showDropTarget;

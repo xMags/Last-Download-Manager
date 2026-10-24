@@ -9,7 +9,7 @@
 // Text for the download list and dialogs. Pure functions, unit tested; no Win32.
 namespace ldm::ui {
 
-// "512 Bytes", "1.50 KB", "12.34 MB", "1.07 GB" (binary units, as the reference shows them).
+// "512 Bytes", "1.50 KB", "12.34 MB", "1.07 GB" (binary units).
 [[nodiscard]] std::wstring FormatSize(std::int64_t bytes);
 // Size column: the total when known, otherwise what arrived so far, otherwise empty.
 [[nodiscard]] std::wstring FormatSizeColumn(const core::DownloadView& view);

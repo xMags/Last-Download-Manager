@@ -1,22 +1,16 @@
 # Last Download Manager
 
-A native Windows download manager written in C++ with plain Win32. It aims to be a full replacement for the reference download manager: the same window layout and workflows, multi-connection downloads, browser capture, media capture, queues, scheduling and a site grabber, with its own branding and artwork.
+A native Windows download manager written in C++ with plain Win32. It aims to be a complete download manager: a classic list window, multi-connection downloads, browser capture, media capture, queues, scheduling and a site grabber.
 
 **Status: complete rewrite in progress.** The previous wxWidgets version has been retired. Work is delivered in milestones:
 
 | Milestone | Scope | State |
 |---|---|---|
-| 1 | Reference study and parity checklist | Done |
+| 1 | Feature study and plan | Done |
 | 2 | Native shell and reliable downloads | Done |
-| 3 | Browser integration and media capture | Planned |
+| 3 | Browser integration and media capture | In progress |
 | 4 | Queues, scheduler, organization and Site Grabber | Planned |
 | 5 | Packaging and installer | Planned |
-
-Design documents:
-
-- [the reference parity checklist](docs/rewrite/parity-checklist.md): what "replacement" means, item by item.
-- [Milestone 2 technical design](docs/rewrite/m2-technical-design.md): modules, threads, database and build.
-- [Milestone 3 technical design](docs/rewrite/m3-technical-design.md): browser extensions, native messaging host and media capture.
 
 ## Requirements
 
