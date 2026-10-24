@@ -1,6 +1,7 @@
 // Engine against the HTTP fixture (design section 9). Each test drives the real CurlEngine,
 // network and disk threads included, and checks the file byte by byte.
 #include "FixtureServer.h"
+#include "RecordingListener.h"
 
 #include "engine/CurlEngine.h"
 #include "model/Cookie.h"
@@ -32,65 +33,7 @@ using ldm::core::TransferOutcome;
 using ldm::core::TransferRequest;
 using ldm::model::DownloadId;
 using ldm::test::FixtureServer;
-
-class RecordingListener final : public ldm::core::EngineListener {
-public:
-    void OnEngineEvent(EngineEvent event) override
-    {
-        {
-            std::lock_guard lock(mutex_);
-            events_.push_back(std::move(event));
-        }
-        changed_.notify_all();
-    }
-
-    // Waits for an event of type T for (id, epoch) matching `predicate`.
-    template <typename T>
-    std::optional<T> WaitFor(DownloadId id, std::int64_t epoch, std::chrono::milliseconds timeout,
-                             const std::function<bool(const T&)>& predicate = {})
-    {
-        std::unique_lock lock(mutex_);
-        std::optional<T> found;
-        changed_.wait_for(lock, timeout, [&] {
-            for (const EngineEvent& event : events_) {
-                if (event.id != id || event.epoch != epoch) {
-                    continue;
-                }
-                if (const T* typed = std::get_if<T>(&event.payload); typed && (!predicate || predicate(*typed))) {
-                    found = *typed;
-                    return true;
-                }
-            }
-            return false;
-        });
-        return found;
-    }
-
-    std::optional<TransferFinished> Finished(DownloadId id, std::int64_t epoch, std::chrono::milliseconds timeout = 60s)
-    {
-        return WaitFor<TransferFinished>(id, epoch, timeout);
-    }
-
-    template <typename T>
-    std::vector<T> All(DownloadId id, std::int64_t epoch)
-    {
-        std::lock_guard lock(mutex_);
-        std::vector<T> result;
-        for (const EngineEvent& event : events_) {
-            if (event.id == id && event.epoch == epoch) {
-                if (const T* typed = std::get_if<T>(&event.payload)) {
-                    result.push_back(*typed);
-                }
-            }
-        }
-        return result;
-    }
-
-private:
-    std::mutex mutex_;
-    std::condition_variable changed_;
-    std::vector<EngineEvent> events_;
-};
+using ldm::test::RecordingListener;
 
 ldm::engine::EngineOptions TestOptions()
 {

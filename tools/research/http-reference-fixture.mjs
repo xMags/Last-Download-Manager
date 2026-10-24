@@ -1,4 +1,5 @@
-// Controlled local reference experiment and engine test server. Never serves files from the host.
+// Controlled local reference experiment and engine test server. Serves files from the host only
+// under /media/, from the folder given with --media-root, and nothing when it is not given.
 //
 // Routes (all serve the same deterministic payload, byte i = i % 251, unless noted):
 //   /range.bin           ranges, ETag, Last-Modified
@@ -18,13 +19,17 @@
 //   /empty.bin           a zero-length file
 //   /large.bin           ranges; --large-size bytes (default 2 GiB) of the same pattern, generated
 //                        on the fly, for stress tests
+//   /media/<path>        a file under --media-root, with ranges: generated HLS and DASH fixtures
+//   /media-gone/<path>   404, for a segment that disappeared
 //   /control/log         JSON: request log and the highest number of concurrent responses
 //   /control/bump        changes the content of /versioned.bin
 //   /control/reset       clears the log and per-route counters
 // An FTP listener on its own port serves the same payload (see ftp-reference-fixture.mjs); the
 // ready line reports it as "ftpPort".
 import { createHash, randomBytes } from 'node:crypto';
+import { readFileSync, realpathSync, statSync } from 'node:fs';
 import { createServer } from 'node:http';
+import { extname, isAbsolute, relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { brotliCompressSync, gzipSync } from 'node:zlib';
 
@@ -67,8 +72,35 @@ function parseDigest(header) {
   return fields;
 }
 
+const MEDIA_TYPES = {
+  '.m3u8': 'application/vnd.apple.mpegurl', '.mpd': 'application/dash+xml', '.ts': 'video/mp2t',
+  '.m4s': 'video/iso.segment', '.mp4': 'video/mp4', '.m4a': 'audio/mp4', '.vtt': 'text/vtt',
+  '.key': 'application/octet-stream', '.bin': 'application/octet-stream',
+};
+
+// The file under `root` that `relativePath` names, or nothing when it leaves the folder or is not
+// a file.
+function mediaFile(root, relativePath) {
+  if (!root) return undefined;
+  let decoded;
+  try { decoded = decodeURIComponent(relativePath); } catch { return undefined; }
+  const base = realpathSync(root);
+  const candidate = resolve(base, decoded);
+  const inside = relative(base, candidate);
+  if (!inside || inside.startsWith('..') || isAbsolute(inside)) return undefined;
+  try {
+    const real = realpathSync(candidate);
+    const within = relative(base, real);
+    if (!within || within.startsWith('..') || isAbsolute(within) || !statSync(real).isFile()) return undefined;
+    return real;
+  } catch {
+    return undefined;
+  }
+}
+
 export function createReferenceFixture({
-  size = 16 * 1024 * 1024, delayMs = 40, chunkSize = 32 * 1024, largeSize = 2 * 1024 * 1024 * 1024, log = () => {},
+  size = 16 * 1024 * 1024, delayMs = 40, chunkSize = 32 * 1024, largeSize = 2 * 1024 * 1024 * 1024, mediaRoot,
+  log = () => {},
 } = {}) {
   if (!Number.isSafeInteger(size) || size < 1 || size > 64 * 1024 * 1024) {
     throw new RangeError('Fixture size must be between 1 byte and 64 MiB');
@@ -117,7 +149,7 @@ export function createReferenceFixture({
   };
 
   // Answers a request for `body` with range support when `ranges` is set. Returns after headers.
-  const serveBody = (request, response, id, body, { ranges = true, etag, lastModified, name, disposition, cutAfter, salt } = {}) => {
+  const serveBody = (request, response, id, body, { ranges = true, etag, lastModified, name, disposition, cutAfter, salt, contentType } = {}) => {
     let start = 0;
     let end = body.length - 1;
     const rangeHeader = ranges ? request.headers.range : undefined;
@@ -146,11 +178,11 @@ export function createReferenceFixture({
       }
     }
     const headers = {
-      'Content-Type': 'application/octet-stream',
+      'Content-Type': contentType ?? 'application/octet-stream',
       'Content-Length': end - start + 1,
-      'Content-Disposition': disposition ?? `attachment; filename="${name}"`,
       'Accept-Ranges': ranges ? 'bytes' : 'none',
     };
+    if (!contentType) headers['Content-Disposition'] = disposition ?? `attachment; filename="${name}"`;
     if (etag) headers.ETag = etag;
     if (lastModified) headers['Last-Modified'] = lastModified;
     if (ranged) headers['Content-Range'] = `bytes ${start}-${end}/${body.length}`;
@@ -220,6 +252,20 @@ export function createReferenceFixture({
     }
     const strong = `"${digest}"`;
     const modified = 'Thu, 01 Oct 2026 00:00:00 GMT';
+    if (path.startsWith('/media/')) {
+      const file = mediaFile(mediaRoot, path.slice('/media/'.length));
+      if (!file) {
+        finish(404);
+        return;
+      }
+      const type = MEDIA_TYPES[extname(file).toLowerCase()] ?? 'application/octet-stream';
+      serveBody(request, response, id, readFileSync(file), { contentType: type });
+      return;
+    }
+    if (path.startsWith('/media-gone/')) {
+      finish(404);
+      return;
+    }
     switch (path) {
       case '/redirect':
         finish(302, { Location: '/range.bin' });
@@ -342,6 +388,7 @@ function parseArguments(argv) {
     else if (name === '--delay') { options.delayMs = Number(value); ++i; }
     else if (name === '--chunk') { options.chunkSize = Number(value); ++i; }
     else if (name === '--large-size') { options.largeSize = Number(value); ++i; }
+    else if (name === '--media-root') { options.mediaRoot = value; ++i; }
     else if (name === '--quiet') { options.quiet = true; }
     else throw new Error(`Unknown argument: ${name}`);
   }

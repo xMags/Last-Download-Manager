@@ -1,5 +1,7 @@
 #include "engine/MemoryFetch.h"
 
+#include "core/NetworkAddress.h"
+#include "core/Url.h"
 #include "engine/FailurePolicy.h"
 
 #include <utility>
@@ -39,6 +41,9 @@ MemoryFetch::MemoryFetch(CURLM* multi, core::FetchRequest request, long connectT
             curl_easy_setopt(easy, CURLOPT_COOKIELIST, line.c_str());  // copied by libcurl
         }
     }
+    // Through a proxy the connection goes to the proxy, which says nothing about the server.
+    addressGuard_.refuse = request_.refusePrivateAddresses && !request_.proxy;
+    InstallAddressGuard(easy, &addressGuard_);
     curl_easy_setopt(easy, CURLOPT_MAXFILESIZE_LARGE, static_cast<curl_off_t>(request_.maxBytes));
     curl_easy_setopt(easy, CURLOPT_WRITEFUNCTION, &MemoryFetch::OnWrite);
     curl_easy_setopt(easy, CURLOPT_WRITEDATA, this);
@@ -74,6 +79,11 @@ core::FetchFinished MemoryFetch::Finish(CURLcode result)
         return finished;
     }
     CURL* easy = easy_.get();
+    if (addressGuard_.refuse && addressGuard_.reachedPrivate) {
+        finished.failure = core::TransferFailure{core::FailureReason::PrivateAddress, core::FailureClass::Fatal, 0,
+                                                 "the address leads to a loopback or private network address"};
+        return finished;
+    }
     if (tooLarge_ || result == CURLE_FILESIZE_EXCEEDED) {
         finished.failure = core::TransferFailure{core::FailureReason::Protocol, core::FailureClass::Fatal, 0,
                                                  "the manifest is larger than " + std::to_string(request_.maxBytes) +
@@ -101,6 +111,8 @@ core::FetchFinished MemoryFetch::Finish(CURLcode result)
         finished.contentType = std::string(contentType);
     }
     finished.body = std::move(body_);
+    const auto url = core::ParseUrl(finished.finalUrl);
+    finished.fromPrivateNetwork = (!request_.proxy && addressGuard_.reachedPrivate) || (url && core::IsPrivateHost(url->host));
     return finished;
 }
 

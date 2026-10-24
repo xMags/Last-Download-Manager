@@ -3,9 +3,11 @@
 #include "core/SegmentPlanner.h"
 #include "core/TransferEngine.h"
 #include "engine/BufferPool.h"
+#include "engine/ConnectionGuards.h"
 #include "engine/CurlHandles.h"
 #include "engine/DiskWriter.h"
 #include "engine/HttpHeaders.h"
+#include "engine/Run.h"
 #include "engine/TokenBucket.h"
 
 #include <array>
@@ -40,6 +42,9 @@ struct TransferServices {
     DiskWriter* disk = nullptr;
     BufferPool* pool = nullptr;
     TokenBucket* globalBucket = nullptr;
+    // A stream's own limit, shared by its pieces and its whole-file tracks; none for a file,
+    // whose limit is its transfer's own.
+    TokenBucket* runBucket = nullptr;
     core::EngineListener* listener = nullptr;
     std::mt19937* random = nullptr;
     const TransferTuning* tuning = nullptr;
@@ -51,36 +56,32 @@ struct TransferServices {
 //
 // libcurl callbacks only record data and flags. Anything that adds or removes connections happens
 // in Service(), so no callback ever destroys the object that is calling it.
-class Transfer {
+//
+// A stream's whole-file track runs as a Transfer inside its MediaRun, writing file `file` of the
+// run and reporting to the MediaRun through `services.listener`.
+class Transfer final : public Run, public ConnectionOwner {
 public:
-    using Clock = std::chrono::steady_clock;
-
-    Transfer(const TransferServices& services, core::TransferRequest request);
-    ~Transfer();
+    Transfer(const TransferServices& services, core::TransferRequest request, std::uint32_t file = 0);
+    ~Transfer() override;
 
     Transfer(const Transfer&) = delete;
     Transfer& operator=(const Transfer&) = delete;
 
-    [[nodiscard]] RunKey Key() const noexcept { return RunKey{request_.id, request_.epoch}; }
+    [[nodiscard]] RunKey Key() const noexcept override { return RunKey{request_.id, request_.epoch, file_}; }
 
     void Begin(Clock::time_point now);
-    void RequestStop();
-    void SetSpeedLimit(std::optional<std::int64_t> bytesPerSecond, Clock::time_point now);
+    void RequestStop() override;
+    void SetSpeedLimit(std::optional<std::int64_t> bytesPerSecond, Clock::time_point now) override;
 
     // A connection's easy handle reported CURLMSG_DONE. `easy` belongs to this transfer.
-    void OnConnectionDone(CURL* easy, CURLcode result, Clock::time_point now);
-    void OnDiskReport(DiskReport& report, Clock::time_point now);
+    void OnConnectionDone(CURL* easy, CURLcode result, Clock::time_point now) override;
+    void OnDiskReport(DiskReport& report, Clock::time_point now) override;
 
-    // Opens connections, retries, unpauses, reports progress and finishes. Call after every
-    // curl_multi_perform and whenever NextDeadline() passes.
-    void Service(Clock::time_point now);
-    [[nodiscard]] Clock::time_point NextDeadline(Clock::time_point now) const;
+    void Service(Clock::time_point now) override;
+    [[nodiscard]] Clock::time_point NextDeadline(Clock::time_point now) const override;
 
     // True once TransferFinished was sent; the loop then destroys the transfer.
-    [[nodiscard]] bool Done() const noexcept { return phase_ == Phase::Done; }
-
-    // The transfer owning an easy handle created by StartConnection().
-    [[nodiscard]] static Transfer* OwnerOf(CURL* easy);
+    [[nodiscard]] bool Done() const noexcept override { return phase_ == Phase::Done; }
 
     // libcurl entry points; `userdata` is the Connection.
     static size_t WriteCallback(char* data, size_t size, size_t count, void* userdata);
@@ -124,6 +125,7 @@ private:
         CurlEasy easy;
         CurlSlist headerList;
         std::array<char, CURL_ERROR_SIZE> errorBuffer{};
+        AddressGuard addressGuard;
         std::uint32_t segmentKey = 0;
         std::int64_t requestStart = 0;
         bool probe = false;  // the first connection of the run; its response is validated in full
@@ -170,9 +172,11 @@ private:
     [[nodiscard]] bool HasProgress() const noexcept;
     [[nodiscard]] std::optional<std::string> IfRangeValue() const;
     [[nodiscard]] int ConnectionLimit() const noexcept;
+    [[nodiscard]] bool CanTake(Clock::time_point now) noexcept;
 
     TransferServices services_;
     core::TransferRequest request_;
+    std::uint32_t file_ = 0;
     bool http_ = true;
     bool resumeRun_ = false;  // the run continues stored progress
 

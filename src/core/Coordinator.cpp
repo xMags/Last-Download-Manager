@@ -1019,6 +1019,8 @@ void Coordinator::OnEngineEvent(EngineEvent event)
                 OnProxyResolved(*entry, payload);
             } else if constexpr (std::is_same_v<T, FetchFinished>) {
                 // handled above
+            } else if constexpr (std::is_same_v<T, MediaProgress> || std::is_same_v<T, MediaFinished>) {
+                // The coordinator starts no stream runs yet, so none of their events can arrive.
             } else {
                 static_assert(sizeof(T) == 0, "unhandled engine event");
             }
