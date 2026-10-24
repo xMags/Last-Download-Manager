@@ -711,7 +711,7 @@ void GrabberExplorer::OnPageRead(Project& project, Item& item, const core::Fetch
     if (project.stored.definition.savePages) {
         // Written once exploring ends, when every link's file is decided (some wait for their
         // size); a large site past the budget gets the rest written at once, with what is known.
-        PendingPage pending{itemId, finished.body, base, links.links};
+        PendingPage pending{itemId, finished.body, base, links.links, links.baseHrefRange};
         if (project.pendingBytes + pending.body.size() > config_.maxPendingPageBytes) {
             WritePage(project, pending);
         } else {
@@ -884,6 +884,12 @@ void GrabberExplorer::WritePage(Project& project, const PendingPage& page)
                 reference = AttributeSafeAddress(*resolved);
             }
             replacements.push_back(LinkReplacement{link.begin, link.end, std::move(reference)});
+        }
+        if (page.baseHrefRange) {
+            // The converted links are relative to the saved copy or absolute; a <base> naming the
+            // website would send the relative ones back there, so it names the saved page itself.
+            replacements.push_back(LinkReplacement{page.baseHrefRange->begin, page.baseHrefRange->end,
+                                                   RelativeReference(pagePath, pagePath)});
         }
         body = RewriteLinks(page.body, std::move(replacements));
     }

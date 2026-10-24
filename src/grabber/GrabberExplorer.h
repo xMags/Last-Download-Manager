@@ -92,6 +92,7 @@ private:
         std::string body;
         std::string base;  // what its relative links resolve against
         std::vector<HtmlLink> links;
+        std::optional<TextRange> baseHrefRange;
     };
 
     struct Item {

@@ -119,11 +119,34 @@ TEST(HtmlLinks, DecodesEntitiesAndReadsBase)
     EXPECT_EQ(Addresses(links), std::vector<std::string>{"x.php?a=1&b=2&lt=3&c=4"});
 }
 
+TEST(HtmlLinks, ReadsEmptyCommentsAsBrowsersDo)
+{
+    const PageLinks links = ScanLinks(R"(<!--><a href="a.zip">A</a><!---><a href="b.zip">B</a><!-- <a href="c.zip"> -->)", 100);
+    EXPECT_EQ(Addresses(links), (std::vector<std::string>{"a.zip", "b.zip"}));
+}
+
+TEST(HtmlLinks, RemovesLineBreaksAndTabsInsideAddresses)
+{
+    const PageLinks links = ScanLinks("<a href=\"/files/annual-\r\nreport.pdf\">R</a><a href=\"a&#10;b\tc.pdf\">X</a>", 100);
+    EXPECT_EQ(Addresses(links), (std::vector<std::string>{"/files/annual-report.pdf", "abc.pdf"}));
+}
+
+TEST(HtmlLinks, FindsTheBaseHrefForRewriting)
+{
+    const std::string html = R"(<base href=" https://example.com/ "><img src="b.png">)";
+    const PageLinks links = ScanLinks(html, 100);
+    ASSERT_TRUE(links.baseHrefRange);
+    EXPECT_EQ(html.substr(links.baseHrefRange->begin, links.baseHrefRange->end - links.baseHrefRange->begin),
+              "https://example.com/");
+}
+
 TEST(HtmlLinks, DecodesEntities)
 {
     EXPECT_EQ(DecodeEntities("a &amp; b &lt;c&gt; &quot;d&quot; &#233; &#xE9; &unknown; &"), "a & b <c> \"d\" \xC3\xA9 \xC3\xA9 &unknown; &");
     EXPECT_EQ(DecodeEntities("&#0;&#xD800;&#x110000;"), "\xEF\xBF\xBD\xEF\xBF\xBD\xEF\xBF\xBD");
     EXPECT_EQ(DecodeEntities("&nbsp;"), " ");
+    EXPECT_EQ(DecodeEntities("&#0000000065;&#x0000000041;"), "AA") << "zero padding of any length";
+    EXPECT_EQ(DecodeEntities("&#99999999999999999999;x"), "\xEF\xBF\xBDx");
 }
 
 TEST(HtmlLinks, SurvivesMalformedMarkup)

@@ -3,6 +3,7 @@
 #include "core/FileNames.h"
 #include "core/Matching.h"
 #include "core/NetworkAddress.h"
+#include "grabber/LocalPaths.h"
 
 #include <algorithm>
 #include <array>
@@ -38,10 +39,25 @@ bool AnyPathMatches(const std::vector<std::string>& masks, std::string_view path
 bool PassesPathMasks(const std::vector<std::string>& include, const std::vector<std::string>& exclude,
                      std::string_view path)
 {
-    if (!include.empty() && !AnyPathMatches(include, path)) {
+    // Masks are typed the way addresses read, so "/my files/" has to match "/my%20files/": the
+    // path counts as matched in either form.
+    const std::string decoded = PercentDecode(path);
+    const auto matches = [path, &decoded](const std::vector<std::string>& masks) {
+        return AnyPathMatches(masks, path) || AnyPathMatches(masks, decoded);
+    };
+    if (!include.empty() && !matches(include)) {
         return false;
     }
-    return !AnyPathMatches(exclude, path);
+    return !matches(exclude);
+}
+
+// "example.com." and "example.com" name the same host (the dot is the DNS root).
+std::string_view WithoutRootDot(std::string_view host)
+{
+    if (host.ends_with('.')) {
+        host.remove_suffix(1);
+    }
+    return host;
 }
 
 bool AnyNameMatches(const std::vector<std::string>& masks, std::string_view name)
@@ -75,6 +91,7 @@ std::vector<std::string_view> Labels(std::string_view host)
 
 std::string MainDomainOf(std::string_view host)
 {
+    host = WithoutRootDot(host);
     if (IsAddressLiteral(host)) {
         return std::string(host);
     }
@@ -110,15 +127,16 @@ BaseSite BaseSiteOf(const core::Url& startPage)
 
 bool OnBaseSite(const BaseSite& site, const core::Url& url, bool mainDomainSites)
 {
-    if (url.host == site.host) {
+    const std::string_view host = WithoutRootDot(url.host);
+    if (host == WithoutRootDot(site.host)) {
         return true;
     }
-    if (!mainDomainSites || IsAddressLiteral(url.host)) {
+    if (!mainDomainSites || IsAddressLiteral(host)) {
         return false;
     }
-    return url.host == site.mainDomain ||
-           (url.host.size() > site.mainDomain.size() + 1 && url.host.ends_with(site.mainDomain) &&
-            url.host[url.host.size() - site.mainDomain.size() - 1] == '.');
+    return host == site.mainDomain ||
+           (host.size() > site.mainDomain.size() + 1 && host.ends_with(site.mainDomain) &&
+            host[host.size() - site.mainDomain.size() - 1] == '.');
 }
 
 PageDepth DepthOfLink(const PageDepth& parent, bool onBaseSite)

@@ -25,6 +25,8 @@ int HexValue(char c) noexcept
     return -1;
 }
 
+}  // namespace
+
 std::string PercentDecode(std::string_view text)
 {
     std::string out;
@@ -39,6 +41,8 @@ std::string PercentDecode(std::string_view text)
     }
     return out;
 }
+
+namespace {
 
 std::vector<std::string_view> Split(std::string_view text, char separator)
 {
