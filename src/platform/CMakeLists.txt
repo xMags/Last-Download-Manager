@@ -21,6 +21,8 @@ add_library(ldm_platform STATIC
     win/SystemPorts.h
     win/WinHttpProxyResolver.cpp
     win/WinHttpProxyResolver.h
+    win/WinBrowserWindows.cpp
+    win/WinBrowserWindows.h
     win/WinShellActions.cpp
     win/WinShellActions.h
     win/WinSystemActions.cpp
@@ -29,4 +31,4 @@ add_library(ldm_platform STATIC
     win/XmlLiteReader.h)
 target_link_libraries(ldm_platform
     PUBLIC ldm_browser ldm_core ldm_media ldm_pipe ldm_ui
-    PRIVATE nlohmann_json::nlohmann_json winhttp bcrypt shell32 shlwapi xmllite ole32 winmm powrprof advapi32)
+    PRIVATE nlohmann_json::nlohmann_json winhttp bcrypt shell32 shlwapi xmllite dwmapi ole32 winmm powrprof advapi32)

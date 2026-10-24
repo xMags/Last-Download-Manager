@@ -11,6 +11,7 @@
 #include "ui/Handles.h"
 #include "ui/LinkDropTarget.h"
 #include "ui/MainController.h"
+#include "ui/MediaPanelController.h"
 #include "ui/ShellActions.h"
 #include "ui/StartupRegistration.h"
 #include "ui/StatusBar.h"
@@ -23,10 +24,12 @@
 #include <windows.h>
 
 #include <deque>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <variant>
 #include <vector>
 
@@ -44,6 +47,9 @@ public:
         core::SecretProtector* secrets = nullptr;
         StartupRegistration* startup = nullptr;
         BrowserLink* browser = nullptr;  // optional: no browser integration without it
+        // The media panel over web players needs both; without them it stays off.
+        BrowserWindows* browserWindows = nullptr;
+        std::function<base::Result<media::XmlElement>(std::string_view)> readXml;
         bool elevated = false;  // LDM runs as administrator, which browsers cannot reach (checklist B-10)
     };
 
@@ -102,6 +108,8 @@ private:
     // Queues dropped addresses for DrainExternalInput; safe inside another program's drag loop.
     void QueueDroppedUrls(std::vector<std::string> urls);
     void DrainBrowserEvents();
+    // The media panel over web players (M3 design section 6), once the theme exists.
+    void CreateMediaPanel();
 
     // Input that arrives from outside the window and may open dialogs.
     // The warning that browsers cannot reach an elevated LDM, shown once the window is up.
@@ -126,6 +134,7 @@ private:
     LinkDropTarget linkDrop_;  // links dropped on the main window
     std::unique_ptr<MainController> controller_;
     std::unique_ptr<BrowserSessions> browserSessions_;
+    std::unique_ptr<MediaPanelController> mediaPanel_;  // uses browserSessions_; declared after it
 
     UniqueFont uiFont_;
     UniqueFont listFont_;

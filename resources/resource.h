@@ -452,3 +452,13 @@
 #define IDC_OFFER_ADDRESS_EDIT 1604
 #define IDC_OFFER_DONT_ASK 1605
 #define IDC_OPT_OFFER_EXCEPTIONS 1606
+
+// Media panel over web players (Options > General > Media panel)
+#define IDD_MEDIA_PANEL 337
+#define IDC_OPT_MEDIA 1610
+#define IDC_MEDIA_ENABLED 1611
+#define IDC_MEDIA_TYPES 1612
+#define IDC_MEDIA_TYPES_DEFAULT 1613
+#define IDC_MEDIA_MINIMUM 1614
+#define IDC_MEDIA_SITES 1615
+#define IDC_MEDIA_DRM 1616

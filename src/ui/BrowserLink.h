@@ -16,6 +16,9 @@ using BrowserConnectionId = std::uint64_t;
 struct BrowserEvent {
     BrowserConnectionId connection = 0;
     std::optional<browser::ParsedMessage> message;  // nothing: the connection closed
+    // The process at the other end of the pipe (ldm-host.exe), as Windows reports it; 0 when
+    // unknown. LDM finds the browser's windows through it, for the media panel.
+    std::uint32_t hostProcessId = 0;
 };
 
 // Sends messages to connected extensions (M3 design section 3). Implemented in platform/win.

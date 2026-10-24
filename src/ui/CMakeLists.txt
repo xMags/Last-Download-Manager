@@ -8,6 +8,7 @@ add_library(ldm_ui STATIC
     BrowserLink.h
     BrowserSessions.cpp
     BrowserSessions.h
+    BrowserWindows.h
     CaptureFollowUp.cpp
     CaptureFollowUp.h
     CategoryPane.cpp
@@ -49,10 +50,18 @@ add_library(ldm_ui STATIC
     MainController.h
     MediaCatalog.cpp
     MediaCatalog.h
+    MediaPanelController.cpp
+    MediaPanelController.h
+    MediaPanelMenu.cpp
+    MediaPanelMenu.h
+    MediaPanelWindow.cpp
+    MediaPanelWindow.h
     MainWindow.cpp
     MainWindow.h
     PageLinks.cpp
     PageLinks.h
+    PanelPlacement.cpp
+    PanelPlacement.h
     ShellActions.h
     StartupRegistration.h
     StatusBar.cpp

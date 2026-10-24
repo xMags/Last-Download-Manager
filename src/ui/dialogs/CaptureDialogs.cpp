@@ -1,6 +1,7 @@
 #include "ui/dialogs/CaptureDialogs.h"
 
 #include "resource.h"
+#include "base/Utf.h"
 
 #include <commctrl.h>
 
@@ -12,6 +13,26 @@ namespace ldm::ui {
 namespace {
 
 constexpr size_t kMaxPattern = 2048;
+constexpr int kMaxMinimumKilobytes = 10'000'000;  // the setting's range (Settings.cpp)
+
+constexpr const wchar_t* kSpaces = L" \t\r\n";
+
+// The words of `text` joined by single spaces.
+std::string Words(const std::wstring& text)
+{
+    std::wstring joined;
+    size_t at = 0;
+    while (at < text.size()) {
+        const size_t start = text.find_first_not_of(kSpaces, at);
+        if (start == std::wstring::npos) {
+            break;
+        }
+        const size_t end = std::min(text.find_first_of(kSpaces, start), text.size());
+        joined += (joined.empty() ? L"" : L" ") + text.substr(start, end - start);
+        at = end;
+    }
+    return base::ToUtf8(joined);
+}
 
 }  // namespace
 
@@ -340,6 +361,55 @@ bool BrowserMenuDialog::OnCommand(int id, int code, HWND control)
     menus.firefox.downloadLink = Checked(IDC_MENU_FIREFOX_LINK);
     menus.firefox.downloadAll = Checked(IDC_MENU_FIREFOX_ALL);
     result_ = menus;
+    Close(IDOK);
+    return true;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Media panel
+
+MediaPanelDialog::MediaPanelDialog(const Theme& theme, MediaPanelSettings settings)
+    : Dialog(IDD_MEDIA_PANEL, theme), settings_(std::move(settings))
+{
+}
+
+std::optional<MediaPanelSettings> MediaPanelDialog::Run(HWND owner)
+{
+    RunModal(owner);
+    return result_;
+}
+
+bool MediaPanelDialog::OnInit()
+{
+    SetChecked(IDC_MEDIA_ENABLED, settings_.enabled);
+    SetText(IDC_MEDIA_TYPES, base::ToUtf16(settings_.types));
+    SetNumber(IDC_MEDIA_MINIMUM, settings_.minimumKilobytes);
+    SetText(IDC_MEDIA_SITES, base::ToUtf16(settings_.siteExceptions));
+    SetChecked(IDC_MEDIA_DRM, settings_.drmNotice);
+    return true;
+}
+
+bool MediaPanelDialog::OnCommand(int id, int code, HWND control)
+{
+    if (id == IDC_MEDIA_TYPES_DEFAULT) {
+        SetText(IDC_MEDIA_TYPES, base::ToUtf16(model::DefaultMediaTypes()));
+        return true;
+    }
+    if (id != IDOK) {
+        return Dialog::OnCommand(id, code, control);
+    }
+    const auto minimum = Number(IDC_MEDIA_MINIMUM);
+    if (!minimum || *minimum < 0 || *minimum > kMaxMinimumKilobytes) {
+        Warn(L"Enter the smallest file size to offer in KB, from 0 to " + std::to_wstring(kMaxMinimumKilobytes) + L".");
+        return true;
+    }
+    MediaPanelSettings settings;
+    settings.enabled = Checked(IDC_MEDIA_ENABLED);
+    settings.types = Words(Text(IDC_MEDIA_TYPES));
+    settings.minimumKilobytes = *minimum;
+    settings.siteExceptions = Words(Text(IDC_MEDIA_SITES));
+    settings.drmNotice = Checked(IDC_MEDIA_DRM);
+    result_ = std::move(settings);
     Close(IDOK);
     return true;
 }

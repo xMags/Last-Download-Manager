@@ -211,3 +211,51 @@ TEST(BrowserSessions, OpenPageGoesToTheNewestLastingConnection)
     EXPECT_EQ(message["type"], "open-page");
     EXPECT_EQ(message["url"], "https://a.test/page");
 }
+
+TEST(BrowserSessions, MediaReportsArriveOnlyAfterHello)
+{
+    RecordingLink link;
+    std::vector<std::pair<BrowserConnectionId, ldm::browser::MediaFound>> found;
+    std::vector<int> resets;
+    std::vector<ldm::browser::VideoPosition> positions;
+    ldm::ui::BrowserSessions::Handlers handlers;
+    handlers.onMedia = [&found](BrowserConnectionId connection, ldm::browser::MediaFound media) {
+        found.emplace_back(connection, std::move(media));
+    };
+    handlers.onMediaReset = [&resets](BrowserConnectionId, int tabId) { resets.push_back(tabId); };
+    handlers.onVideoPosition = [&positions](BrowserConnectionId, ldm::browser::VideoPosition position) {
+        positions.push_back(position);
+    };
+    ldm::ui::BrowserSessions sessions(link, "5.0.0", std::move(handlers));
+    const ldm::model::Settings settings;
+    ldm::browser::MediaFound media;
+    media.tabId = 4;
+    media.url = "https://cdn.test/m.m3u8";
+
+    sessions.OnEvent(Event(1, ldm::browser::HostInfo{}), settings);
+    sessions.OnEvent(Event(1, media), settings);
+    EXPECT_TRUE(found.empty()) << "before hello";
+
+    ldm::ui::BrowserEvent hostEvent = Event(2, ldm::browser::HostInfo{});
+    hostEvent.hostProcessId = 4242;
+    sessions.OnEvent(std::move(hostEvent), settings);
+    sessions.OnEvent(Event(2, SampleHello()), settings);
+    EXPECT_EQ(sessions.Sessions().at(2).hostProcessId, 4242u);
+    sessions.OnEvent(Event(2, media), settings);
+    sessions.OnEvent(Event(2, ldm::browser::MediaReset{4}), settings);
+    ldm::browser::VideoPosition position;
+    position.tabId = 4;
+    sessions.OnEvent(Event(2, position), settings);
+    ASSERT_EQ(found.size(), 1u);
+    EXPECT_EQ(found[0].first, 2u);
+    EXPECT_EQ(resets, std::vector<int>{4});
+    EXPECT_EQ(positions.size(), 1u);
+
+    link.sent.clear();
+    sessions.SendMediaList(2, 4, true);
+    sessions.SendMediaList(9, 4, true);  // no such connection
+    ASSERT_EQ(link.sent.size(), 1u);
+    const auto list = nlohmann::json::parse(link.sent[0].second);
+    EXPECT_EQ(list["type"], "media-list");
+    EXPECT_EQ(list["hasMedia"], true);
+}
