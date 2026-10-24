@@ -551,6 +551,9 @@ TEST_F(CoordinatorTest, GrabberDownloadsStayHiddenUntilListed)
     // Delete completed leaves the project's downloads alone.
     Finish(hidden, 1, TransferOutcome::Completed, {{0, 1, 1}}, std::nullopt, 1);
     Send(hidden, 1, ldm::core::FinalizeFinished{});
+    const auto completed = observer_.All<ldm::core::DownloadCompleted>();
+    ASSERT_EQ(completed.size(), 1u);
+    EXPECT_FALSE(completed[0].inMainList) << "the Grabber reports its own downloads";
     coordinator_->Handle(ldm::core::DeleteCompletedCommand{});
     EXPECT_TRUE(InSnapshot(hidden));
 

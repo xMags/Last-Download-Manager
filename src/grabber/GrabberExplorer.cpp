@@ -1019,7 +1019,7 @@ bool GrabberExplorer::TakeNotification(const core::Notification& notification)
                 break;
             }
         }
-        return IsHidden(completed->id);
+        return !completed->inMainList;
     }
     if (const auto* failed = std::get_if<core::DownloadFailed>(&notification)) {
         for (auto& [projectId, project] : projects_) {
@@ -1032,7 +1032,7 @@ bool GrabberExplorer::TakeNotification(const core::Notification& notification)
                 break;
             }
         }
-        return IsHidden(failed->id);
+        return !failed->inMainList;
     }
     return false;
 }
@@ -1077,12 +1077,6 @@ void GrabberExplorer::FinishDownloadsIfDone(Project& project)
     }
     UnloadItemsIfIdle(project);
     snapshotDirty_ = true;
-}
-
-bool GrabberExplorer::IsHidden(model::DownloadId id) const
-{
-    const core::DownloadView* view = FindDownload(id);
-    return view != nullptr && !view->download.listed;
 }
 
 const core::DownloadView* GrabberExplorer::FindDownload(model::DownloadId id) const

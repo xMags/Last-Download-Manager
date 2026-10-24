@@ -561,6 +561,7 @@ TEST_F(GrabberExplorerTest, DownloadsCheckedFilesThroughTheCoordinator)
     done.id = DownloadId{100};
     done.finalPath = "C:\\Downloads\\a.zip";
     done.size = 1234;
+    done.inMainList = false;
     EXPECT_TRUE(explorer_->TakeNotification(done)) << "the front end does not announce a hidden download";
     items = Items(id);
     EXPECT_EQ(ByUrl(items, "https://example.com/a.zip")->state, GrabberItemState::Done);
@@ -571,6 +572,7 @@ TEST_F(GrabberExplorerTest, DownloadsCheckedFilesThroughTheCoordinator)
     // One more attempt after a failure, then the file shows failed.
     ldm::core::DownloadFailed failed;
     failed.id = DownloadId{101};
+    failed.inMainList = false;
     EXPECT_TRUE(explorer_->TakeNotification(failed));
     const auto resumes = sink_.All<ldm::core::ResumeCommand>();
     ASSERT_EQ(resumes.size(), 1u);

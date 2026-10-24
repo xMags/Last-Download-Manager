@@ -74,7 +74,7 @@ public:
     // The coordinator's output, on the core thread.
     void OnCoreSnapshot(std::shared_ptr<const core::Snapshot> snapshot);
     // Takes the coordinator's answers that belong to the Grabber: AddResult for its own adds, and
-    // the end of its downloads. True when the front end should not see the notification.
+    // the end of downloads not in the main list. True when the front end should not see it.
     [[nodiscard]] bool TakeNotification(const core::Notification& notification);
 
     // Add tokens at or above this are the explorer's.
@@ -159,8 +159,6 @@ private:
                          std::optional<std::int64_t> size);
     void FinishDownloadsIfDone(Project& project);
     [[nodiscard]] const core::DownloadView* FindDownload(model::DownloadId id) const;
-    // A download of a project that is not in the main list: its notifications are the Grabber's.
-    [[nodiscard]] bool IsHidden(model::DownloadId id) const;
 
     // Where things are saved (checklist G-02).
     [[nodiscard]] std::optional<std::filesystem::path> SaveRoot(const Project& project) const;
