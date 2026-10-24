@@ -34,6 +34,8 @@ CommandLineParse ParseCommandLine(const std::vector<std::wstring>& arguments)
             request.startQueue = true;
         } else if (argument == L"--tray") {
             request.tray = true;
+        } else if (argument == L"--write-host-manifests") {
+            request.writeHostManifests = true;
         } else if (argument == L"--save-dir") {
             const auto folder = value();
             if (!folder || !std::filesystem::path(*folder).is_absolute()) {
@@ -66,6 +68,9 @@ CommandLineParse ParseCommandLine(const std::vector<std::wstring>& arguments)
     if (!request.url && (request.saveDir || request.fileName || request.silent || request.queueOnly)) {
         return fail("--save-dir, --name, --silent and --queue-only need an address.");
     }
+    if (request.writeHostManifests && arguments.size() != 1) {
+        return fail("--write-host-manifests cannot be combined with anything else.");
+    }
     return parse;
 }
 
@@ -80,6 +85,7 @@ std::wstring CommandLineHelp()
            L"--queue-only: add without starting the download\n"
            L"--start-queue: start the main download queue\n"
            L"--tray: start hidden in the notification area\n"
+           L"--write-host-manifests: register the browser helper and exit (the installer runs this)\n"
            L"--help: show this help\n"
            L"\n"
            L"When Last Download Manager is already running, the request goes to it.";
