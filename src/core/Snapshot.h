@@ -4,6 +4,7 @@
 #include "model/Category.h"
 #include "model/ConnectionRules.h"
 #include "model/Download.h"
+#include "model/Queue.h"
 #include "model/Settings.h"
 
 #include <cstdint>
@@ -29,6 +30,7 @@ struct DownloadView {
     std::optional<TransferFailure> retrying;  // set while the engine retries after a failure
     bool waitingForQuota = false;  // paused by the download quota; starts again by itself
     bool waitingForAddress = false;  // Refresh download address: waits for the browser (ENG-08)
+    bool waitingInQueue = false;  // a member of a running queue that waits for a free slot
     // A stream's progress, which has no total size until its pieces are joined. Its tracks are in
     // `download.tracks` without their pieces, which can be many thousands.
     struct Stream {
@@ -42,6 +44,13 @@ struct DownloadView {
     std::optional<Stream> stream;
 };
 
+struct QueueView {
+    model::Queue queue;
+    bool running = false;
+    int members = 0;
+    int runningMembers = 0;  // members that download, are being moved into place or wait for the quota
+};
+
 // A stored site login without its password.
 struct SiteLoginView {
     std::string pattern;
@@ -53,6 +62,7 @@ struct Snapshot {
     // Ordered by sort order. Rows that did not change are shared with the previous snapshot.
     std::vector<std::shared_ptr<const DownloadView>> downloads;
     std::vector<model::Category> categories;
+    std::vector<QueueView> queues;  // in their sort order
     model::Settings settings;  // secrets inside proxy settings are protected blobs, never plain text
     std::vector<model::ServerLimit> serverLimits;
     std::vector<SiteLoginView> siteLogins;
@@ -103,8 +113,33 @@ struct QuotaReached {
     std::int64_t periodEndsAtUnixMs = 0;
 };
 
+// A download queue started, by the user or by its schedule (checklist O-09: its sound).
+struct QueueStarted {
+    model::QueueId id;
+    std::string name;
+};
+
+// A queue stopped by itself because no member is left to download (checklist Q-08). The front end
+// runs its completion action, which is None when the queue started nothing in this run, so an
+// empty queue never shuts the computer down.
+struct QueueFinished {
+    model::QueueId id;
+    std::string name;
+    model::CompletionAction completionAction = model::CompletionAction::None;
+    bool forceTerminate = false;
+    std::string openFileWhenDone;
+};
+
+// A queue was stopped: by the user, Stop All, its schedule's stop time or its deletion. No
+// completion action follows.
+struct QueueStopped {
+    model::QueueId id;
+    std::string name;
+};
+
 // FetchFinished answers a FetchManifestCommand.
-using Notification = std::variant<AddResult, DownloadCompleted, DownloadFailed, CoreError, QuotaReached, FetchFinished>;
+using Notification = std::variant<AddResult, DownloadCompleted, DownloadFailed, CoreError, QuotaReached, FetchFinished,
+                                  QueueStarted, QueueFinished, QueueStopped>;
 
 // Receives the coordinator's output. Called on the core thread; implementations must only post to
 // their own thread.

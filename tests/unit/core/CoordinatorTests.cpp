@@ -1656,3 +1656,408 @@ TEST_F(CoordinatorTest, ManifestFetchesRefuseOtherSchemes)
     ASSERT_EQ(answers.size(), 1u);
     EXPECT_TRUE(answers[0].failure);
 }
+
+// ---------------------------------------------------------------------------------------------
+// Download queues (M4 design section 3)
+
+class QueueTest : public CoordinatorTest {
+protected:
+    const ldm::core::QueueView& QueueOf(ldm::model::QueueId id)
+    {
+        Publish();
+        for (const auto& view : observer_.snapshot->queues) {
+            if (view.queue.id == id) {
+                return view;
+            }
+        }
+        ADD_FAILURE() << "queue " << id.value << " not in the snapshot";
+        static const ldm::core::QueueView empty;
+        return empty;
+    }
+
+    ldm::model::QueueId MainQueue()
+    {
+        Publish();
+        return observer_.snapshot->queues.at(0).queue.id;
+    }
+
+    ldm::model::QueueId SyncQueue()
+    {
+        Publish();
+        return observer_.snapshot->queues.at(1).queue.id;
+    }
+
+    ldm::model::QueueId NewQueue(const std::string& name, int concurrent, int retries = 3,
+                                 ldm::model::CompletionAction action = ldm::model::CompletionAction::None)
+    {
+        ldm::model::Queue queue;
+        queue.name = name;
+        queue.concurrent = concurrent;
+        queue.retriesPerFile = retries;
+        queue.completionAction = action;
+        coordinator_->Handle(ldm::core::SaveQueueCommand{queue});
+        Publish();
+        return observer_.snapshot->queues.back().queue.id;
+    }
+
+    DownloadId AddTo(ldm::model::QueueId queue, const std::string& url)
+    {
+        return *Add(url, AddMode::Later, [queue](AddDownloadCommand& c) { c.queue = queue; }).id;
+    }
+
+    void Complete(DownloadId id, std::int64_t epoch)
+    {
+        Finish(id, epoch, TransferOutcome::Completed, {{0, 4, 4}}, std::nullopt, 4);
+        Send(id, epoch, ldm::core::FinalizeFinished{});
+    }
+
+    std::vector<DownloadId> Started() const
+    {
+        std::vector<DownloadId> ids;
+        for (const auto& start : engine_.starts) {
+            ids.push_back(start.id);
+        }
+        return ids;
+    }
+
+    const TransferFailure notFound{FailureReason::NotFound, FailureClass::Fatal, 404, "HTTP status 404"};
+};
+
+TEST_F(QueueTest, DownloadLaterJoinsTheMainQueueAtTheEnd)
+{
+    const DownloadId a = *Add("http://x.test/a.dat", AddMode::Later).id;
+    const DownloadId b = *Add("http://x.test/b.dat", AddMode::Later).id;
+    const DownloadId now = *Add("http://x.test/c.dat").id;
+    EXPECT_EQ(View(a).download.queueId, MainQueue());
+    EXPECT_EQ(View(a).download.queuePosition, 1);
+    EXPECT_EQ(View(b).download.queuePosition, 2);
+    EXPECT_FALSE(View(now).download.queueId) << "a download started at once joins no queue";
+    EXPECT_EQ(Stored(b)->queueId, MainQueue());
+    EXPECT_EQ(QueueOf(MainQueue()).members, 2);
+    EXPECT_FALSE(QueueOf(MainQueue()).running);
+}
+
+TEST_F(QueueTest, AddingToAQueueThatIsGoneFails)
+{
+    const auto result = Add("http://x.test/a.dat", AddMode::Later, [](AddDownloadCommand& c) { c.queue = {77}; });
+    EXPECT_FALSE(result.id);
+    EXPECT_TRUE(result.error);
+}
+
+TEST_F(QueueTest, DownloadLaterInTheInfoDialogJoinsTheMainQueue)
+{
+    const DownloadId id = *Add("http://x.test/a.iso", AddMode::Speculative).id;
+    EXPECT_FALSE(View(id).download.queueId);
+    ldm::core::ConfirmDownloadCommand confirm;
+    confirm.id = id;
+    confirm.fileName = "a.iso";
+    confirm.saveDir = View(id).download.saveDir;
+    confirm.start = false;
+    coordinator_->Handle(confirm);
+    EXPECT_EQ(View(id).download.queueId, MainQueue());
+    EXPECT_EQ(Stored(id)->queueId, MainQueue());
+}
+
+TEST_F(QueueTest, AQueueStartsItsMembersInOrderAndFinishesWithItsAction)
+{
+    const auto queue = NewQueue("Nightly", 2, 3, ldm::model::CompletionAction::Shutdown);
+    const DownloadId a = AddTo(queue, "http://x.test/a.dat");
+    const DownloadId b = AddTo(queue, "http://x.test/b.dat");
+    const DownloadId c = AddTo(queue, "http://x.test/c.dat");
+    EXPECT_TRUE(engine_.starts.empty()) << "Download Later starts nothing";
+
+    coordinator_->Handle(ldm::core::StartQueueCommand{queue});
+    EXPECT_EQ(Started(), (std::vector<DownloadId>{a, b}));
+    ASSERT_EQ(observer_.All<ldm::core::QueueStarted>().size(), 1u);
+    EXPECT_EQ(observer_.All<ldm::core::QueueStarted>()[0].name, "Nightly");
+    EXPECT_TRUE(View(c).waitingInQueue);
+    EXPECT_FALSE(View(a).waitingInQueue);
+    EXPECT_TRUE(QueueOf(queue).running);
+    EXPECT_EQ(QueueOf(queue).members, 3);
+    EXPECT_EQ(QueueOf(queue).runningMembers, 2);
+
+    Complete(a, 1);
+    EXPECT_FALSE(View(a).download.queueId) << "a completed member leaves its queue";
+    EXPECT_EQ(Started(), (std::vector<DownloadId>{a, b, c})) << "the free slot is filled on the next tick";
+    EXPECT_FALSE(View(c).waitingInQueue);
+
+    Complete(b, 1);
+    Complete(c, 1);
+    Publish();
+    const auto finished = observer_.All<ldm::core::QueueFinished>();
+    ASSERT_EQ(finished.size(), 1u);
+    EXPECT_EQ(finished[0].id, queue);
+    EXPECT_EQ(finished[0].completionAction, ldm::model::CompletionAction::Shutdown);
+    EXPECT_FALSE(QueueOf(queue).running);
+    EXPECT_EQ(QueueOf(queue).members, 0);
+    EXPECT_TRUE(observer_.All<ldm::core::QueueStopped>().empty());
+}
+
+TEST_F(QueueTest, AQueueThatStartsNothingFinishesWithoutItsAction)
+{
+    const auto queue = NewQueue("Empty", 1, 3, ldm::model::CompletionAction::Shutdown);
+    coordinator_->Handle(ldm::core::StartQueueCommand{queue});
+    const auto finished = observer_.All<ldm::core::QueueFinished>();
+    ASSERT_EQ(finished.size(), 1u);
+    EXPECT_EQ(finished[0].completionAction, ldm::model::CompletionAction::None) << "an empty queue never shuts down";
+    EXPECT_FALSE(QueueOf(queue).running);
+}
+
+TEST_F(QueueTest, StartingARunningQueueAgainChangesNothing)
+{
+    const auto queue = NewQueue("Nightly", 1);
+    AddTo(queue, "http://x.test/a.dat");
+    AddTo(queue, "http://x.test/b.dat");
+    coordinator_->Handle(ldm::core::StartQueueCommand{queue});
+    coordinator_->Handle(ldm::core::StartQueueCommand{queue});
+    EXPECT_EQ(engine_.starts.size(), 1u);
+    EXPECT_EQ(observer_.All<ldm::core::QueueStarted>().size(), 1u);
+}
+
+TEST_F(QueueTest, AFailedMemberIsTriedAgainAfterTheOthersUntilItsRetriesAreUsed)
+{
+    const auto queue = NewQueue("Retry", 1, 1);
+    const DownloadId a = AddTo(queue, "http://x.test/a.dat");
+    const DownloadId b = AddTo(queue, "http://x.test/b.dat");
+    coordinator_->Handle(ldm::core::StartQueueCommand{queue});
+    ASSERT_EQ(Started(), (std::vector<DownloadId>{a}));
+
+    Finish(a, 1, TransferOutcome::Failed, {}, notFound);
+    EXPECT_EQ(View(a).download.queueFailures, 1);
+    EXPECT_GT(View(a).download.queuePosition, View(b).download.queuePosition) << "moved behind the others";
+    EXPECT_EQ(Started(), (std::vector<DownloadId>{a, b}));
+
+    Complete(b, 1);
+    Publish();
+    EXPECT_EQ(Started(), (std::vector<DownloadId>{a, b, a})) << "one retry";
+    Finish(a, 2, TransferOutcome::Failed, {}, notFound);
+    Publish();
+    EXPECT_EQ(engine_.starts.size(), 3u) << "no retries left";
+    EXPECT_EQ(View(a).download.status, DownloadStatus::Failed);
+    EXPECT_EQ(View(a).download.queueId, queue) << "a failed member stays in its queue";
+    ASSERT_EQ(observer_.All<ldm::core::QueueFinished>().size(), 1u);
+
+    // The next run gives it its retries again.
+    coordinator_->Handle(ldm::core::StartQueueCommand{queue});
+    EXPECT_EQ(View(a).download.queueFailures, 0);
+    EXPECT_EQ(engine_.starts.size(), 4u);
+}
+
+TEST_F(QueueTest, AMemberStoppedByHandIsLeftAloneForTheRestOfTheRun)
+{
+    const auto queue = NewQueue("Nightly", 1);
+    const DownloadId a = AddTo(queue, "http://x.test/a.dat");
+    const DownloadId b = AddTo(queue, "http://x.test/b.dat");
+    coordinator_->Handle(ldm::core::StartQueueCommand{queue});
+    coordinator_->Handle(ldm::core::StopCommand{{a}});
+    Finish(a, 1, TransferOutcome::Stopped, {{0, 100, 30}}, std::nullopt, 100);
+    Publish();
+    EXPECT_EQ(Started(), (std::vector<DownloadId>{a, b}));
+    EXPECT_FALSE(View(a).waitingInQueue);
+    EXPECT_EQ(View(a).download.queueId, queue) << "stopping keeps the membership";
+
+    Complete(b, 1);
+    Publish();
+    EXPECT_EQ(engine_.starts.size(), 2u);
+    EXPECT_EQ(observer_.All<ldm::core::QueueFinished>().size(), 1u);
+}
+
+TEST_F(QueueTest, ResumingAMemberByHandStartsItBesideTheQueue)
+{
+    const auto queue = NewQueue("Nightly", 1);
+    const DownloadId a = AddTo(queue, "http://x.test/a.dat");
+    const DownloadId b = AddTo(queue, "http://x.test/b.dat");
+    coordinator_->Handle(ldm::core::StartQueueCommand{queue});
+    coordinator_->Handle(ldm::core::ResumeCommand{{b}});
+    EXPECT_EQ(Started(), (std::vector<DownloadId>{a, b})) << "a manual start ignores the queue's concurrency";
+    EXPECT_EQ(QueueOf(queue).runningMembers, 2);
+}
+
+TEST_F(QueueTest, StoppingAQueueStopsItsRunningMembersWithoutItsAction)
+{
+    const auto queue = NewQueue("Nightly", 2, 3, ldm::model::CompletionAction::Shutdown);
+    const DownloadId a = AddTo(queue, "http://x.test/a.dat");
+    const DownloadId b = AddTo(queue, "http://x.test/b.dat");
+    AddTo(queue, "http://x.test/c.dat");
+    coordinator_->Handle(ldm::core::StartQueueCommand{queue});
+    coordinator_->Handle(ldm::core::StopQueueCommand{queue});
+    EXPECT_EQ(engine_.stops.size(), 2u);
+    ASSERT_EQ(observer_.All<ldm::core::QueueStopped>().size(), 1u);
+    Finish(a, 1, TransferOutcome::Stopped, {{0, 100, 30}}, std::nullopt, 100);
+    Finish(b, 1, TransferOutcome::Stopped, {{0, 100, 30}}, std::nullopt, 100);
+    Publish();
+    EXPECT_EQ(engine_.starts.size(), 2u) << "a stopped queue starts nothing";
+    EXPECT_TRUE(observer_.All<ldm::core::QueueFinished>().empty());
+    EXPECT_FALSE(QueueOf(queue).running);
+}
+
+TEST_F(QueueTest, StopAllStopsEveryQueue)
+{
+    const auto queue = NewQueue("Nightly", 1);
+    AddTo(queue, "http://x.test/a.dat");
+    coordinator_->Handle(ldm::core::StartQueueCommand{queue});
+    coordinator_->Handle(ldm::core::StopAllCommand{});
+    EXPECT_EQ(observer_.All<ldm::core::QueueStopped>().size(), 1u);
+    EXPECT_FALSE(QueueOf(queue).running);
+}
+
+TEST_F(QueueTest, ACompletedDownloadAddedToAQueueIsDownloadedAgainWhenItsTurnComes)
+{
+    const DownloadId id = *Add("http://x.test/a.dat").id;
+    Complete(id, 1);
+    files_.Put(kRoot / L"a.dat", 4);
+    coordinator_->Handle(ldm::core::SetQueueCommand{{id}, MainQueue()});
+    EXPECT_EQ(View(id).download.status, DownloadStatus::Completed);
+
+    coordinator_->Handle(ldm::core::StartQueueCommand{MainQueue()});
+    ASSERT_EQ(engine_.starts.size(), 2u);
+    EXPECT_TRUE(engine_.starts.back().segments.empty()) << "from the start";
+    Finish(id, 2, TransferOutcome::Completed, {{0, 4, 4}}, std::nullopt, 4);
+    EXPECT_FALSE(files_.Exists(kRoot / L"a.dat")) << "the old file goes only once the new one is complete";
+    Send(id, 2, ldm::core::FinalizeFinished{});
+    Publish();
+    EXPECT_FALSE(View(id).download.queueId);
+    EXPECT_EQ(observer_.All<ldm::core::QueueFinished>().size(), 1u);
+}
+
+TEST_F(QueueTest, TheSynchronizationQueueKeepsItsCompletedMembers)
+{
+    const DownloadId id = AddTo(SyncQueue(), "http://x.test/a.dat");
+    coordinator_->Handle(ldm::core::StartQueueCommand{SyncQueue()});
+    ASSERT_EQ(engine_.starts.size(), 1u);
+    Complete(id, 1);
+    Publish();
+    EXPECT_EQ(View(id).download.queueId, SyncQueue());
+    EXPECT_EQ(engine_.starts.size(), 1u) << "a completed member is not downloaded again";
+    EXPECT_EQ(observer_.All<ldm::core::QueueFinished>().size(), 1u);
+}
+
+TEST_F(QueueTest, QueuesAreStoppedAfterARestartAndKeepTheirMembers)
+{
+    const auto queue = NewQueue("Nightly", 1);
+    const DownloadId a = AddTo(queue, "http://x.test/a.dat");
+    const DownloadId b = AddTo(queue, "http://x.test/b.dat");
+    coordinator_->Handle(ldm::core::StartQueueCommand{queue});
+    Recreate();
+    EXPECT_FALSE(QueueOf(queue).running);
+    EXPECT_EQ(QueueOf(queue).members, 2);
+    EXPECT_EQ(View(a).download.status, DownloadStatus::Paused);
+    EXPECT_EQ(View(b).download.queuePosition, 2);
+    EXPECT_FALSE(View(b).waitingInQueue);
+}
+
+TEST_F(QueueTest, ACompletedMemberFoundAfterACrashLeavesItsQueue)
+{
+    const DownloadId id = *Add("http://x.test/a.dat").id;
+    coordinator_->Handle(ldm::core::SetQueueCommand{{id}, MainQueue()});
+    Finish(id, 1, TransferOutcome::Completed, {{0, 4, 4}}, std::nullopt, 4);  // the move never answers
+    files_.Put(kRoot / L"a.dat", 4);
+    Recreate();
+    EXPECT_EQ(View(id).download.status, DownloadStatus::Completed);
+    EXPECT_FALSE(View(id).download.queueId) << "otherwise the next run would download it again";
+}
+
+TEST_F(QueueTest, ReorderingDecidesWhichMemberStartsFirst)
+{
+    const auto queue = NewQueue("Nightly", 1);
+    const DownloadId a = AddTo(queue, "http://x.test/a.dat");
+    const DownloadId b = AddTo(queue, "http://x.test/b.dat");
+    const DownloadId c = AddTo(queue, "http://x.test/c.dat");
+    coordinator_->Handle(ldm::core::ReorderQueueCommand{queue, {c, a, DownloadId{999}, c}});
+    EXPECT_EQ(View(c).download.queuePosition, 1);
+    EXPECT_EQ(View(a).download.queuePosition, 2);
+    EXPECT_EQ(View(b).download.queuePosition, 3) << "members left out follow those listed";
+    EXPECT_EQ(Stored(c)->queuePosition, 1);
+    coordinator_->Handle(ldm::core::StartQueueCommand{queue});
+    EXPECT_EQ(Started(), (std::vector<DownloadId>{c}));
+}
+
+TEST_F(QueueTest, MovingDownloadsToAQueueKeepsTheListOrder)
+{
+    const auto queue = NewQueue("Nightly", 1);
+    const DownloadId a = *Add("http://x.test/a.dat", AddMode::Later).id;
+    const DownloadId b = *Add("http://x.test/b.dat", AddMode::Later).id;
+    coordinator_->Handle(ldm::core::SetQueueCommand{{b, a}, queue});
+    EXPECT_EQ(View(a).download.queueId, queue);
+    EXPECT_EQ(View(a).download.queuePosition, 1);
+    EXPECT_EQ(View(b).download.queuePosition, 2);
+    EXPECT_EQ(QueueOf(MainQueue()).members, 0);
+
+    coordinator_->Handle(ldm::core::SetQueueCommand{{a}, std::nullopt});
+    EXPECT_FALSE(View(a).download.queueId);
+    EXPECT_FALSE(Stored(a)->queueId);
+}
+
+TEST_F(QueueTest, SavingQueuesChecksWhatTheyAreGiven)
+{
+    const auto nightly = NewQueue("  Nightly ", 2);
+    EXPECT_EQ(QueueOf(nightly).queue.name, "Nightly");
+    EXPECT_EQ(QueueOf(nightly).queue.kind, ldm::model::QueueKind::Custom);
+
+    const auto errorsBefore = observer_.All<ldm::core::CoreError>().size();
+    ldm::model::Queue duplicate;
+    duplicate.name = "NIGHTLY";
+    coordinator_->Handle(ldm::core::SaveQueueCommand{duplicate});
+    ldm::model::Queue wide;
+    wide.name = "Wide";
+    wide.concurrent = ldm::model::kMaxQueueConcurrent + 1;
+    coordinator_->Handle(ldm::core::SaveQueueCommand{wide});
+    ldm::model::Queue noDays;
+    noDays.name = "No days";
+    noDays.schedule.enabled = true;
+    noDays.schedule.weekdays = 0;
+    coordinator_->Handle(ldm::core::SaveQueueCommand{noDays});
+    ldm::model::Queue relative;
+    relative.name = "Relative";
+    relative.openFileWhenDone = "done.cmd";
+    coordinator_->Handle(ldm::core::SaveQueueCommand{relative});
+    EXPECT_EQ(observer_.All<ldm::core::CoreError>().size(), errorsBefore + 4);
+    EXPECT_EQ(observer_.snapshot->queues.size(), 3u);
+
+    ldm::model::Queue main = QueueOf(MainQueue()).queue;
+    main.name = "Renamed";
+    main.concurrent = 4;
+    coordinator_->Handle(ldm::core::SaveQueueCommand{main});
+    EXPECT_EQ(QueueOf(MainQueue()).queue.name, "Main download queue") << "the built-in queues keep their names";
+    EXPECT_EQ(QueueOf(MainQueue()).queue.concurrent, 4);
+    EXPECT_EQ(QueueOf(MainQueue()).queue.kind, ldm::model::QueueKind::Main);
+}
+
+TEST_F(QueueTest, DeletingAQueueLeavesItsMembersOutsideAnyQueue)
+{
+    const auto queue = NewQueue("Nightly", 1);
+    const DownloadId a = AddTo(queue, "http://x.test/a.dat");
+    coordinator_->Handle(ldm::core::StartQueueCommand{queue});
+    coordinator_->Handle(ldm::core::DeleteQueueCommand{queue});
+    EXPECT_EQ(observer_.All<ldm::core::QueueStopped>().size(), 1u) << "a running queue stops first";
+    EXPECT_FALSE(View(a).download.queueId);
+    EXPECT_FALSE(Stored(a)->queueId);
+    EXPECT_EQ(observer_.snapshot->queues.size(), 2u);
+
+    const auto errorsBefore = observer_.All<ldm::core::CoreError>().size();
+    coordinator_->Handle(ldm::core::DeleteQueueCommand{MainQueue()});
+    EXPECT_EQ(observer_.All<ldm::core::CoreError>().size(), errorsBefore + 1);
+    EXPECT_EQ(observer_.snapshot->queues.size(), 2u);
+}
+
+TEST_F(QueueTest, AQueueWaitsForTheQuotaInsteadOfFinishing)
+{
+    EnableQuota(*coordinator_, false);
+    const DownloadId first = *Add("http://x.test/first.dat").id;
+    Send(first, 1, Received(1100 * 1024));
+    Finish(first, 1, TransferOutcome::Stopped, {{0, std::nullopt, 1100 * 1024}});
+
+    const auto queue = NewQueue("Nightly", 1);
+    const DownloadId a = AddTo(queue, "http://x.test/a.dat");
+    coordinator_->Handle(ldm::core::StartQueueCommand{queue});
+    Publish();
+    EXPECT_EQ(engine_.starts.size(), 1u) << "nothing starts while the quota is used up";
+    EXPECT_TRUE(QueueOf(queue).running);
+    EXPECT_TRUE(observer_.All<ldm::core::QueueFinished>().empty());
+
+    clock_.Advance(std::chrono::hours(1));
+    Publish();
+    const auto started = Started();
+    EXPECT_NE(std::find(started.begin(), started.end(), a), started.end()) << "it starts when the period ends";
+}
+

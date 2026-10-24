@@ -188,6 +188,12 @@ base::Status Coordinator::Initialize()
         }
     }
 
+    auto queues = ports_.store->LoadQueues();
+    if (!queues) {
+        return queues.GetError();
+    }
+    queues_ = std::move(queues).Value();
+
     auto logins = ports_.store->LoadSiteLogins();
     if (!logins) {
         return logins.GetError();
@@ -278,6 +284,7 @@ void Coordinator::RecoverAfterRestart(Entry& entry)
             if (!d.completedAtMs) {
                 d.completedAtMs = ports_.clock->NowUnixMs();
             }
+            LeaveQueueOnCompletion(entry);
         } else {
             d.status = DownloadStatus::Paused;
         }
@@ -379,6 +386,18 @@ void Coordinator::Handle(Command command)
                 if (manifests_) {
                     manifests_->Start(std::move(typed), settings_.userAgent);
                 }
+            } else if constexpr (std::is_same_v<T, SaveQueueCommand>) {
+                SaveQueue(std::move(typed.queue));
+            } else if constexpr (std::is_same_v<T, DeleteQueueCommand>) {
+                DeleteQueue(typed.id);
+            } else if constexpr (std::is_same_v<T, SetQueueCommand>) {
+                SetQueue(typed.ids, typed.queue);
+            } else if constexpr (std::is_same_v<T, ReorderQueueCommand>) {
+                ReorderQueue(typed.queue, typed.order);
+            } else if constexpr (std::is_same_v<T, StartQueueCommand>) {
+                StartQueue(typed.id);
+            } else if constexpr (std::is_same_v<T, StopQueueCommand>) {
+                StopQueue(typed.id);
             } else {
                 static_assert(sizeof(T) == 0, "unhandled command");
             }
@@ -543,6 +562,18 @@ void Coordinator::Add(const AddDownloadCommand& command)
             return;
         }
     }
+    // Download Later goes into the main queue unless another was chosen (M4 design decision 2).
+    const std::optional<model::QueueId> queue = command.queue ? command.queue
+                                                : command.mode == AddMode::Later ? MainQueue()
+                                                                                 : std::nullopt;
+    if (queue) {
+        if (FindQueue(*queue) == nullptr) {
+            fail("The selected queue no longer exists.");
+            return;
+        }
+        download.queueId = queue;
+        download.queuePosition = NextQueuePosition(*queue);
+    }
 
     auto inserted = ports_.store->InsertDownload(download);
     if (!inserted) {
@@ -600,6 +631,16 @@ void Coordinator::Confirm(const ConfirmDownloadCommand& command)
     d.description = command.description;
     entry->userNamed = true;
     d.awaitingConfirmation = false;
+    // Download Later goes into the main queue unless another was chosen (M4 design decision 2).
+    const std::optional<model::QueueId> queue = command.queue ? command.queue
+                                                : !command.start  ? MainQueue()
+                                                                  : std::nullopt;
+    if (queue && FindQueue(*queue) != nullptr && d.queueId != queue) {
+        d.queuePosition = NextQueuePosition(*queue);
+        d.queueId = queue;
+        d.queueFailures = 0;
+        MarkMembersChanged(*queue);
+    }
 
     if (command.rememberFolderForCategory && category) {
         const auto it = std::find_if(categories_.begin(), categories_.end(),
@@ -631,6 +672,9 @@ void Coordinator::Resume(const std::vector<model::DownloadId>& ids)
 {
     for (const model::DownloadId id : ids) {
         StopWaitingForAddress(id);  // resumed by hand: the old address is tried again
+        for (auto& [queueId, run] : queueRuns_) {
+            run.stoppedByUser.erase(id);
+        }
         Entry* entry = Find(id);
         if (entry != nullptr && !entry->running && !entry->finalizing && CanStart(entry->download.status)) {
             Start(*entry);
@@ -644,6 +688,12 @@ void Coordinator::Stop(const std::vector<model::DownloadId>& ids)
         Entry* entry = Find(id);
         if (entry == nullptr) {
             continue;
+        }
+        if (entry->download.queueId) {
+            if (const auto run = queueRuns_.find(*entry->download.queueId); run != queueRuns_.end()) {
+                run->second.stoppedByUser.insert(id);  // its queue does not start it again in this run
+                MarkChanged(*entry);
+            }
         }
         if (entry->quotaHeld) {
             // Stopped by the user: it no longer starts by itself when the quota allows.
@@ -662,6 +712,13 @@ void Coordinator::Stop(const std::vector<model::DownloadId>& ids)
 
 void Coordinator::StopAll()
 {
+    std::vector<model::QueueId> running;
+    for (const auto& [id, run] : queueRuns_) {
+        running.push_back(id);
+    }
+    for (const model::QueueId id : running) {
+        StopQueue(id);
+    }
     for (auto& [id, entry] : entries_) {
         if (entry.running) {
             RequestStop(entry);
@@ -730,6 +787,9 @@ void Coordinator::DeleteCompleted()
 
 void Coordinator::Redownload(model::DownloadId id)
 {
+    for (auto& [queueId, run] : queueRuns_) {
+        run.stoppedByUser.erase(id);
+    }
     Entry* entry = Find(id);
     if (entry == nullptr || entry->deleteWhenStopped || entry->finalizing) {
         return;
@@ -1367,6 +1427,7 @@ void Coordinator::OnFinalized(Entry& entry, const FinalizeFinished& finalized)
     entry.finalizeAttempts = 0;
     entry.automaticRestarts = 0;
     entry.forcedMaxConnections.reset();
+    LeaveQueueOnCompletion(entry);
     Save(entry);
     MarkChanged(entry);
     UpdatePowerRequest();
@@ -1604,6 +1665,9 @@ void Coordinator::RemoveEntry(model::DownloadId id, bool deleteFinalFile)
     if (waitingForAddress_ == id) {
         waitingForAddress_.reset();
     }
+    for (auto& [queueId, run] : queueRuns_) {
+        run.stoppedByUser.erase(id);  // row ids can be used again by a later download
+    }
     const model::Download& d = entry->download;
     if (d.partialPath) {
         const std::filesystem::path partial = PathFromUtf8(*d.partialPath);
@@ -1662,6 +1726,7 @@ void Coordinator::Fail(Entry& entry, const TransferFailure& failure)
     model::Download& d = entry.download;
     d.status = DownloadStatus::Failed;
     d.lastResult = DescribeFailure(failure);
+    CountQueueFailure(entry);
     Save(entry);
     MarkChanged(entry);
     Notify(DownloadFailed{d.id, d.fileName, failure});
@@ -2253,6 +2318,7 @@ void Coordinator::Tick()
     if (waitingForAddress_ && now - waitingSince_ >= kAddressWaitLimit) {
         StopWaitingForAddress(*waitingForAddress_);
     }
+    RunQueues();
     if (snapshotDirty_ && now - lastSnapshot_ >= config_.snapshotInterval) {
         PublishSnapshot();
     }
@@ -2409,6 +2475,7 @@ void Coordinator::PublishSnapshot()
             view->retrying = entry->retrying;
             view->waitingForQuota = entry->quotaHeld;
             view->waitingForAddress = waitingForAddress_ == entry->download.id;
+            view->waitingInQueue = IsWaitingInQueue(*entry);
             std::optional<std::int64_t> expectedSize = entry->download.totalSize;
             if (entry->download.IsStream()) {
                 for (model::MediaTrack& track : view->download.tracks) {
@@ -2451,6 +2518,25 @@ void Coordinator::PublishSnapshot()
     snapshot->categories = categories_;
     std::sort(snapshot->categories.begin(), snapshot->categories.end(),
               [](const model::Category& a, const model::Category& b) { return a.sortOrder < b.sortOrder; });
+    std::map<model::QueueId, QueueView> queueViews;
+    for (const model::Queue& queue : queues_) {
+        queueViews.emplace(queue.id, QueueView{queue, queueRuns_.contains(queue.id), 0, 0});
+    }
+    for (const auto& [id, entry] : entries_) {
+        if (!entry.download.queueId) {
+            continue;
+        }
+        if (const auto view = queueViews.find(*entry.download.queueId); view != queueViews.end()) {
+            view->second.members += 1;
+            view->second.runningMembers += DescribeMember(entry).busy ? 1 : 0;
+        }
+    }
+    for (auto& [id, view] : queueViews) {
+        snapshot->queues.push_back(std::move(view));
+    }
+    std::sort(snapshot->queues.begin(), snapshot->queues.end(), [](const QueueView& a, const QueueView& b) {
+        return std::pair(a.queue.sortOrder, a.queue.id.value) < std::pair(b.queue.sortOrder, b.queue.id.value);
+    });
     snapshot->settings = settings_;
     snapshot->serverLimits = serverLimits_;
     for (const model::SiteLogin& login : siteLogins_) {
@@ -2504,6 +2590,7 @@ Coordinator::Entry* Coordinator::Find(model::DownloadId id)
 void Coordinator::BeginShutdown()
 {
     shuttingDown_ = true;
+    queueRuns_.clear();  // every queue is stopped at the next start anyway; nothing to tell
     for (auto& [id, entry] : entries_) {
         if (entry.running) {
             RequestStop(entry);

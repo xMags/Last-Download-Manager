@@ -6,6 +6,7 @@
 #include "core/MediaProgress.h"
 #include "core/MediaTools.h"
 #include "core/Ports.h"
+#include "core/QueueRunner.h"
 #include "core/Quota.h"
 #include "core/Snapshot.h"
 #include "core/Store.h"
@@ -18,6 +19,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -157,6 +159,29 @@ private:
     // Ends Refresh download address for `id`, if it is the download that waits.
     void StopWaitingForAddress(model::DownloadId id);
 
+    // Download queues (M4 design section 3; CoordinatorQueues.cpp).
+    void SaveQueue(model::Queue queue);
+    void DeleteQueue(model::QueueId id);
+    void SetQueue(const std::vector<model::DownloadId>& ids, std::optional<model::QueueId> queue);
+    void ReorderQueue(model::QueueId id, const std::vector<model::DownloadId>& order);
+    void StartQueue(model::QueueId id);
+    // Stops a running queue and its running members; tells the front end unless `quietly`.
+    void StopQueue(model::QueueId id, bool quietly = false);
+    // Starts members of running queues in free slots and stops queues that are done. Runs on
+    // every Tick and after a queue starts.
+    void RunQueues();
+    [[nodiscard]] model::Queue* FindQueue(model::QueueId id);
+    [[nodiscard]] std::optional<model::QueueId> MainQueue() const;
+    [[nodiscard]] std::int64_t NextQueuePosition(model::QueueId id) const;
+    [[nodiscard]] QueueMember DescribeMember(const Entry& entry) const;
+    [[nodiscard]] bool IsWaitingInQueue(const Entry& entry) const;
+    // Marks the views of a queue's members changed: whether they wait in it depends on its run.
+    void MarkMembersChanged(model::QueueId id);
+    // Membership consequences of a member's end: a completed member leaves an ordinary queue; a
+    // failed member of a running queue counts the failure and moves behind the others.
+    void LeaveQueueOnCompletion(Entry& entry);
+    void CountQueueFailure(Entry& entry);
+
     // Engine event handlers.
     void OnResponseInfo(Entry& entry, const ResponseInfo& info);
     void OnProgress(Entry& entry, const ProgressInfo& progress);
@@ -238,6 +263,14 @@ private:
     std::vector<model::SiteLogin> siteLogins_;
     std::vector<model::ServerLimit> serverLimits_;
     std::map<model::DownloadId, Entry> entries_;
+    std::vector<model::Queue> queues_;
+    // The queues that run, with what their current run remembers. Not stored: every queue is
+    // stopped when LDM starts.
+    struct QueueRun {
+        std::set<model::DownloadId> stoppedByUser;  // not started again in this run
+        bool startedAny = false;  // the completion action runs only after the queue downloaded something
+    };
+    std::map<model::QueueId, QueueRun> queueRuns_;
     std::int64_t nextSortOrder_ = 1;
     bool speedLimiterOn_ = false;
     bool shuttingDown_ = false;

@@ -10,6 +10,7 @@ add_executable(ldm_unit_tests
     core/CoordinatorTests.cpp
     core/MediaPiecesTests.cpp
     core/NetworkAddressTests.cpp
+    core/QueueRunnerTests.cpp
     core/QuotaTests.cpp
     core/SegmentPlannerTests.cpp
     core/UrlAndNamesTests.cpp
