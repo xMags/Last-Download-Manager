@@ -84,14 +84,47 @@ Type: files; Name: "{#DataFolder}\browser\firefox-host.json"
 Type: dirifempty; Name: "{#DataFolder}\browser"
 
 [Code]
+const
+  RunningMutex = 'Local\LastDownloadManager.Running';  // kRunningMutexName in InstanceChannel.h
+  WM_COMMAND = $0111;
+  ExitCommand = 40009;  // ID_TASKS_EXIT in src/resources/resource.h; LDM 5.0.0 knows it too
+  ExitWaitMs = 15000;
+
+// Windows' Restart Manager classifies LDM as an application it can only close by force, so
+// CloseApplications alone stops on "Setup was unable to automatically close all applications".
+// Called before that check: LDM is asked to exit through its own Exit command, which saves its
+// state and ends the browser helper with it. If it is still running after the wait, Setup goes on
+// to the Restart Manager prompt, where the user can exit LDM and choose Try again.
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  Window: HWND;
+  Waited: Integer;
+begin
+  Result := '';
+  if not CheckForMutexes(RunningMutex) then
+    exit;
+  Window := FindWindowByClassName('LdmMainWindow');
+  if Window = 0 then
+    exit;
+  PostMessage(Window, WM_COMMAND, ExitCommand, 0);
+  Waited := 0;
+  while CheckForMutexes(RunningMutex) and (Waited < ExitWaitMs) do
+  begin
+    Sleep(250);
+    Waited := Waited + 250;
+  end;
+  // The browser helper ends when it loses LDM; give it a moment before files are checked.
+  if not CheckForMutexes(RunningMutex) then
+    Sleep(1500);
+end;
+
 // A running LDM keeps its files and its database open, so they could not be removed: the user exits
-// it first. LDM holds this mutex while it runs (kRunningMutexName in InstanceChannel.h). Setup
-// itself closes LDM through Windows' Restart Manager instead (CloseApplications), which the
-// uninstaller does not use.
+// it first. LDM holds RunningMutex while it runs. Setup closes LDM in PrepareToInstall above
+// instead; the uninstaller has no such step.
 function InitializeUninstall(): Boolean;
 begin
   Result := True;
-  while CheckForMutexes('Local\LastDownloadManager.Running') do
+  while CheckForMutexes(RunningMutex) do
   begin
     if UninstallSilent or
        (MsgBox('Last Download Manager is running.' + #13#10#13#10 +
