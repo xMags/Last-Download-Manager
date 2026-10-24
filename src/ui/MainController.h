@@ -11,6 +11,7 @@
 #include "ui/ClipboardMonitor.h"
 #include "ui/DownloadListView.h"
 #include "ui/ImportExportFlow.h"
+#include "ui/PlaylistOffer.h"
 #include "ui/ListModel.h"
 #include "ui/ShellActions.h"
 #include "ui/StartupRegistration.h"
@@ -126,6 +127,7 @@ private:
     CaptureFollowUp captures_;
     AddFlow adds_;
     ImportExportFlow importExport_;
+    PlaylistOffer playlists_;
     ClipboardMonitor clipboard_;
     std::unique_ptr<FindDialog> find_;
     FindOptions findOptions_;

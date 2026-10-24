@@ -19,6 +19,7 @@ add_executable(ldm_unit_tests
     engine/TokenBucketTests.cpp
     media/DashManifestTests.cpp
     media/HlsPlaylistTests.cpp
+    media/M3uListTests.cpp
     media/NumberTextTests.cpp
     media/QualityListTests.cpp
     media/UrlReferenceTests.cpp
@@ -36,6 +37,7 @@ add_executable(ldm_unit_tests
     ui/MediaPanelMenuTests.cpp
     ui/PageLinksTests.cpp
     ui/PanelPlacementTests.cpp
+    ui/PlaylistOfferTests.cpp
     ui/StopChoiceTests.cpp
     ui/StreamChoiceTests.cpp
     # The app's own manifest: the UI code under test needs version 6 of the common controls

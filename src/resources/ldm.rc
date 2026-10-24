@@ -627,7 +627,7 @@ STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMEN
 CAPTION "Download All Links with LDM"
 FONT 9, "Segoe UI", 400, 0, 0x1
 BEGIN
-    LTEXT "Check the links you want to add to Last Download Manager's list, then press OK. Types and sizes fill in while the browser checks the links.", -1, 7, 5, 518, 16
+    LTEXT "Check the links you want to add to Last Download Manager's list, then press OK. Types and sizes fill in while the browser checks the links.", IDC_LINKS_INTRO, 7, 5, 518, 16
     CONTROL "", IDC_LINKS_LIST, "SysListView32", LVS_REPORT | LVS_SHOWSELALWAYS | WS_BORDER | WS_TABSTOP, 7, 23, 518, 176
     LTEXT "", IDC_LINKS_COUNT, 7, 203, 518, 8
     GROUPBOX "Save to", -1, 7, 216, 273, 78
