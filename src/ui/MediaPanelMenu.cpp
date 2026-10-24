@@ -148,10 +148,16 @@ std::vector<PanelMenuItem> BuildPanelMenu(const std::vector<const MediaItem*>& o
             }
             continue;
         }
+        // The submenu says what is inside, so a protected or live stream shows before it is opened.
         PanelMenuItem stream;
         stream.text = KindName(*item);
-        if (!item->qualities.entries.empty()) {
+        if (item->qualities.drm) {
+            stream.text += L" (protected)";
+        } else if (!item->qualities.entries.empty()) {
             stream.text += L": " + base::ToUtf16(media::QualityLabel(item->qualities.entries.front()));
+            if (item->offer && item->offer->live) {
+                stream.text += L" (live)";
+            }
         }
         stream.children = std::move(lines);
         menu.push_back(std::move(stream));
