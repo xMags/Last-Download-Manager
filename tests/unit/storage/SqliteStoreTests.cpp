@@ -358,6 +358,21 @@ TEST(SqliteStore, ALiveTrackGrowsByAppendingKeysAndPieces)
     EXPECT_EQ(store.LoadDownloads().Value().front().tracks[0].pieces.size(), 5u);
 }
 
+TEST(SqliteStore, SkippedPiecesRoundTrip)
+{
+    SqliteStore store = OpenMemoryStore();
+    Download d = SampleStream("s");
+    d.tracks[0].pieces[3].skipped = true;
+    d.id = store.InsertDownload(d).Value();
+    Download loaded = store.LoadDownloads().Value().front();
+    EXPECT_TRUE(loaded.tracks[0].pieces[3].skipped);
+    EXPECT_FALSE(loaded.tracks[0].pieces[2].skipped);
+
+    loaded.tracks[0].pieces[2].skipped = true;
+    ASSERT_TRUE(store.ReplaceMediaTrack(d.id, 0, loaded.tracks[0]).Ok());
+    EXPECT_TRUE(store.LoadDownloads().Value().front().tracks[0].pieces[2].skipped);
+}
+
 TEST(SqliteStore, AppendingToATrackThatDoesNotExistChangesNothing)
 {
     SqliteStore store = OpenMemoryStore();
@@ -439,6 +454,28 @@ TEST(Migrations, SchemaSixMarksEarlierTracksAsNotLive)
     ASSERT_TRUE(query.Value().Step().Value());
     EXPECT_EQ(query.Value().Int64(0), 0);
     EXPECT_FALSE(connection.Value().Execute("UPDATE media_tracks SET live = 2").Ok()) << "only 0 or 1";
+}
+
+TEST(Migrations, SchemaSevenKeepsEarlierPiecesWanted)
+{
+    auto connection = ldm::storage::Connection::Open(":memory:");
+    ASSERT_TRUE(connection.Ok());
+    ASSERT_TRUE(connection.Value().Execute("PRAGMA foreign_keys = ON").Ok());
+    ASSERT_TRUE(ldm::storage::MigrateTo(connection.Value(), 6).Ok());
+    ASSERT_TRUE(connection.Value()
+                    .Execute("INSERT INTO downloads (id, public_id, url, file_name, save_dir, status, created_at, "
+                             "sort_order, kind) VALUES (7, 'p', 'https://x.test/m.m3u8', 'f', 'C:\\\\D', 'paused', 1, "
+                             "1, 'hls');"
+                             "INSERT INTO media_tracks (download_id, track, role, source_url) "
+                             "VALUES (7, 0, 'video', 'https://x.test/v.m3u8');"
+                             "INSERT INTO media_segments (download_id, track, idx, kind, url) "
+                             "VALUES (7, 0, 0, 'media', 'https://x.test/0.ts');")
+                    .Ok());
+    ASSERT_TRUE(ldm::storage::Migrate(connection.Value()).Ok());
+    auto query = connection.Value().Prepare("SELECT skipped FROM media_segments");
+    ASSERT_TRUE(query.Ok());
+    ASSERT_TRUE(query.Value().Step().Value());
+    EXPECT_EQ(query.Value().Int64(0), 0);
 }
 
 TEST(Migrations, RefusesNewerSchema)
