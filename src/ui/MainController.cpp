@@ -26,10 +26,10 @@ namespace ldm::ui {
 
 namespace {
 
-constexpr wchar_t kHelpUrl[] = L"https://github.com/xMags/Last-Download-Manager#readme";
-constexpr wchar_t kQueuesHelpUrl[] = L"https://github.com/xMags/Last-Download-Manager/blob/main/docs/help/queues.md";
-constexpr wchar_t kGrabberHelpUrl[] =
-    L"https://github.com/xMags/Last-Download-Manager/blob/main/docs/help/site-grabber.md";
+// The user guide on the Last Projects wiki; the queue and Grabber items open their own sections.
+constexpr wchar_t kHelpUrl[] = L"https://lastprojects.com/wiki/last-download-manager";
+constexpr wchar_t kQueuesHelpUrl[] = L"https://lastprojects.com/wiki/last-download-manager#ldm-queues";
+constexpr wchar_t kGrabberHelpUrl[] = L"https://lastprojects.com/wiki/last-download-manager#ldm-grabber";
 
 std::filesystem::path FinalPath(const model::Download& download)
 {
