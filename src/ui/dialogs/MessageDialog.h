@@ -9,7 +9,7 @@
 namespace ldm::ui {
 
 enum class MessageKind { Information, Warning, Question };
-enum class MessageButtons { Ok, YesNo };
+enum class MessageButtons { Ok, YesNo, YesNoCancel };
 
 struct MessageRequest {
     std::wstring text;
@@ -21,8 +21,8 @@ struct MessageRequest {
 // Tells or asks the user something, like MessageBox. The Windows message box has no dark mode
 // (checklist V-08), so while `theme` is dark this shows LDM's own dialog with the same icon,
 // sound and buttons; while it is light it is the Windows message box. Yes/No questions cannot
-// be dismissed with Esc or the close button, as in the Windows message box.
-// Returns IDOK, IDYES or IDNO.
+// be dismissed with Esc or the close button, as in the Windows message box; with Cancel, Esc and
+// the close button answer Cancel. Returns IDOK, IDYES, IDNO or IDCANCEL.
 int ShowMessage(HWND owner, const Theme& theme, const MessageRequest& request);
 
 }  // namespace ldm::ui

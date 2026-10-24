@@ -68,6 +68,8 @@ add_library(ldm_ui STATIC
     StreamChoice.cpp
     StreamChoice.h
     StatusBar.h
+    StopChoice.cpp
+    StopChoice.h
     SystemActions.cpp
     SystemActions.h
     Theme.cpp

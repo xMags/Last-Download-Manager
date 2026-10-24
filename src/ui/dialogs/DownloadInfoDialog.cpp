@@ -129,6 +129,8 @@ void DownloadInfoDialog::Update(const core::DownloadView& view)
     std::wstring size = L"Size: ";
     if (d.totalSize) {
         size += FormatSize(*d.totalSize);
+    } else if (view.stream && view.stream->live) {
+        size += L"live recording, " + FormatRecordedLength(view.stream->recordedUs) + L" so far";
     } else if (view.stream && view.stream->estimatedBytes) {
         size += L"about " + FormatSize(*view.stream->estimatedBytes);
     } else {

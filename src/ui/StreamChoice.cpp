@@ -53,8 +53,9 @@ base::Result<StreamCapture> BuildStreamCapture(const TabMedia& tab, const MediaI
         return Refused("This stream is not ready yet.");
     }
     const media::MediaOffer& offer = *item.offer;
-    if (offer.live) {
-        return Refused("This is a live stream. LDM cannot download live streams yet: that comes with a later update.");
+    // A live HLS stream is recorded; a live DASH stream is not (M3 design, known limits).
+    if (offer.live && item.kind == browser::MediaKind::Dash) {
+        return Refused("LDM records live HLS streams only. This is a live DASH stream.");
     }
     if (item.qualities.drm || offer.drm) {
         return Refused("This video is protected and cannot be downloaded.");
@@ -112,7 +113,9 @@ base::Result<StreamCapture> BuildStreamCapture(const TabMedia& tab, const MediaI
     if (capture.media.tracks.empty()) {
         return Refused("This quality has nothing to download.");
     }
-    capture.media.approximateBytes = entry.approximateBytes;
+    if (!offer.live) {
+        capture.media.approximateBytes = entry.approximateBytes;  // a recording's size depends on how long it runs
+    }
     capture.fileName = Title(tab) + (picture ? ".mp4" : ".m4a");
     return capture;
 }

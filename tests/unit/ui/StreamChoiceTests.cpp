@@ -156,13 +156,24 @@ TEST(StreamChoice, DashTracksCarryTheirListsAndTheManifestAddress)
     }
 }
 
-TEST(StreamChoice, LiveStreamsAndStaleEntriesAreRefused)
+TEST(StreamChoice, LiveHlsIsRecordedWithoutASizeAndLiveDashIsRefused)
 {
     MediaItem live = HlsItem();
     live.offer->live = true;
+    const auto recorded = ldm::ui::BuildStreamCapture(Tab(), live, PanelAction{PanelAction::Kind::DownloadStream, 3, 0});
+    ASSERT_TRUE(recorded) << recorded.GetError().message;
+    EXPECT_EQ(recorded.Value().media.kind, ldm::model::DownloadKind::Hls);
+    EXPECT_FALSE(recorded.Value().media.approximateBytes) << "its size depends on how long it runs";
+    EXPECT_EQ(recorded.Value().fileName, "My_ Video.mp4");
+
+    live.kind = ldm::browser::MediaKind::Dash;
     const auto refused = ldm::ui::BuildStreamCapture(Tab(), live, PanelAction{PanelAction::Kind::DownloadStream, 3, 0});
     ASSERT_FALSE(refused);
-    EXPECT_NE(refused.GetError().message.find("live"), std::string::npos);
+    EXPECT_NE(refused.GetError().message.find("live DASH"), std::string::npos);
+}
+
+TEST(StreamChoice, StaleEntriesAreRefused)
+{
 
     const MediaItem item = HlsItem();
     EXPECT_FALSE(ldm::ui::BuildStreamCapture(Tab(), item, PanelAction{PanelAction::Kind::DownloadStream, 3, 99}));

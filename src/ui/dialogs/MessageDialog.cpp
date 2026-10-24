@@ -48,12 +48,15 @@ public:
 private:
     bool OnInit() override
     {
-        const bool yesNo = request_.buttons == MessageButtons::YesNo;
+        const bool yesNo = request_.buttons != MessageButtons::Ok;
+        const bool cancel = request_.buttons == MessageButtons::YesNoCancel;
         SetText(IDC_MESSAGE_TEXT, request_.text);
         SetText(IDOK, yesNo ? L"&Yes" : L"OK");
         Show(IDNO, yesNo);
         Enable(IDNO, yesNo);
-        if (yesNo) {
+        Show(IDCANCEL, cancel);
+        Enable(IDCANCEL, cancel);
+        if (yesNo && !cancel) {
             // A question needs an answer: no close button and no Esc, as in the Windows message box.
             ::EnableMenuItem(::GetSystemMenu(Handle(), FALSE), SC_CLOSE, MF_BYCOMMAND | MF_GRAYED);
         }
@@ -76,7 +79,7 @@ private:
     {
         (void)code;
         (void)control;
-        const bool yesNo = request_.buttons == MessageButtons::YesNo;
+        const bool yesNo = request_.buttons != MessageButtons::Ok;
         switch (id) {
         case IDOK:
             Close(yesNo ? IDYES : IDOK);
@@ -85,7 +88,10 @@ private:
             Close(IDNO);
             return true;
         case IDCANCEL:
-            if (!yesNo) {
+            // The Cancel button, Esc or the close button.
+            if (request_.buttons == MessageButtons::YesNoCancel) {
+                Close(IDCANCEL);
+            } else if (!yesNo) {
                 Close(IDOK);
             }
             return true;
@@ -107,8 +113,10 @@ private:
         ::GetWindowRect(Item(IDOK), &button);  // the template's size, which follows the dialog font
         const int buttonWidth = button.right - button.left;
         const int buttonHeight = button.bottom - button.top;
-        const bool yesNo = request_.buttons == MessageButtons::YesNo;
-        const int buttonsWidth = yesNo ? 2 * buttonWidth + buttonGap : buttonWidth;
+        const int buttonCount = request_.buttons == MessageButtons::YesNoCancel ? 3
+                                : request_.buttons == MessageButtons::YesNo     ? 2
+                                                                                : 1;
+        const int buttonsWidth = buttonCount * buttonWidth + (buttonCount - 1) * buttonGap;
 
         RECT measured{0, 0, Scale(400, dpi), 0};
         {
@@ -132,6 +140,8 @@ private:
         const int buttonsLeft = clientWidth - margin - buttonsWidth;
         ::MoveWindow(Item(IDOK), buttonsLeft, buttonsTop, buttonWidth, buttonHeight, FALSE);
         ::MoveWindow(Item(IDNO), buttonsLeft + buttonWidth + buttonGap, buttonsTop, buttonWidth, buttonHeight, FALSE);
+        ::MoveWindow(Item(IDCANCEL), buttonsLeft + 2 * (buttonWidth + buttonGap), buttonsTop, buttonWidth, buttonHeight,
+                     FALSE);
 
         RECT frame{0, 0, clientWidth, clientHeight};
         ::AdjustWindowRectExForDpi(&frame, static_cast<DWORD>(::GetWindowLongPtrW(window, GWL_STYLE)), FALSE,
@@ -167,7 +177,18 @@ int ShowMessage(HWND owner, const Theme& theme, const MessageRequest& request)
         }
         // The dialog could not be created; the Windows message box still gets the answer.
     }
-    UINT flags = IconFlag(request.kind) | (request.buttons == MessageButtons::YesNo ? MB_YESNO : MB_OK);
+    UINT flags = IconFlag(request.kind);
+    switch (request.buttons) {
+    case MessageButtons::Ok:
+        flags |= MB_OK;
+        break;
+    case MessageButtons::YesNo:
+        flags |= MB_YESNO;
+        break;
+    case MessageButtons::YesNoCancel:
+        flags |= MB_YESNOCANCEL;
+        break;
+    }
     if (request.bringToFront) {
         flags |= MB_SETFOREGROUND;
     }

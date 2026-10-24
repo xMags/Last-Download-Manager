@@ -9,7 +9,7 @@ namespace ldm::ui {
 // Which list and toolbar commands apply to the current selection (checklist TB-01, L-05).
 struct CommandState {
     bool resume = false;      // at least one selected download can start
-    bool stop = false;        // at least one selected download is running
+    bool stop = false;        // at least one selected download is running, or is a live recording
     bool remove = false;      // something is selected
     bool redownload = false;  // exactly one, not being deleted
     bool refreshAddress = false;  // exactly one, not complete, finishing or being deleted

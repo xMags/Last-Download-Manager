@@ -45,6 +45,9 @@ std::wstring FormatSizeColumn(const core::DownloadView& view)
     if (view.download.totalSize) {
         return FormatSize(*view.download.totalSize);
     }
+    if (view.stream && view.stream->live && view.stream->estimatedBytes) {
+        return FormatSize(*view.stream->estimatedBytes);  // a recording is as large as what it recorded
+    }
     if (view.stream && view.stream->estimatedBytes) {
         return L"~" + FormatSize(*view.stream->estimatedBytes);  // a stream's size is known once it is joined
     }
@@ -91,7 +94,7 @@ std::optional<double> ProgressFraction(const core::DownloadView& view)
         if (view.download.status == model::DownloadStatus::Completed) {
             return 1.0;
         }
-        if (view.stream->piecesTotal == 0) {
+        if (view.stream->piecesTotal == 0 || view.stream->live) {  // a recording has no end to measure against
             return std::nullopt;
         }
         return std::clamp(view.stream->fraction, 0.0, 1.0);
@@ -106,18 +109,34 @@ std::optional<double> ProgressFraction(const core::DownloadView& view)
     return std::clamp(static_cast<double>(view.receivedBytes) / static_cast<double>(*total), 0.0, 1.0);
 }
 
+std::wstring FormatRecordedLength(std::int64_t microseconds)
+{
+    const long long seconds = std::max<long long>(microseconds / 1'000'000, 0);
+    wchar_t buffer[32] = {};
+    if (seconds >= 3600) {
+        std::swprintf(buffer, std::size(buffer), L"%lld:%02lld:%02lld", seconds / 3600, (seconds % 3600) / 60, seconds % 60);
+    } else {
+        std::swprintf(buffer, std::size(buffer), L"%lld:%02lld", seconds / 60, seconds % 60);
+    }
+    return buffer;
+}
+
 std::wstring FormatStatus(const core::DownloadView& view)
 {
     using model::DownloadStatus;
     if (view.waitingForAddress && view.download.status != DownloadStatus::Stopping) {
         return L"Waiting for new address";
     }
+    const bool live = view.stream && view.stream->live;
     switch (view.download.status) {
     case DownloadStatus::Queued:
         return L"Queued";
     case DownloadStatus::Downloading: {
         if (view.retrying && view.connections.empty()) {
             return L"Retrying...";
+        }
+        if (live) {
+            return L"Recording live, " + FormatRecordedLength(view.stream->recordedUs);
         }
         if (const auto fraction = ProgressFraction(view)) {
             // Truncated so a download never shows 100.00% before it completes.
@@ -131,6 +150,9 @@ std::wstring FormatStatus(const core::DownloadView& view)
     case DownloadStatus::Paused: {
         if (view.waitingForQuota) {
             return L"Waiting for quota";
+        }
+        if (live && view.stream->recordedUs > 0) {
+            return L"Recording paused, " + FormatRecordedLength(view.stream->recordedUs);
         }
         if (const auto fraction = ProgressFraction(view); fraction && *fraction > 0.0) {
             return Printf(L"%.2f%ls", std::floor(*fraction * 10000.0) / 100.0, L"% (paused)");
