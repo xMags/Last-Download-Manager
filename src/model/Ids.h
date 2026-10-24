@@ -23,6 +23,11 @@ struct QueueId {
     auto operator<=>(const QueueId&) const = default;
 };
 
+struct GrabberProjectId {
+    std::int64_t value = 0;
+    auto operator<=>(const GrabberProjectId&) const = default;
+};
+
 }  // namespace ldm::model
 
 template <>
