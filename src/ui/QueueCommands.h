@@ -27,7 +27,8 @@ public:
         const Theme* theme = nullptr;
         std::function<std::shared_ptr<const core::Snapshot>()> snapshot;
         std::function<std::vector<const core::DownloadView*>()> selection;
-        std::function<void()> openScheduler;
+        // Opens the Scheduler window, on this queue when given.
+        std::function<void(std::optional<model::QueueId>)> openScheduler;
     };
 
     explicit QueueCommands(Context context);

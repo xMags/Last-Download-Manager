@@ -33,6 +33,7 @@
 namespace ldm::ui {
 
 class FindDialog;
+class SchedulerWindow;
 
 // Turns menu, toolbar and tray commands into dialogs and core commands (design section 6). Adding
 // downloads lives in AddFlow and per-transfer windows in TransferWindows; this class dispatches and
@@ -112,6 +113,7 @@ private:
     void EditCategory(std::optional<model::CategoryId> id);
     void DeleteCategory(model::CategoryId id);
     void SpeedLimiterSettings();
+    void OpenScheduler(std::optional<model::QueueId> select);
     void ShowOptions();
     void AskForLogin(const core::DownloadFailed& failed);
     void AskAboutQuota(const core::QuotaReached& reached);
@@ -136,6 +138,7 @@ private:
     QueueCommands queues_;
     ClipboardMonitor clipboard_;
     std::unique_ptr<FindDialog> find_;
+    std::unique_ptr<SchedulerWindow> scheduler_;
     FindOptions findOptions_;
     std::optional<model::CategoryId> categoryMenuTarget_;
     std::vector<HWND> trayWindows_;  // download windows listed in the open tray menu

@@ -11,6 +11,7 @@ public:
     bool ShutDown(bool forceTerminate) override;
     bool Sleep() override;
     bool Hibernate() override;
+    std::optional<bool> WakeTimersAllowed() override;
 };
 
 }  // namespace ldm::platform

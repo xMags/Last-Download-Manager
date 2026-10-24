@@ -67,4 +67,20 @@ bool WinSystemActions::Hibernate()
     return ::SetSuspendState(TRUE, FALSE, FALSE) != FALSE;
 }
 
+std::optional<bool> WinSystemActions::WakeTimersAllowed()
+{
+    GUID* scheme = nullptr;
+    if (::PowerGetActiveScheme(nullptr, &scheme) != ERROR_SUCCESS || scheme == nullptr) {
+        return std::nullopt;
+    }
+    DWORD value = 0;
+    const DWORD read = ::PowerReadACValueIndex(nullptr, scheme, &GUID_SLEEP_SUBGROUP, &GUID_ALLOW_RTC_WAKE, &value);
+    ::LocalFree(scheme);
+    if (read != ERROR_SUCCESS) {
+        return std::nullopt;
+    }
+    // 0 disables wake timers, 1 enables them, 2 allows only "important" ones, which LDM's are not.
+    return value == 1;
+}
+
 }  // namespace ldm::platform

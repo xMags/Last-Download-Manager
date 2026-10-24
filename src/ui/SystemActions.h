@@ -1,13 +1,15 @@
 #pragma once
 
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <string_view>
 
 namespace ldm::ui {
 
-// What happens around a finished download outside LDM itself (checklist O-09, ENG-18, P-05).
-// Implemented in platform/win; tests can substitute a recorder.
+// What happens around a finished download outside LDM itself (checklist O-09, ENG-18, P-05), and
+// what Windows allows for scheduled queues (Q-07). Implemented in platform/win; tests can
+// substitute a recorder.
 class SystemActions {
 public:
     virtual ~SystemActions() = default;
@@ -19,6 +21,9 @@ public:
     virtual bool ShutDown(bool forceTerminate) = 0;
     virtual bool Sleep() = 0;
     virtual bool Hibernate() = 0;
+    // Whether the power plan lets programs wake the computer from sleep while it is plugged in;
+    // nothing when Windows does not say.
+    [[nodiscard]] virtual std::optional<bool> WakeTimersAllowed() = 0;
 };
 
 // Replaces every "[File]" in the scanner arguments with the quoted path (checklist ENG-18). Without

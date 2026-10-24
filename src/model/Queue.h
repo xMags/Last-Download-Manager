@@ -39,6 +39,8 @@ struct Queue {
     std::int64_t sortOrder = 0;
 
     [[nodiscard]] bool IsBuiltin() const noexcept { return kind != QueueKind::Custom; }
+
+    bool operator==(const Queue&) const = default;
 };
 
 }  // namespace ldm::model
