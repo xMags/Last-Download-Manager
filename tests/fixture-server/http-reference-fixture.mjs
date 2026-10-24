@@ -29,6 +29,8 @@
 //                        window of three segments that moves on by one each second from the
 //                        route's first request, ending with EXT-X-ENDLIST once the last segment
 //                        is in it; its segment addresses point at /media/
+//   /releases/latest     a GitHub "latest release" answer for the update check; ?tag=vX.Y.Z picks
+//                        the tag (default v5.0.0)
 //   /control/log         JSON: request log and the highest number of concurrent responses
 //   /control/bump        changes the content of /versioned.bin
 //   /control/reset       clears the log and per-route counters
@@ -339,6 +341,14 @@ export function createReferenceFixture({
       }
       const type = MEDIA_TYPES[extname(file).toLowerCase()] ?? 'application/octet-stream';
       serveBody(request, response, id, readFileSync(file), { contentType: type });
+      return;
+    }
+    if (path === '/releases/latest') {
+      const tag = url.searchParams.get('tag') ?? 'v5.0.0';
+      finish(200, { 'Content-Type': 'application/json' }, JSON.stringify({
+        tag_name: tag, html_url: `https://github.com/xMags/Last-Download-Manager/releases/tag/${tag}`,
+        draft: false, prerelease: tag.includes('-'), assets: [],
+      }));
       return;
     }
     if (SITE_PAGES[path] !== undefined) {

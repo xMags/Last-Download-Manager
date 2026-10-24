@@ -220,6 +220,12 @@ struct Settings {
     // Confirmations
     bool confirmDeleteCompleted = true;
     bool confirmDeleteIncomplete = true;
+
+    // Update check (checklist X-05): off until the user turns it on; LDM asks once.
+    bool updatesCheckEnabled = false;
+    bool updatesAsked = false;
+    std::int64_t updatesLastCheckUnixMs = 0;  // the last check that got an answer
+    std::string updatesSkippedVersion;        // "Skip this version"
 };
 
 using SettingsMap = std::map<std::string, std::string, std::less<>>;

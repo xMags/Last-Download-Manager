@@ -2,6 +2,8 @@
 
 #include <array>
 #include <charconv>
+#include <cstdint>
+#include <limits>
 #include <string_view>
 #include <utility>
 
@@ -137,6 +139,21 @@ public:
         field = value;
     }
 
+    void Int64(std::string_view key, std::int64_t& field, std::int64_t minimum, std::int64_t maximum)
+    {
+        const std::string* text = Find(key);
+        if (text == nullptr) {
+            return;
+        }
+        std::int64_t value = 0;
+        const auto [end, error] = std::from_chars(text->data(), text->data() + text->size(), value);
+        if (error != std::errc{} || end != text->data() + text->size() || value < minimum || value > maximum) {
+            Warn(key);
+            return;
+        }
+        field = value;
+    }
+
     void String(std::string_view key, std::string& field)
     {
         const std::string* text = Find(key);
@@ -196,6 +213,10 @@ public:
 
     void Bool(std::string_view key, const bool& field) { Put(key, field ? "1" : "0"); }
     void Int(std::string_view key, const int& field, int, int) { Put(key, std::to_string(field)); }
+    void Int64(std::string_view key, const std::int64_t& field, std::int64_t, std::int64_t)
+    {
+        Put(key, std::to_string(field));
+    }
     void String(std::string_view key, const std::string& field) { Put(key, field); }
     void Bytes(std::string_view key, const std::vector<std::uint8_t>& field) { Put(key, EncodeHex(field)); }
 
@@ -338,6 +359,11 @@ void VisitSettings(Visitor& v, SettingsType& s)
 
     v.Bool("confirm.deleteCompleted", s.confirmDeleteCompleted);
     v.Bool("confirm.deleteIncomplete", s.confirmDeleteIncomplete);
+
+    v.Bool("updates.checkEnabled", s.updatesCheckEnabled);
+    v.Bool("updates.asked", s.updatesAsked);
+    v.Int64("updates.lastCheckUnixMs", s.updatesLastCheckUnixMs, 0, std::numeric_limits<std::int64_t>::max());
+    v.String("updates.skippedVersion", s.updatesSkippedVersion);
 }
 
 }  // namespace

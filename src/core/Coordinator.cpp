@@ -161,6 +161,10 @@ Coordinator::Coordinator(const CoordinatorPorts& ports, CoordinatorConfig config
 {
     if (ports_.engine != nullptr && ports_.proxy != nullptr && ports_.observer != nullptr) {
         manifests_ = std::make_unique<ManifestFetches>(*ports_.engine, *ports_.proxy, *ports_.observer);
+        if (!config_.updateFeedUrl.empty()) {
+            updates_ = std::make_unique<UpdateCheck>(*ports_.engine, *ports_.proxy, config_.updateFeedUrl,
+                                                     config_.appVersion, ports_.clock->Steady());
+        }
     }
 }
 
@@ -408,6 +412,12 @@ void Coordinator::Handle(Command command)
                 CheckSchedules();
             } else if constexpr (std::is_same_v<T, SetListedCommand>) {
                 SetListed(typed.ids);
+            } else if constexpr (std::is_same_v<T, CheckForUpdatesCommand>) {
+                if (updates_) {
+                    updates_->CheckNow();
+                } else {
+                    Notify(UpdateCheckFinished{true, std::nullopt, {}, std::string("this build does not check for updates")});
+                }
             } else {
                 static_assert(sizeof(T) == 0, "unhandled command");
             }
@@ -1206,7 +1216,21 @@ void Coordinator::ReplaceServerLimits(std::vector<model::ServerLimit> limits)
 void Coordinator::OnEngineEvent(EngineEvent event)
 {
     // Manifest fetches are not downloads: their answers and proxy lookups go to their own owner.
+    if (event.id.value == kUpdateFetchId) {
+        if (const auto* resolved = std::get_if<ProxyResolved>(&event.payload); resolved && updates_) {
+            updates_->OnProxyResolved(resolved->proxy);
+        }
+        return;
+    }
     if (auto* fetched = std::get_if<FetchFinished>(&event.payload)) {
+        if (fetched->fetchId == kUpdateFetchId) {
+            if (updates_) {
+                if (const auto outcome = updates_->OnFetched(*fetched, settings_)) {
+                    OnUpdateChecked(*outcome);
+                }
+            }
+            return;
+        }
         if (fetched->fetchId < 0) {
             OnPlaylistFetched(*fetched);
         } else if (manifests_) {
@@ -2370,9 +2394,34 @@ void Coordinator::Tick()
         }
     }
     RunQueues();
+    if (updates_ && !shuttingDown_) {
+        updates_->Tick(now, ports_.clock->NowUnixMs(), settings_);
+    }
     if (snapshotDirty_ && now - lastSnapshot_ >= config_.snapshotInterval) {
         PublishSnapshot();
     }
+}
+
+void Coordinator::OnUpdateChecked(const UpdateCheckOutcome& outcome)
+{
+    if (!outcome.error) {
+        settings_.updatesLastCheckUnixMs = ports_.clock->NowUnixMs();
+        if (base::Status saved = ports_.store->SaveSettings(model::SettingsToMap(settings_)); !saved) {
+            ReportError("Settings could not be saved: " + saved.GetError().message);
+        }
+        snapshotDirty_ = true;
+    }
+    if (!outcome.manual && !outcome.newer) {
+        return;  // nothing to say about an automatic check
+    }
+    UpdateCheckFinished finished;
+    finished.manual = outcome.manual;
+    finished.error = outcome.error;
+    if (outcome.newer) {
+        finished.newerVersion = outcome.newer->version;
+        finished.pageUrl = outcome.newer->pageUrl;
+    }
+    Notify(std::move(finished));
 }
 
 std::chrono::steady_clock::time_point Coordinator::NextDeadline() const
@@ -2407,6 +2456,9 @@ std::chrono::steady_clock::time_point Coordinator::NextDeadline() const
     if (anyScheduleEnabled_) {
         // The steady clock may not count while the computer sleeps; look at the time again soon.
         deadline = std::min(deadline, now + kScheduleRecheck);
+    }
+    if (updates_) {
+        deadline = std::min(deadline, updates_->NextDeadline(settings_));
     }
     return deadline;
 }

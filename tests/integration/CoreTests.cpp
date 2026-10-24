@@ -86,6 +86,24 @@ public:
         return found;
     }
 
+    // The notifications of one kind so far, waiting up to `timeout` for at least `count`.
+    template <typename T>
+    std::vector<T> Wait(std::size_t count, std::chrono::milliseconds timeout)
+    {
+        std::unique_lock lock(mutex_);
+        std::vector<T> found;
+        changed_.wait_for(lock, timeout, [&] {
+            found.clear();
+            for (const auto& notification : notifications_) {
+                if (const T* typed = std::get_if<T>(&notification)) {
+                    found.push_back(*typed);
+                }
+            }
+            return found.size() >= count;
+        });
+        return found;
+    }
+
     std::shared_ptr<const ldm::core::Snapshot> Latest()
     {
         std::lock_guard lock(mutex_);
@@ -191,7 +209,8 @@ enum class Timing { Fast, Production };
 // One running instance of the core: what ldm.exe builds in its composition root, minus the UI.
 class CoreStack {
 public:
-    CoreStack(const fs::path& database, const fs::path& downloads, Timing timing = Timing::Fast)
+    CoreStack(const fs::path& database, const fs::path& downloads, Timing timing = Timing::Fast,
+              std::string updateFeed = {})
     {
         auto store = ldm::storage::SqliteStore::Open(ldm::base::ToUtf8(database.wstring()));
         if (!store) {
@@ -229,6 +248,8 @@ public:
         ports.proxy = &proxy_;
         ldm::core::CoordinatorConfig config;
         config.downloadsFolder = downloads;
+        config.updateFeedUrl = std::move(updateFeed);
+        config.appVersion = "5.0.0";
         if (timing == Timing::Fast) {
             config.checkpointInterval = 300ms;
         }
@@ -781,6 +802,42 @@ TEST_F(CoreTest, AQueueRunsAtMostItsConcurrencyAtOnce)
 
 // M4 design section 5: the synchronization queue replaces a file that changed on the server and
 // leaves an unchanged one alone.
+// M5 design section 3: a fake release feed with a newer tag shows a notice; an older or equal one
+// does not. Nothing is downloaded.
+TEST_F(CoreTest, TheUpdateCheckReportsANewerRelease)
+{
+    {
+        CoreStack stack(root_ / "newer.sqlite3", root_ / "downloads", Timing::Fast, server_->Url("/releases/latest?tag=v9.0.0"));
+        stack.Post(ldm::core::CheckForUpdatesCommand{});
+        const auto finished = stack.observer.Wait<ldm::core::UpdateCheckFinished>(1, 30s);
+        ASSERT_EQ(finished.size(), 1u);
+        EXPECT_TRUE(finished[0].manual);
+        EXPECT_FALSE(finished[0].error) << *finished[0].error;
+        EXPECT_EQ(finished[0].newerVersion, "9.0.0");
+        EXPECT_EQ(finished[0].pageUrl, "https://github.com/xMags/Last-Download-Manager/releases/tag/v9.0.0");
+        ASSERT_TRUE(stack.observer.WaitSnapshot(
+            [](const auto& snapshot) { return snapshot.settings.updatesLastCheckUnixMs > 0; }, 10s))
+            << "an answered check is remembered";
+        const auto snapshot = stack.observer.Latest();
+        EXPECT_TRUE(snapshot->downloads.empty());
+    }
+    {
+        CoreStack stack(root_ / "same.sqlite3", root_ / "downloads", Timing::Fast, server_->Url("/releases/latest?tag=v5.0.0"));
+        stack.Post(ldm::core::CheckForUpdatesCommand{});
+        const auto finished = stack.observer.Wait<ldm::core::UpdateCheckFinished>(1, 30s);
+        ASSERT_EQ(finished.size(), 1u);
+        EXPECT_FALSE(finished[0].error);
+        EXPECT_FALSE(finished[0].newerVersion);
+    }
+    {
+        CoreStack stack(root_ / "none.sqlite3", root_ / "downloads");
+        stack.Post(ldm::core::CheckForUpdatesCommand{});
+        const auto finished = stack.observer.Wait<ldm::core::UpdateCheckFinished>(1, 10s);
+        ASSERT_EQ(finished.size(), 1u);
+        EXPECT_TRUE(finished[0].error) << "a build without a feed says so";
+    }
+}
+
 // M4 design section 8: a crawl of the fixture site finds the expected items, downloads the checked
 // ones into the right folders and rewrites the saved start page's links.
 TEST_F(CoreTest, TheGrabberExploresASiteAndSavesItForOfflineBrowsing)

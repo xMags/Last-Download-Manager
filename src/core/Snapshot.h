@@ -140,9 +140,18 @@ struct QueueStopped {
     std::string name;
 };
 
+// The end of an update check (checklist X-05): sent after every check the user asked for, and after
+// an automatic one only when it found a newer version the user did not skip.
+struct UpdateCheckFinished {
+    bool manual = false;
+    std::optional<std::string> newerVersion;  // "5.1.0"
+    std::string pageUrl;                      // the release's page on GitHub, with newerVersion
+    std::optional<std::string> error;         // the check got no usable answer
+};
+
 // FetchFinished answers a FetchManifestCommand.
 using Notification = std::variant<AddResult, DownloadCompleted, DownloadFailed, CoreError, QuotaReached, FetchFinished,
-                                  QueueStarted, QueueFinished, QueueStopped>;
+                                  QueueStarted, QueueFinished, QueueStopped, UpdateCheckFinished>;
 
 // Receives the coordinator's output. Called on the core thread; implementations must only post to
 // their own thread.

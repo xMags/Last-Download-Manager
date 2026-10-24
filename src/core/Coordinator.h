@@ -11,6 +11,7 @@
 #include "core/Snapshot.h"
 #include "core/Store.h"
 #include "core/TransferEngine.h"
+#include "core/UpdateCheck.h"
 #include "core/Url.h"
 
 #include <chrono>
@@ -50,6 +51,10 @@ struct CoordinatorConfig {
     std::chrono::milliseconds snapshotInterval{100};  // at most 10 snapshots per second
     int maxAttemptsPerSegment = 10;
     int maxAutomaticRestarts = 1;  // restarts from zero after inconsistent content or a lost partial file
+    // The update check (checklist X-05): the releases feed to ask and the running version. An
+    // empty feed turns the check off.
+    std::string updateFeedUrl;
+    std::string appVersion;
 };
 
 // The single writer of download state (design section 3). Runs on the core thread: every method
@@ -319,6 +324,9 @@ private:
     // Manifest fetches for the media panel; set when the ports have an engine, a proxy resolver
     // and an observer.
     std::unique_ptr<ManifestFetches> manifests_;
+    // The update check; set when there is a feed to ask as well.
+    std::unique_ptr<UpdateCheck> updates_;
+    void OnUpdateChecked(const UpdateCheckOutcome& outcome);
 
     // HLS playlists fetched at a stream's start or a live recording's reload, by fetch id. Their
     // ids are negative, apart from the media panel's, which are at least 1.
