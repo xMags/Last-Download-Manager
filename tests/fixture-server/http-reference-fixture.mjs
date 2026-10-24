@@ -21,6 +21,10 @@
 //                        on the fly, for stress tests
 //   /media/<path>        a file under --media-root, with ranges: generated HLS and DASH fixtures
 //   /media-gone/<path>   404, for a segment that disappeared
+//   /media-live/<path>   the plain MPEG-TS media playlist at /media/<path> as a live stream: a
+//                        window of three segments that moves on by one each second from the
+//                        route's first request, ending with EXT-X-ENDLIST once the last segment
+//                        is in it; its segment addresses point at /media/
 //   /control/log         JSON: request log and the highest number of concurrent responses
 //   /control/bump        changes the content of /versioned.bin
 //   /control/reset       clears the log and per-route counters
@@ -78,6 +82,35 @@ const MEDIA_TYPES = {
   '.key': 'application/octet-stream', '.bin': 'application/octet-stream',
 };
 
+const LIVE_WINDOW = 3;
+
+// A VOD media playlist's text as a live playlist `elapsedMs` after the stream started (see
+// /media-live/). `folder` is the playlist's folder under /media/. Plain playlists only: segments
+// with EXTINF and their address, no keys or init sections.
+function livePlaylist(text, folder, elapsedMs) {
+  const header = [];
+  const segments = [];
+  let pending = [];
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line || /^#EXT-X-(MEDIA-SEQUENCE|ENDLIST|PLAYLIST-TYPE)/.test(line)) continue;
+    if (!line.startsWith('#')) {
+      segments.push([...pending, `/media/${folder}${line}`]);
+      pending = [];
+    } else if (line.startsWith('#EXTINF') || segments.length > 0 || pending.length > 0) {
+      pending.push(line);
+    } else {
+      header.push(line);
+    }
+  }
+  const end = Math.min(segments.length, LIVE_WINDOW + Math.floor(elapsedMs / 1000));
+  const start = Math.max(0, end - LIVE_WINDOW);
+  const lines = [...header, `#EXT-X-MEDIA-SEQUENCE:${start}`];
+  for (const segment of segments.slice(start, end)) lines.push(...segment);
+  if (end === segments.length) lines.push('#EXT-X-ENDLIST');
+  return lines.join('\n') + '\n';
+}
+
 // The file under `root` that `relativePath` names, or nothing when it leaves the folder or is not
 // a file.
 function mediaFile(root, relativePath) {
@@ -120,6 +153,7 @@ export function createReferenceFixture({
   let versioned = data;
   const counters = new Map();
   const entries = [];
+  const liveStarts = new Map();  // /media-live/ path -> when it was first asked for
 
   const record = entry => {
     entries.push(entry);
@@ -224,6 +258,7 @@ export function createReferenceFixture({
       } else if (path === '/control/reset') {
         entries.length = 0;
         counters.clear();
+        liveStarts.clear();
         maxActive = active;
         finish(204);
       } else {
@@ -264,6 +299,19 @@ export function createReferenceFixture({
     }
     if (path.startsWith('/media-gone/')) {
       finish(404);
+      return;
+    }
+    if (path.startsWith('/media-live/')) {
+      const relativePath = path.slice('/media-live/'.length);
+      const file = mediaFile(mediaRoot, relativePath);
+      if (!file || extname(file).toLowerCase() !== '.m3u8') {
+        finish(404);
+        return;
+      }
+      if (!liveStarts.has(path)) liveStarts.set(path, Date.now());
+      const folder = relativePath.slice(0, relativePath.lastIndexOf('/') + 1);
+      const text = livePlaylist(readFileSync(file, 'utf8'), folder, Date.now() - liveStarts.get(path));
+      finish(200, { 'Content-Type': MEDIA_TYPES['.m3u8'], 'Cache-Control': 'no-store' }, text);
       return;
     }
     switch (path) {

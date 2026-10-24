@@ -637,6 +637,72 @@ TEST_F(MediaJoinTest, DashVideoAndAudioBecomeOneFile)
     EXPECT_EQ(probed.audio, 1);
 }
 
+// The core's part of a live recording, played by the test: the playlist read again every half
+// second while the engine records, until the stream ends; then the recording is joined.
+TEST_F(MediaJoinTest, ALiveStreamIsRecordedUntilItEndsAndJoined)
+{
+    const std::string relative = fs::relative(fixtures_->hlsTs, *fixtureRoot_).generic_string();
+    const std::string live = server_->Url("/media-live/" + relative);
+    std::int64_t nextFetch = 100;
+    const auto fetch = [&]() -> std::optional<ldm::core::FetchFinished> {
+        ldm::core::FetchRequest request;
+        request.fetchId = ++nextFetch;
+        request.url = live;
+        request.userAgent = "LDM test";
+        request.maxBytes = 1024 * 1024;
+        engine_->Fetch(request);
+        const std::int64_t id = request.fetchId;
+        return listener_.WaitFor<ldm::core::FetchFinished>(DownloadId{}, 0, 30s, [id](const ldm::core::FetchFinished& f) {
+            return f.fetchId == id;
+        });
+    };
+
+    ldm::model::Download download;
+    download.id = DownloadId{1};
+    download.epoch = 1;
+    download.kind = ldm::model::DownloadKind::Hls;
+    download.mediaFromPrivateNetwork = true;
+    download.tracks.resize(1);
+    download.tracks[0].sourceUrl = live;
+    const auto first = fetch();
+    ASSERT_TRUE(first && !first->failure);
+    ASSERT_FALSE(ldm::core::ListTrack(download.tracks[0], *first));
+    ASSERT_TRUE(download.tracks[0].live);
+    ASSERT_EQ(download.tracks[0].pieces.size(), 3u) << "the window";
+
+    MediaRequest request = ldm::core::BuildMediaRequest(download, parts_);
+    request.userAgent = "LDM test";
+    request.maxConnections = 4;
+    engine_->StartMedia(request);
+    const auto deadline = std::chrono::steady_clock::now() + 30s;
+    while (download.tracks[0].live && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(500ms);
+        const auto reloaded = fetch();
+        ASSERT_TRUE(reloaded && !reloaded->failure);
+        const auto reload = ldm::core::ReloadTrack(download.tracks[0], *reloaded);
+        ASSERT_FALSE(reload.failure) << reload.failure->message;
+        if (reload.append.changed) {
+            engine_->ExtendMedia(DownloadId{1}, 1,
+                                 ldm::core::MediaExtension{{ldm::core::BuildTrackExtension(download, parts_, 0, reload.append)}});
+        }
+    }
+    ASSERT_FALSE(download.tracks[0].live) << "the stream did not end";
+    ASSERT_EQ(download.tracks[0].pieces.size(), 4u);
+    const auto finished = Finished(1);
+    ASSERT_TRUE(finished);
+    ASSERT_EQ(finished->outcome, TransferOutcome::Completed) << (finished->failure ? finished->failure->message : "");
+    for (std::uint32_t index : Done(1)) {
+        download.tracks[0].pieces.at(index).done = true;
+    }
+
+    tools_->Mux(ldm::core::BuildMuxRequest(download, parts_));
+    const auto muxed = listener_.WaitFor<ldm::core::MuxFinished>(DownloadId{1}, 1, 120s);
+    ASSERT_TRUE(muxed && !muxed->failure) << (muxed && muxed->failure ? muxed->failure->message : "no answer");
+    const Probed probed = Probe(muxed->output);
+    EXPECT_NEAR(probed.seconds, ldm::test::kFixtureSeconds, 0.3);
+    EXPECT_EQ(probed.video, 1);
+}
+
 TEST_F(MediaJoinTest, ACancelledJoinAnswersStopped)
 {
     ldm::core::MuxRequest request;
