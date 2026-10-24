@@ -33,6 +33,7 @@ public:
 
     void Start(core::TransferRequest request) override;
     void StartMedia(core::MediaRequest request) override;
+    void ExtendMedia(model::DownloadId id, std::int64_t epoch, core::MediaExtension extension) override;
     void Stop(model::DownloadId id, std::int64_t epoch) override;
     void SetSpeedLimit(model::DownloadId id, std::int64_t epoch, std::optional<std::int64_t> bytesPerSecond) override;
     void SetGlobalSpeedLimit(std::optional<std::int64_t> bytesPerSecond) override;

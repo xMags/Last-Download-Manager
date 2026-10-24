@@ -26,6 +26,7 @@
 #include <random>
 #include <set>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -175,6 +176,19 @@ protected:
         return done;
     }
 
+    // Waits until the run reported `count` pieces done.
+    bool WaitForDone(std::int64_t epoch, size_t count, std::chrono::milliseconds timeout = 30s)
+    {
+        const auto deadline = std::chrono::steady_clock::now() + timeout;
+        while (Done(epoch).size() < count) {
+            if (std::chrono::steady_clock::now() >= deadline) {
+                return false;
+            }
+            std::this_thread::sleep_for(20ms);
+        }
+        return true;
+    }
+
     // Each piece's file holds exactly the bytes its address (and range) serves.
     void ExpectPiecesMatch(const ldm::model::MediaTrack& track, const fs::path& folder)
     {
@@ -303,6 +317,50 @@ TEST_F(MediaEngineTest, AStoppedRunContinuesWithOnlyTheMissingPieces)
     }
     EXPECT_EQ(all.size(), track.pieces.size());
     ExpectPiecesMatch(track, fixtures_->hlsTs.parent_path());
+}
+
+TEST_F(MediaEngineTest, ALiveRunWaitsForMorePiecesUntilTheRecordingEnds)
+{
+    const auto track = Track(fixtures_->hlsTs);
+    ASSERT_EQ(track.pieces.size(), 4u);
+    MediaTrackRequest first = TrackRequest(track, {2, 3});
+    first.live = true;
+    engine_->StartMedia(Request({first}));
+    ASSERT_TRUE(WaitForDone(1, 2));
+    EXPECT_FALSE(Finished(1, 300ms)) << "a live run waits for more once its pieces are done";
+
+    const MediaTrackRequest rest = TrackRequest(track, {0, 1});
+    ldm::core::MediaTrackExtension added;
+    added.track = 0;
+    added.pieces = rest.pieces;
+    added.live = false;  // the playlist said the stream ended
+    engine_->ExtendMedia(DownloadId{1}, 1, ldm::core::MediaExtension{{added}});
+    const auto finished = Finished(1);
+    ASSERT_TRUE(finished);
+    ASSERT_EQ(finished->outcome, TransferOutcome::Completed) << (finished->failure ? finished->failure->message : "");
+    EXPECT_EQ(Done(1), (std::set<std::uint32_t>{0, 1, 2, 3}));
+    ExpectPiecesMatch(track, fixtures_->hlsTs.parent_path());
+}
+
+TEST_F(MediaEngineTest, ALiveRunWaitingForPiecesStopsAtOnce)
+{
+    const auto track = Track(fixtures_->hlsTs);
+    MediaTrackRequest live = TrackRequest(track);
+    live.live = true;
+    engine_->StartMedia(Request({live}));
+    ASSERT_TRUE(WaitForDone(1, track.pieces.size()));
+    // An extension for another epoch, or one that adds nothing, does not end it.
+    engine_->ExtendMedia(DownloadId{1}, 7, ldm::core::MediaExtension{{ldm::core::MediaTrackExtension{0, {}, {}, false}}});
+    engine_->ExtendMedia(DownloadId{1}, 1, ldm::core::MediaExtension{{ldm::core::MediaTrackExtension{0, {}, {}, true}}});
+    EXPECT_FALSE(Finished(1, 300ms));
+    EXPECT_FALSE(listener_.All<MediaProgress>(DownloadId{1}, 1).empty()) << "an idle run still reports";
+
+    const auto stopAt = std::chrono::steady_clock::now();
+    engine_->Stop(DownloadId{1}, 1);
+    const auto stopped = Finished(1, 5s);
+    ASSERT_TRUE(stopped);
+    EXPECT_EQ(stopped->outcome, TransferOutcome::Stopped);
+    EXPECT_LT(std::chrono::steady_clock::now() - stopAt, 2s);
 }
 
 TEST_F(MediaEngineTest, LoopbackAddressesAreRefusedForAStreamFromThePublicInternet)

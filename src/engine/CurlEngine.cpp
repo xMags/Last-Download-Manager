@@ -45,6 +45,11 @@ struct StartCommand {
 struct StartMediaCommand {
     core::MediaRequest request;
 };
+struct ExtendMediaCommand {
+    model::DownloadId id;
+    std::int64_t epoch;
+    core::MediaExtension extension;
+};
 struct StopCommand {
     model::DownloadId id;
     std::int64_t epoch;
@@ -62,8 +67,8 @@ struct FetchCommand {
     core::FetchRequest request;
 };
 
-using Command = std::variant<StartCommand, StartMediaCommand, StopCommand, SpeedCommand, GlobalSpeedCommand,
-                             ShutdownCommand, DiskReport, FetchCommand>;
+using Command = std::variant<StartCommand, StartMediaCommand, ExtendMediaCommand, StopCommand, SpeedCommand,
+                             GlobalSpeedCommand, ShutdownCommand, DiskReport, FetchCommand>;
 
 }  // namespace
 
@@ -288,6 +293,12 @@ private:
             started.Begin(now);
             return;
         }
+        if (auto* extend = std::get_if<ExtendMediaCommand>(&command)) {
+            if (engine::Run* run = FindRun(extend->id, extend->epoch)) {
+                run->ExtendMedia(std::move(extend->extension), now);
+            }
+            return;
+        }
         if (auto* stop = std::get_if<StopCommand>(&command)) {
             if (engine::Run* run = FindRun(stop->id, stop->epoch)) {
                 run->RequestStop();
@@ -360,6 +371,11 @@ void CurlEngine::Start(core::TransferRequest request)
 void CurlEngine::StartMedia(core::MediaRequest request)
 {
     loop_->Post(StartMediaCommand{std::move(request)});
+}
+
+void CurlEngine::ExtendMedia(model::DownloadId id, std::int64_t epoch, core::MediaExtension extension)
+{
+    loop_->Post(ExtendMediaCommand{id, epoch, std::move(extension)});
 }
 
 void CurlEngine::Stop(model::DownloadId id, std::int64_t epoch)

@@ -46,6 +46,10 @@ public:
     void Begin(Clock::time_point now);
     void RequestStop() override;
     void SetSpeedLimit(std::optional<std::int64_t> bytesPerSecond, Clock::time_point now) override;
+    // Appends a live recording's new keys and pieces to their tracks; they are fetched after
+    // everything the run already had. A run whose tracks are all done and still live idles,
+    // reporting progress, until an extension brings pieces or ends the recording.
+    void ExtendMedia(core::MediaExtension extension, Clock::time_point now) override;
     void OnConnectionDone(CURL* easy, CURLcode result, Clock::time_point now) override;
     void OnDiskReport(DiskReport& report, Clock::time_point now) override;
     void Service(Clock::time_point now) override;

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/TransferEngine.h"
 #include "engine/DiskWriter.h"
 
 #include <curl/curl.h>
@@ -22,6 +23,8 @@ public:
     [[nodiscard]] virtual RunKey Key() const noexcept = 0;
     virtual void RequestStop() = 0;
     virtual void SetSpeedLimit(std::optional<std::int64_t> bytesPerSecond, Clock::time_point now) = 0;
+    // New pieces for a live recording (core::TransferEngine::ExtendMedia).
+    virtual void ExtendMedia(core::MediaExtension extension, Clock::time_point now) = 0;
     // A report about one of the run's files, with the run's id and epoch.
     virtual void OnDiskReport(DiskReport& report, Clock::time_point now) = 0;
     // Opens connections, retries, unpauses, reports progress and finishes. Called after every

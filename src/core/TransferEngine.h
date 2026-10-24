@@ -78,6 +78,22 @@ struct MediaTrackRequest {
     std::string url;
     std::filesystem::path path;
     std::vector<model::Segment> ranges;
+    // A live recording: the run does not complete when these pieces are done, but waits for
+    // more through TransferEngine::ExtendMedia until an extension turns `live` off.
+    bool live = false;
+};
+
+// What a live recording's playlist added since the run started or was last extended.
+struct MediaTrackExtension {
+    std::uint32_t track = 0;  // as in MediaTrackRequest::track
+    // Keys after those the run already has; MediaPieceRequest::key indexes the whole list.
+    std::vector<model::MediaKey> keys;
+    std::vector<MediaPieceRequest> pieces;  // in playback order, all after the run's pieces
+    bool live = true;  // false: the stream ended or the user finished the recording
+};
+
+struct MediaExtension {
+    std::vector<MediaTrackExtension> tracks;
 };
 
 // Everything the engine needs to run one stream download: the pieces of every track, fetched
@@ -293,6 +309,9 @@ public:
     // Starts a run of a stream, under the same rules as Start; answered with MediaProgress and
     // one MediaFinished instead.
     virtual void StartMedia(MediaRequest request) = 0;
+    // Adds pieces to the running stream run of a live recording, or ends its wait for more.
+    // Ignored when that run already finished or is stopping, or is not a stream run.
+    virtual void ExtendMedia(model::DownloadId id, std::int64_t epoch, MediaExtension extension) = 0;
     // Requests a stop. Always answered by exactly one TransferFinished (MediaFinished for a
     // stream) for that epoch, sent after the run's files are closed, unless it had already finished.
     virtual void Stop(model::DownloadId id, std::int64_t epoch) = 0;
