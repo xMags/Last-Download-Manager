@@ -156,6 +156,18 @@ TEST(StreamChoice, DashTracksCarryTheirListsAndTheManifestAddress)
     }
 }
 
+TEST(StreamChoice, SubtitlesWithoutALanguageAndPagesWithoutATitleGetPlainNames)
+{
+    MediaItem item = HlsItem();
+    item.offer->subtitles[0].language.clear();
+    TabMedia untitled = Tab();
+    untitled.pageTitle = "  ";
+    const auto subtitles =
+        ldm::ui::BuildStreamCapture(untitled, item, PanelAction{PanelAction::Kind::DownloadSubtitles, 3, 0});
+    ASSERT_TRUE(subtitles);
+    EXPECT_EQ(subtitles.Value().fileName, "video.vtt");
+}
+
 TEST(StreamChoice, LiveHlsIsRecordedWithoutASizeAndLiveDashIsRefused)
 {
     MediaItem live = HlsItem();

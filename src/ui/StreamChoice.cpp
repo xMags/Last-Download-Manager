@@ -39,10 +39,11 @@ core::MediaTrackChoice RenditionTrack(const media::Rendition& rendition, const s
     return track;
 }
 
+// SanitizeFileName gives a fallback name for empty text, so emptiness is checked before it.
 std::string Title(const TabMedia& tab)
 {
-    std::string title = core::SanitizeFileName(tab.pageTitle);
-    return title.empty() ? std::string("video") : title;
+    const bool blank = tab.pageTitle.find_first_not_of(" \t") == std::string::npos;
+    return blank ? std::string("video") : core::SanitizeFileName(tab.pageTitle);
 }
 
 }  // namespace
@@ -78,7 +79,7 @@ base::Result<StreamCapture> BuildStreamCapture(const TabMedia& tab, const MediaI
         }
         const media::Rendition& subtitles = offer.subtitles[index];
         capture.media.tracks.push_back(RenditionTrack(subtitles, capture.manifestUrl, model::TrackRole::Subtitles));
-        const std::string language = core::SanitizeFileName(subtitles.language);
+        const std::string language = subtitles.language.empty() ? std::string() : core::SanitizeFileName(subtitles.language);
         capture.fileName = Title(tab) + (language.empty() ? "" : "." + language) + ".vtt";
         return capture;
     }
