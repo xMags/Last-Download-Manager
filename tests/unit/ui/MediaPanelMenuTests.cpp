@@ -105,6 +105,24 @@ TEST(MediaPanelMenu, LiveQualitiesSayTheyRecordAndLiveDashIsANotice)
     EXPECT_NE(dash[0].text.find(L"live DASH"), std::wstring::npos);
 }
 
+TEST(MediaPanelMenu, StreamSubmenusSayWhenTheyAreProtectedOrLive)
+{
+    MediaItem clear = Stream(1);
+    MediaItem live = Stream(2);
+    live.kind = ldm::browser::MediaKind::Hls;
+    live.offer->live = true;
+    MediaItem protectedStream = Stream(3);
+    protectedStream.qualities.entries.clear();
+    protectedStream.qualities.drm = ldm::media::DrmInfo{{"Widevine"}};
+    const auto menu = BuildPanelMenu({&clear, &live, &protectedStream}, false);
+    ASSERT_GE(menu.size(), 3u);
+    EXPECT_EQ(menu[0].text, L"DASH stream: 1080p H.264");
+    EXPECT_EQ(menu[1].text, L"HLS stream: 1080p H.264 (live)");
+    EXPECT_EQ(menu[2].text, L"DASH stream (protected)");
+    ASSERT_EQ(menu[2].children.size(), 1u);
+    EXPECT_FALSE(menu[2].children[0].enabled);
+}
+
 TEST(MediaPanelMenu, AProtectedStreamIsANoticeOnly)
 {
     MediaItem stream = Stream(4);
