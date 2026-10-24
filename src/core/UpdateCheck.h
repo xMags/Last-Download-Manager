@@ -17,9 +17,12 @@ namespace ldm::core {
 // What GitHub's "latest release" answer says, validated as untrusted input.
 struct LatestRelease {
     std::string version;  // the tag without its leading "v": "5.1.0" or "5.1.0-beta.2"
-    std::string pageUrl;  // the release's page, always under https://github.com/
+    std::string pageUrl;  // the release's page, always under kReleasesPage
     bool prerelease = false;
 };
+
+// The notice opens only pages below this: LDM's own releases on GitHub.
+inline constexpr std::string_view kReleasesPage = "https://github.com/xMags/Last-Download-Manager/releases/";
 
 [[nodiscard]] std::optional<LatestRelease> ParseLatestRelease(std::string_view json);
 
