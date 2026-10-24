@@ -521,7 +521,7 @@ void AddFlow::AddPageLinks(browser::Links links, BrowserConnectionId connection,
         command.parentPage = links.referrer;
         command.userAgent = links.userAgent;
         command.cookies = CookiesForAddress(links.cookies, pick.url);
-        // Added to the list without starting, as the reference adds them to its queue.
+        // Added to the list without starting.
         command.mode = core::AddMode::Later;
         command.duplicatePolicy = model::DuplicatePolicy::AddNumbered;
         Post(std::move(command));

@@ -1,4 +1,4 @@
-// The toolbar button's extension: no popup; a click turns integration on or off, and
+// The toolbar button: no popup; a click turns integration on or off, and
 // the icon, badge and tooltip show on, off and error.
 
 import { State } from './connection.js';

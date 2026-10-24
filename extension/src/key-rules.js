@@ -75,7 +75,7 @@ export function downloadVerdict(settings, clickKeys, heldKeys, mimeType, fileNam
   return verdict;
 }
 
-// Web pages, pictures and scripts (the reference's wording for what forcing can leave alone). Plain text,
+// Web pages, pictures and scripts: what forcing can leave alone. Plain text,
 // JSON and XML files are files people download, so they are not on the list.
 const WEB_TYPES = /^(text\/(html|css|javascript)|application\/(xhtml\+xml|javascript)|image\/)/i;
 const WEB_EXTENSIONS = /\.(html?|xhtml|shtml|php\d?|aspx?|jsp|cgi|pl|js|mjs|css|jpe?g|png|gif|webp|avif|bmp|ico|svg)$/i;

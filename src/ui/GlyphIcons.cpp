@@ -98,7 +98,7 @@ Canvas RenderGlyph(const Glyph& glyph, int size, bool grayed)
 // edges and stroke widths are first snapped to whole pixels of the final size, so straight lines
 // stay sharp instead of smearing across two pixels.
 constexpr int kSupersample = 4;
-// Matches the toolbar's disabled label text, as the reference greys its disabled buttons.
+// Matches the toolbar's disabled label text.
 constexpr COLORREF kDisabledGradientColor = RGB(0xA0, 0xA0, 0xA0);
 // Stroke width of drawn shapes in the 32-unit design grid, close to the icon font's line weight.
 constexpr double kStroke = 1.4;
@@ -177,7 +177,7 @@ private:
     int stroke_;
 };
 
-// A circle at the drawn-shape stroke; the icon font's ring is heavier than the reference's.
+// A circle at the drawn-shape stroke; the icon font's ring is too heavy next to the other icons.
 void DrawRing(const ShapePainter& paint)
 {
     const PixelRect outer = paint.Snap(DesignRect{2.5, 2.5, 29.5, 29.5, 0});

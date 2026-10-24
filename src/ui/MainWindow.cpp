@@ -20,8 +20,8 @@ namespace {
 constexpr wchar_t kClassName[] = L"LdmMainWindow";
 constexpr int kToolbarId = 100;
 constexpr int kSplitterWidth96 = 5;
-constexpr int kMargin96 = 6;   // the reference: grey border around the panes
-constexpr int kTopGap96 = 12;  // the reference: space between the toolbar line and the panes
+constexpr int kMargin96 = 6;   // grey border around the panes
+constexpr int kTopGap96 = 12;  // space between the toolbar line and the panes
 constexpr int kDividerPx = 1;  // hairlines stay one physical pixel at every DPI
 constexpr int kMinimumTreeWidth96 = 120;
 constexpr int kMinimumListWidth96 = 200;

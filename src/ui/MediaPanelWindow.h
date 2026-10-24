@@ -10,8 +10,8 @@
 
 namespace ldm::ui {
 
-// The button LDM shows over a web video (checklist B-07, M3 design decision 4), drawn by LDM as
-// the reference draws its own: a borderless window that stays on top, never takes the focus from the
+// The button LDM shows over a web video (checklist B-07, M3 design decision 4), drawn by LDM: a
+// borderless window that stays on top, never takes the focus from the
 // browser and has no taskbar entry. Full mode shows "Download this video" with a menu arrow, a
 // "make smaller" and a close button; mini mode shows only the icon and the arrow. It draws and
 // reports clicks; the controller decides what the menu holds and where the window goes.

@@ -15,7 +15,7 @@ namespace ldm::ui {
                                                 SIZE minimum);
 
 // The panel's top-left corner: at the video's top-right corner, just above the video when the
-// page has room there (as the reference places it), otherwise just inside the video's top edge; never
+// page has room there, otherwise just inside the video's top edge; never
 // left of the video or outside the page.
 [[nodiscard]] POINT PanelPosition(const RECT& page, const RECT& video, SIZE panel, int gap);
 

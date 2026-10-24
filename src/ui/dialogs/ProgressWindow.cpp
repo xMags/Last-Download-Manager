@@ -297,7 +297,7 @@ bool ProgressWindow::OnCommand(int id, int code, HWND control)
         }
         return true;
     case IDCANCEL:
-        // the reference's Cancel stops the transfer and closes the window; the download stays in the list.
+        // Cancel stops the transfer and closes the window; the download stays in the list.
         if (latest_ && IsRunning(latest_->download.status)) {
             callbacks_.post(core::StopCommand{{id_}});
         }

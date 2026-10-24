@@ -27,8 +27,8 @@ constexpr wchar_t kRoundedSquare = 0xE71A;
 constexpr wchar_t kCheck = 0xE73E;
 constexpr wchar_t kGear = 0xE713;
 
-// LDM's buttons in the reference's default order (gap G-1) and the reference's look: the same symbols as thin
-// gradient outlines. Five download actions use embedded the reference artwork; other icons use local drawings. Scheduler and
+// LDM's buttons in their default order (gap G-1), as thin gradient outlines. Five download
+// actions use embedded icons (resources/toolbar); other icons use local drawings. Scheduler and
 // queue buttons join in M4, when those features exist; "Tell a Friend" is excluded by the checklist.
 constexpr std::array<ButtonInfo, 7> kButtons{{
     {ID_TASKS_ADD_URL, {{}, RGB(0x4C, 0xB8, 0x6E), RGB(0x2F, 0x8C, 0xC4), IconShape::OutlinePlus}, L"Add URL"},
@@ -108,7 +108,7 @@ std::vector<int> ParseOrder(const std::string& layout)
     return std::any_of(order.begin(), order.end(), [](int command) { return command != 0; }) ? order : DefaultOrder();
 }
 
-// the reference's large buttons all share one width; longer labels end in "..." and show whole in the tooltip.
+// Large buttons all share one width; longer labels end in "..." and show whole in the tooltip.
 constexpr int kLargeButtonWidth96 = 60;
 
 TBBUTTON MakeButton(int command, bool autosize)
@@ -181,7 +181,7 @@ void Toolbar::Refresh(bool largeButtons, const Theme& theme)
     const int padding = Scale(large_ ? 10 : 6, dpi);
     ::SendMessageW(window_, TB_SETPADDING, 0, MAKELPARAM(padding, Scale(large_ ? 6 : 6, dpi)));
     ::SendMessageW(window_, TB_SETMAXTEXTROWS, large_ ? 1 : 0, 0);
-    // Large: one fixed width with ellipsis, as the reference. Small: icon-only buttons sized to their image.
+    // Large: one fixed width with ellipsis. Small: icon-only buttons sized to their image.
     const int fixedWidth = Scale(kLargeButtonWidth96, dpi);
     ::SendMessageW(window_, TB_SETBUTTONWIDTH, 0, large_ ? MAKELPARAM(fixedWidth, fixedWidth) : MAKELPARAM(0, Scale(400, dpi)));
     ::SendMessageW(window_, TB_SETDRAWTEXTFLAGS, DT_END_ELLIPSIS, large_ ? DT_END_ELLIPSIS : 0);

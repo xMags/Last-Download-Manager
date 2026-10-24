@@ -64,3 +64,6 @@ temp/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Private notes and research, never published
+private/

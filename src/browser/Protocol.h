@@ -73,7 +73,7 @@ struct Capture {
     bool chosen = false;  // the user picked LDM (right-click menu or force keys); not taken automatically
 };
 
-// Where a link of a page was found, as the reference tells them apart.
+// Where a link of a page was found.
 enum class LinkKind {
     Link,   // <a> and <area>
     Image,  // a picture shown on the page (<img>)

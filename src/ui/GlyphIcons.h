@@ -20,7 +20,7 @@ struct Glyph {
 // With `grayed`, every glyph is drawn in a neutral gray (for disabled toolbar buttons).
 [[nodiscard]] UniqueImageList CreateGlyphImageList(std::span<const Glyph> glyphs, int sizePx, bool grayed = false);
 
-// Toolbar icons in the reference's style: thin outlines filled with a diagonal two-color gradient, built
+// Toolbar icons as thin outlines filled with a diagonal two-color gradient, built
 // from one or two glyphs (for example a ring with an arrow inside) or from a drawn shape.
 struct IconLayer {
     wchar_t codepoint = 0;   // 0: unused
@@ -46,8 +46,8 @@ struct GradientIcon {
     IconShape shape = IconShape::Glyphs;
 };
 
-// One premultiplied 32-bit image per icon, `sizePx` square. With `grayed`, a flat light gray, as
-// the reference shows disabled buttons.
+// One premultiplied 32-bit image per icon, `sizePx` square. With `grayed`, a flat light gray, for
+// disabled buttons.
 [[nodiscard]] UniqueImageList CreateGradientImageList(std::span<const GradientIcon> icons, int sizePx, bool grayed);
 
 // A single glyph as an icon, for windows and tray entries that need an HICON.
