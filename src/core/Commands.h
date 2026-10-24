@@ -7,6 +7,7 @@
 #include "model/Download.h"
 #include "model/Ids.h"
 #include "model/Media.h"
+#include "model/Queue.h"
 #include "model/Settings.h"
 
 #include <chrono>
@@ -90,6 +91,8 @@ struct AddDownloadCommand {
     std::optional<model::DuplicatePolicy> duplicatePolicy;
     ExistingFilePolicy existingFilePolicy = ExistingFilePolicy::AutoRename;
     std::optional<MediaChoice> media;
+    // The download queue to join. AddMode::Later without one joins the main queue.
+    std::optional<model::QueueId> queue;
 };
 
 // The user pressed Start Download or Download Later in the info dialog of a speculative add.
@@ -101,6 +104,8 @@ struct ConfirmDownloadCommand {
     std::string description;
     bool start = true;
     bool rememberFolderForCategory = false;
+    // The download queue to join. Download Later (`start` false) without one joins the main queue.
+    std::optional<model::QueueId> queue;
 };
 
 struct ResumeCommand {
@@ -212,6 +217,36 @@ struct ReplaceAddressCommand {
     std::optional<PostData> post;
 };
 
+// Download queues (M4 design section 3). A queue with id 0 is added as a custom queue; the
+// built-in queues keep their names.
+struct SaveQueueCommand {
+    model::Queue queue;
+};
+// Deletes a custom queue, stopping it first; its members stay as downloads outside any queue.
+struct DeleteQueueCommand {
+    model::QueueId id;
+};
+// Add to queue (a queue) and Delete from queue (none), checklist L-05. New members go to the end;
+// a running download keeps running. Adding a completed download to an ordinary queue downloads it
+// again when its turn comes, so front ends ask first (M4 design decision 3).
+struct SetQueueCommand {
+    std::vector<model::DownloadId> ids;
+    std::optional<model::QueueId> queue;
+};
+// Files in the queue (checklist Q-03): the members in their new order. Members left out keep their
+// order after those listed; other downloads are ignored.
+struct ReorderQueueCommand {
+    model::QueueId queue;
+    std::vector<model::DownloadId> order;
+};
+struct StartQueueCommand {
+    model::QueueId id;
+};
+// Stops the queue and its running members, without its completion action (checklist Q-08).
+struct StopQueueCommand {
+    model::QueueId id;
+};
+
 // Fetch a streaming manifest into memory for the media panel (M3 design section 6), with the
 // proxy downloads use. Answered by a FetchFinished notification with the same id.
 struct FetchManifestCommand {
@@ -228,7 +263,9 @@ using Command = std::variant<AddDownloadCommand, ConfirmDownloadCommand, ResumeC
                              SetSpeedLimiterCommand, UpdateDownloadCommand, MoveDownloadCommand, SaveCategoryCommand,
                              DeleteCategoryCommand, ReassignCategoryCommand, UpdateSettingsCommand,
                              ModifySettingsCommand, ReplaceSiteLoginsCommand, ReplaceServerLimitsCommand,
-                             QuotaDecisionCommand, WaitForAddressCommand, ReplaceAddressCommand, FetchManifestCommand>;
+                             QuotaDecisionCommand, WaitForAddressCommand, ReplaceAddressCommand, FetchManifestCommand,
+                             SaveQueueCommand, DeleteQueueCommand, SetQueueCommand, ReorderQueueCommand,
+                             StartQueueCommand, StopQueueCommand>;
 
 // Where front ends send commands. Thread-safe; returns at once.
 class CommandSink {

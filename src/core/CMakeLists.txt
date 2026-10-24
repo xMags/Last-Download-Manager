@@ -2,6 +2,7 @@ add_library(ldm_core STATIC
     Commands.h
     Coordinator.cpp
     Coordinator.h
+    CoordinatorQueues.cpp
     CoreThread.cpp
     CoreThread.h
     FailureText.cpp
@@ -25,6 +26,8 @@ add_library(ldm_core STATIC
     Quota.cpp
     Quota.h
     Ports.h
+    QueueRunner.cpp
+    QueueRunner.h
     SegmentPlanner.cpp
     SegmentPlanner.h
     Snapshot.h
