@@ -1,6 +1,6 @@
 # The Windows installer (M5 design section 2.3): installer/ldm.iss.in configured with the project
 # version and compiled by Inno Setup 6 from the files ldm_package stages. Writes
-# <build dir>/package/LastDownloadManager-windows-x64-setup.exe.
+# <build dir>/package/LastDownloadManager-windows-x64-setup.exe (-arm64-setup.exe for ARM64).
 # Build with: cmake --build --preset windows-release --target ldm_installer
 # Inno Setup is a build-machine tool, not a vcpkg dependency; without it the target is skipped.
 
@@ -14,6 +14,14 @@ find_program(LDM_ISCC ISCC
 if(NOT LDM_ISCC)
     message(STATUS "Inno Setup 6 not found: the ldm_installer target is not available")
     return()
+endif()
+
+# Inno Setup's architecture identifiers: the x64 build also installs on ARM64 Windows, which runs
+# x64 programs; the ARM64 build installs only there.
+if(LDM_PACKAGE_ARCH STREQUAL "arm64")
+    set(LDM_INSTALLER_ARCHITECTURES arm64)
+else()
+    set(LDM_INSTALLER_ARCHITECTURES x64compatible)
 endif()
 
 file(TO_NATIVE_PATH "${LDM_APP_STAGE}" LDM_INSTALLER_STAGE)

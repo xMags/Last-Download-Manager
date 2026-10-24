@@ -33,6 +33,16 @@
       "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
     },
     {
+      "name": "windows-release-arm64",
+      "displayName": "Windows ARM64 Release (cross-compiled from an x64 developer shell for ARM64)",
+      "inherits": "windows-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "VCPKG_TARGET_TRIPLET": "arm64-windows-static",
+        "LDM_BUILD_TESTS": "OFF"
+      }
+    },
+    {
       "name": "windows-asan",
       "displayName": "Windows x64 Debug with AddressSanitizer",
       "inherits": "windows-base",
@@ -54,6 +64,7 @@
   "buildPresets": [
     { "name": "windows-debug", "configurePreset": "windows-debug" },
     { "name": "windows-release", "configurePreset": "windows-release" },
+    { "name": "windows-release-arm64", "configurePreset": "windows-release-arm64" },
     { "name": "windows-asan", "configurePreset": "windows-asan" },
     { "name": "windows-analyze", "configurePreset": "windows-analyze" }
   ],

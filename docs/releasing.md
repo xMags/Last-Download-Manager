@@ -38,6 +38,19 @@ names, so the README's `releases/latest/download/...` links always reach the new
    | `LastDownloadManager-chromium.zip`, `LastDownloadManager-firefox.zip` | the extension packages for the stores |
    | `THIRD-PARTY-NOTICES.txt` | licenses of the shipped components |
 
+   For ARM64 Windows, build the same target from a Visual Studio developer shell that targets
+   ARM64 (`Launch-VsDevShell.ps1 -Arch arm64 -HostArch amd64`). The tests are not built, since an
+   x64 machine cannot run them:
+
+   ```
+   cmake --preset windows-release-arm64
+   cmake --build --preset windows-release-arm64 --target ldm_installer
+   ```
+
+   `build/windows-release-arm64/package/` then holds `LastDownloadManager-windows-arm64-setup.exe`
+   and `LastDownloadManager-windows-arm64.zip`, plus the same extension files. Attach the two ARM64
+   files to the release too.
+
 5. Install the setup over the previous version on a test machine (or in Windows Sandbox with
    `installer/sandbox.wsb`) and check: LDM starts with the old download list; a browser with the
    extension hands over a download; uninstalling and answering No keeps
