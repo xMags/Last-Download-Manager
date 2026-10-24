@@ -27,7 +27,10 @@ add_executable(ldm_unit_tests
     ui/CaptureFollowUpTests.cpp
     ui/ExportAndLaunchTests.cpp
     ui/ListModelTests.cpp
-    ui/PageLinksTests.cpp)
+    ui/PageLinksTests.cpp
+    # The app's own manifest: the UI code under test needs version 6 of the common controls
+    # (SetWindowSubclass and LoadIconMetric exist only there), as ldm.exe gets it.
+    ${PROJECT_SOURCE_DIR}/resources/ldm.manifest)
 target_link_libraries(ldm_unit_tests PRIVATE
     ldm_browser
     ldm_engine
