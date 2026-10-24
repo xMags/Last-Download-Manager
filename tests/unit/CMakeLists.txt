@@ -16,6 +16,9 @@ add_executable(ldm_unit_tests
     core/SegmentPlannerTests.cpp
     core/UrlAndNamesTests.cpp
     engine/Aes128CbcTests.cpp
+    grabber/GrabberFiltersTests.cpp
+    grabber/HtmlLinksTests.cpp
+    grabber/ProjectDefinitionTests.cpp
     engine/FailurePolicyTests.cpp
     engine/HttpHeadersTests.cpp
     engine/TokenBucketTests.cpp
@@ -51,6 +54,7 @@ add_executable(ldm_unit_tests
 target_link_libraries(ldm_unit_tests PRIVATE
     ldm_browser
     ldm_engine
+    ldm_grabber
     ldm_media
     ldm_platform
     ldm_storage

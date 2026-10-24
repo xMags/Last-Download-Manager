@@ -6,6 +6,8 @@ add_library(ldm_model STATIC
     Download.cpp
     Download.h
     EnumNames.h
+    GrabberProject.cpp
+    GrabberProject.h
     Ids.h
     Media.cpp
     Media.h
