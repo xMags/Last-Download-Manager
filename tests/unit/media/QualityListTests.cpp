@@ -27,6 +27,20 @@ std::string ReadFixture(const char* path)
     return std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
 }
 
+TEST(QualityList, AVariantThatSaysNothingAboutItsStreamsIsTakenAsVideo)
+{
+    MediaOffer offer;
+    offer.variants.emplace_back();  // a media playlist on its own: no codecs, no resolution
+    ldm::media::Variant sound;
+    sound.codecs = "mp4a.40.2";
+    offer.variants.push_back(sound);
+    const auto list = BuildQualityList(offer, std::nullopt);
+    ASSERT_EQ(list.entries.size(), 2u);
+    EXPECT_EQ(list.entries[0].kind, QualityKind::Video);
+    EXPECT_EQ(QualityLabel(list.entries[0]), "Media");
+    EXPECT_EQ(list.entries[1].kind, QualityKind::AudioOnly) << "codecs that name sound only still mean sound";
+}
+
 MediaOffer HlsMaster()
 {
     auto parsed = ldm::media::ParseHls(ReadFixture("hls/master.m3u8"), "https://media.example.test/show/ep1/master.m3u8");
