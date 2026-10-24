@@ -52,6 +52,10 @@ TEST(UpdateCheck, RejectsAnswersThatAreNotAReleaseOfGitHub)
         R"({"tag_name":"v5.1.0","html_url":"https://user@github.com/x"})",
         R"({"tag_name":"v5.1.0","html_url":"javascript:alert"})",
         R"({"tag_name":"v5.1.0","html_url":"https://github.com/x","draft":true})",
+        R"({"tag_name":"v5.1.0","html_url":"https://github.com/someone/fake-ldm/releases/tag/v5.1.0"})",
+        R"({"tag_name":"v5.1.0","html_url":"https://github.com/xMags/Last-Download-Manager/releases/../../x/y"})",
+        R"({"tag_name":"v5.1.0","html_url":"https://github.com/xMags/Last-Download-Manager/releases/%2e%2e/x"})",
+        R"({"tag_name":"v5.1.0","html_url":"https://github.com/xMags/Last-Download-Manager/releases/tag/v5.1.0?x=1"})",
     };
     for (const std::string& json : bad) {
         EXPECT_FALSE(ParseLatestRelease(json)) << json;
@@ -203,7 +207,7 @@ TEST(UpdateCheck, ASkippedVersionIsOfferedOnlyWhenAsked)
 
     // The running version is the newest.
     check.CheckNow();
-    outcome = check.OnFetched(Answer(R"({"tag_name":"v5.0.0","html_url":"https://github.com/x"})"), settings);
+    outcome = check.OnFetched(Answer(R"({"tag_name":"v5.0.0","html_url":"https://github.com/xMags/Last-Download-Manager/releases/tag/v5.0.0"})"), settings);
     ASSERT_TRUE(outcome);
     EXPECT_TRUE(outcome->manual);
     EXPECT_FALSE(outcome->newer);

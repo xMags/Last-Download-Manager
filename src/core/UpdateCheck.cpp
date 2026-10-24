@@ -4,6 +4,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <charconv>
 #include <utility>
 #include <vector>
@@ -138,10 +139,20 @@ std::optional<LatestRelease> ParseLatestRelease(std::string_view json)
     if (version.front() == 'v' || version.front() == 'V') {
         version.erase(0, 1);
     }
-    // The notice opens this address, so only GitHub's own pages qualify.
+    // The notice opens this address, so only LDM's own release pages qualify: a plain path below
+    // kReleasesPage, with no dot segments that would climb out of it.
     const std::string& pageUrl = page->get_ref<const std::string&>();
     const auto url = ParseUrl(pageUrl);
-    if (!url || url->scheme != "https" || url->host != "github.com" || url->hasUserInfo || url->port) {
+    if (!url || url->scheme != "https" || url->host != "github.com" || url->hasUserInfo || url->port ||
+        !url->query.empty() || !pageUrl.starts_with(kReleasesPage)) {
+        return std::nullopt;
+    }
+    const std::string_view below = std::string_view(pageUrl).substr(kReleasesPage.size());
+    const bool plain = std::all_of(below.begin(), below.end(), [](char c) {
+        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '.' || c == '-' ||
+               c == '_' || c == '/';
+    });
+    if (!plain || below.find("..") != std::string_view::npos) {
         return std::nullopt;
     }
     LatestRelease release;

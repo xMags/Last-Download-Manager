@@ -2482,7 +2482,7 @@ std::chrono::steady_clock::time_point Coordinator::NextDeadline() const
         // The steady clock may not count while the computer sleeps; look at the time again soon.
         deadline = std::min(deadline, now + kScheduleRecheck);
     }
-    if (updates_) {
+    if (updates_ && !shuttingDown_) {  // Tick no longer checks then, so its deadline would never move
         deadline = std::min(deadline, updates_->NextDeadline(settings_));
     }
     return deadline;
