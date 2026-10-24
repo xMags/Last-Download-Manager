@@ -28,6 +28,7 @@
 //   /control/log         JSON: request log and the highest number of concurrent responses
 //   /control/bump        changes the content of /versioned.bin
 //   /control/reset       clears the log and per-route counters
+// File routes with an ETag or Last-Modified answer If-None-Match and If-Modified-Since with 304.
 // An FTP listener on its own port serves the same payload (see ftp-reference-fixture.mjs); the
 // ready line reports it as "ftpPort".
 import { createHash, randomBytes } from 'node:crypto';
