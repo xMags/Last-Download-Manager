@@ -77,6 +77,16 @@ std::int64_t Download::DownloadedBytes() const noexcept
     for (const Segment& segment : segments) {
         total += segment.done;
     }
+    for (const MediaTrack& track : tracks) {
+        for (const MediaPiece& piece : track.pieces) {
+            if (piece.done && !track.wholeFile) {
+                total += piece.bytes.value_or(0);
+            }
+        }
+        for (const Segment& range : track.ranges) {
+            total += range.done;
+        }
+    }
     return total;
 }
 

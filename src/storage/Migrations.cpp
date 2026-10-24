@@ -104,6 +104,69 @@ ALTER TABLE downloads ADD COLUMN post_content_type TEXT;
 ALTER TABLE downloads ADD COLUMN awaiting_confirmation INTEGER NOT NULL DEFAULT 0
   CHECK (awaiting_confirmation IN (0, 1));
 )sql"},
+    // Streamed video (HLS, DASH): the kind of download, its tracks with their pieces and keys,
+    // and byte ranges per track for the tracks that are one file. Files keep track 0.
+    Migration{5, R"sql(
+ALTER TABLE downloads ADD COLUMN kind TEXT NOT NULL DEFAULT 'file' CHECK (kind IN ('file','hls','dash'));
+ALTER TABLE downloads ADD COLUMN media_private_source INTEGER NOT NULL DEFAULT 0
+  CHECK (media_private_source IN (0, 1));
+
+CREATE TABLE segments_v5 (
+  download_id  INTEGER NOT NULL REFERENCES downloads(id) ON DELETE CASCADE,
+  track        INTEGER NOT NULL DEFAULT 0 CHECK (track >= 0),
+  idx          INTEGER NOT NULL CHECK (idx >= 0),
+  start_offset INTEGER NOT NULL CHECK (start_offset >= 0),
+  end_offset   INTEGER CHECK (end_offset IS NULL OR end_offset >= start_offset),
+  done_bytes   INTEGER NOT NULL DEFAULT 0 CHECK (done_bytes >= 0),
+  PRIMARY KEY (download_id, track, idx)
+) STRICT;
+INSERT INTO segments_v5 (download_id, track, idx, start_offset, end_offset, done_bytes)
+  SELECT download_id, 0, idx, start_offset, end_offset, done_bytes FROM segments;
+DROP TABLE segments;
+ALTER TABLE segments_v5 RENAME TO segments;
+
+CREATE TABLE media_tracks (
+  download_id INTEGER NOT NULL REFERENCES downloads(id) ON DELETE CASCADE,
+  track       INTEGER NOT NULL CHECK (track >= 0),
+  role        TEXT NOT NULL CHECK (role IN ('video','audio','subtitles')),
+  source_url  TEXT NOT NULL,
+  codecs      TEXT NOT NULL DEFAULT '',
+  language    TEXT NOT NULL DEFAULT '',
+  name        TEXT NOT NULL DEFAULT '',
+  whole_file  INTEGER NOT NULL DEFAULT 0 CHECK (whole_file IN (0, 1)),
+  PRIMARY KEY (download_id, track)
+) STRICT;
+
+CREATE TABLE media_keys (
+  download_id INTEGER NOT NULL,
+  track       INTEGER NOT NULL,
+  idx         INTEGER NOT NULL CHECK (idx >= 0),
+  url         TEXT NOT NULL DEFAULT '',
+  value       BLOB CHECK (value IS NULL OR length(value) = 16),
+  PRIMARY KEY (download_id, track, idx),
+  FOREIGN KEY (download_id, track) REFERENCES media_tracks(download_id, track) ON DELETE CASCADE
+) STRICT;
+
+CREATE TABLE media_segments (
+  download_id   INTEGER NOT NULL,
+  track         INTEGER NOT NULL,
+  idx           INTEGER NOT NULL CHECK (idx >= 0),
+  kind          TEXT NOT NULL CHECK (kind IN ('init','media')),
+  url           TEXT NOT NULL,
+  range_offset  INTEGER CHECK (range_offset IS NULL OR range_offset >= 0),
+  range_length  INTEGER CHECK (range_length IS NULL OR range_length > 0),
+  duration_us   INTEGER NOT NULL DEFAULT 0 CHECK (duration_us >= 0),
+  sequence      INTEGER NOT NULL DEFAULT 0,
+  discontinuity INTEGER NOT NULL DEFAULT 0 CHECK (discontinuity IN (0, 1)),
+  init_idx      INTEGER,
+  key_idx       INTEGER,
+  iv            BLOB CHECK (iv IS NULL OR length(iv) = 16),
+  done          INTEGER NOT NULL DEFAULT 0 CHECK (done IN (0, 1)),
+  bytes         INTEGER CHECK (bytes IS NULL OR bytes >= 0),
+  PRIMARY KEY (download_id, track, idx),
+  FOREIGN KEY (download_id, track) REFERENCES media_tracks(download_id, track) ON DELETE CASCADE
+) STRICT;
+)sql"},
 };
 
 base::Result<int> CurrentVersion(Connection& connection)
@@ -157,6 +220,11 @@ int LatestSchemaVersion() noexcept
 
 base::Status Migrate(Connection& connection)
 {
+    return MigrateTo(connection, LatestSchemaVersion());
+}
+
+base::Status MigrateTo(Connection& connection, int target)
+{
     base::Result<int> current = CurrentVersion(connection);
     if (!current) {
         return current.GetError();
@@ -170,6 +238,9 @@ base::Status Migrate(Connection& connection)
     for (const Migration& migration : kMigrations) {
         if (migration.version <= version) {
             continue;
+        }
+        if (migration.version > target) {
+            break;
         }
         base::Status applied = Apply(connection, migration, version);
         if (!applied) {

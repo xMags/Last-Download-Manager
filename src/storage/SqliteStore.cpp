@@ -2,6 +2,9 @@
 
 #include "storage/Migrations.h"
 
+#include <algorithm>
+#include <limits>
+#include <tuple>
 #include <unordered_map>
 #include <utility>
 
@@ -23,7 +26,7 @@ SELECT id, public_id, url, final_url, referer, parent_page, user_agent, file_nam
        partial_path, category_id, description, status, epoch, total_size, resumable, etag,
        last_modified, content_type, max_connections, speed_limit_bps, login_user, login_secret,
        completion_action, created_at, last_try_at, completed_at, last_result, sort_order, cookie_secret,
-       post_secret, post_content_type, awaiting_confirmation
+       post_secret, post_content_type, awaiting_confirmation, kind, media_private_source
 FROM downloads ORDER BY sort_order, id
 )sql";
 
@@ -33,9 +36,9 @@ INSERT INTO downloads (
   partial_path, category_id, description, status, epoch, total_size, resumable, etag,
   last_modified, content_type, max_connections, speed_limit_bps, login_user, login_secret,
   completion_action, created_at, last_try_at, completed_at, last_result, sort_order, cookie_secret,
-  post_secret, post_content_type, awaiting_confirmation)
+  post_secret, post_content_type, awaiting_confirmation, kind, media_private_source)
 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20,
-        ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32)
+        ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34)
 )sql";
 
 constexpr std::string_view kUpdateDownload = R"sql(
@@ -46,8 +49,8 @@ UPDATE downloads SET
   content_type = ?18, max_connections = ?19, speed_limit_bps = ?20, login_user = ?21,
   login_secret = ?22, completion_action = ?23, created_at = ?24, last_try_at = ?25,
   completed_at = ?26, last_result = ?27, sort_order = ?28, cookie_secret = ?29, post_secret = ?30,
-  post_content_type = ?31, awaiting_confirmation = ?32
-WHERE id = ?33
+  post_content_type = ?31, awaiting_confirmation = ?32, kind = ?33, media_private_source = ?34
+WHERE id = ?35
 )sql";
 
 base::Error CorruptRow(std::string_view what)
@@ -70,7 +73,89 @@ std::optional<std::int64_t> ToOptionalBool(const std::optional<bool>& value)
     return value.has_value() ? std::optional<std::int64_t>(*value ? 1 : 0) : std::nullopt;
 }
 
-// Binds parameters ?1..?32 in the column order of kInsertDownload / kUpdateDownload.
+std::optional<std::int64_t> ToOptionalIndex(const std::optional<std::uint32_t>& value)
+{
+    return value.has_value() ? std::optional<std::int64_t>(*value) : std::nullopt;
+}
+
+void BindKey(Statement& statement, int index, const std::optional<model::AesKey>& key)
+{
+    if (key) {
+        statement.Bind(index, std::span<const std::uint8_t>(*key));
+    } else {
+        statement.BindNull(index);
+    }
+}
+
+std::optional<model::AesKey> ReadKey(const Statement& row, int column)
+{
+    const std::vector<std::uint8_t> bytes = row.Blob(column);
+    if (bytes.size() != std::tuple_size_v<model::AesKey>) {
+        return std::nullopt;  // NULL; the schema refuses any other length
+    }
+    model::AesKey key{};
+    std::copy(bytes.begin(), bytes.end(), key.begin());
+    return key;
+}
+
+std::optional<std::uint32_t> ReadIndex(const Statement& row, int column)
+{
+    const auto value = row.OptionalInt64(column);
+    if (!value || *value < 0 || *value > std::int64_t{std::numeric_limits<std::uint32_t>::max()}) {
+        return std::nullopt;
+    }
+    return static_cast<std::uint32_t>(*value);
+}
+
+using DownloadsById = std::unordered_map<model::DownloadId, model::Download*>;
+
+DownloadsById IndexById(std::vector<model::Download>& downloads)
+{
+    DownloadsById byId;
+    byId.reserve(downloads.size());
+    for (model::Download& download : downloads) {
+        byId.emplace(download.id, &download);
+    }
+    return byId;
+}
+
+model::Download* FindOwner(const DownloadsById& byId, std::int64_t id)
+{
+    const auto owner = byId.find(model::DownloadId{id});
+    return owner == byId.end() ? nullptr : owner->second;
+}
+
+// The track of a row whose first two columns are download_id and track.
+model::MediaTrack* FindTrack(const DownloadsById& byId, const Statement& row)
+{
+    model::Download* owner = FindOwner(byId, row.Int64(0));
+    const std::int64_t index = row.Int64(1);
+    if (owner == nullptr || index < 0 || static_cast<std::uint64_t>(index) >= owner->tracks.size()) {
+        return nullptr;
+    }
+    return &owner->tracks[static_cast<size_t>(index)];
+}
+
+// The references inside a track point at rows that exist: LDM wrote them, and checks them on the
+// way back rather than trusting the file.
+bool TrackIsConsistent(const model::MediaTrack& track)
+{
+    for (const model::MediaPiece& piece : track.pieces) {
+        if (piece.init && (*piece.init >= track.pieces.size() ||
+                           track.pieces[*piece.init].kind != model::MediaPiece::Kind::Init)) {
+            return false;
+        }
+        if (piece.key && *piece.key >= track.keys.size()) {
+            return false;
+        }
+        if (piece.rangeOffset.has_value() != piece.rangeLength.has_value()) {
+            return false;
+        }
+    }
+    return !track.wholeFile || track.pieces.size() <= 1;
+}
+
+// Binds parameters ?1..?34 in the column order of kInsertDownload / kUpdateDownload.
 void BindDownloadColumns(Statement& statement, const model::Download& d)
 {
     statement.Bind(1, d.publicId)
@@ -115,7 +200,10 @@ void BindDownloadColumns(Statement& statement, const model::Download& d)
     } else {
         statement.Bind(30, std::span<const std::uint8_t>(d.postSecret));
     }
-    statement.Bind(31, d.postContentType).Bind(32, std::int64_t{d.awaitingConfirmation ? 1 : 0});
+    statement.Bind(31, d.postContentType)
+        .Bind(32, std::int64_t{d.awaitingConfirmation ? 1 : 0})
+        .Bind(33, model::ToString(d.kind))
+        .Bind(34, std::int64_t{d.mediaFromPrivateNetwork ? 1 : 0});
 }
 
 base::Result<model::Download> ReadDownload(const Statement& row)
@@ -168,6 +256,12 @@ base::Result<model::Download> ReadDownload(const Statement& row)
     d.postSecret = row.Blob(30);
     d.postContentType = row.OptionalText(31);
     d.awaitingConfirmation = row.Int64(32) != 0;
+    const auto kind = model::ParseDownloadKind(row.Text(33));
+    if (!kind) {
+        return CorruptRow("downloads.kind");
+    }
+    d.kind = *kind;
+    d.mediaFromPrivateNetwork = row.Int64(34) != 0;
     return d;
 }
 
@@ -213,6 +307,10 @@ base::Result<std::vector<model::Download>> SqliteStore::LoadDownloads()
         }
         downloads.push_back(std::move(download).Value());
     }
+    base::Status tracks = LoadTracks(downloads);
+    if (!tracks) {
+        return tracks.GetError();
+    }
     base::Status segments = LoadSegments(downloads);
     if (!segments) {
         return segments.GetError();
@@ -222,13 +320,10 @@ base::Result<std::vector<model::Download>> SqliteStore::LoadDownloads()
 
 base::Status SqliteStore::LoadSegments(std::vector<model::Download>& downloads)
 {
-    std::unordered_map<model::DownloadId, model::Download*> byId;
-    byId.reserve(downloads.size());
-    for (model::Download& download : downloads) {
-        byId.emplace(download.id, &download);
-    }
+    const DownloadsById byId = IndexById(downloads);
     base::Result<Statement> query = connection_.Prepare(
-        "SELECT download_id, start_offset, end_offset, done_bytes FROM segments ORDER BY download_id, idx");
+        "SELECT download_id, track, start_offset, end_offset, done_bytes FROM segments "
+        "ORDER BY download_id, track, idx");
     if (!query) {
         return query.GetError();
     }
@@ -241,44 +336,276 @@ base::Status SqliteStore::LoadSegments(std::vector<model::Download>& downloads)
             return {};
         }
         const Statement& r = query.Value();
-        const auto owner = byId.find(model::DownloadId{r.Int64(0)});
-        if (owner == byId.end()) {
+        model::Download* owner = FindOwner(byId, r.Int64(0));
+        if (owner == nullptr) {
             continue;  // unreachable with foreign keys on; ignore rather than fail the whole load
         }
-        owner->second->segments.push_back(model::Segment{r.Int64(1), r.OptionalInt64(2), r.Int64(3)});
+        const model::Segment segment{r.Int64(2), r.OptionalInt64(3), r.Int64(4)};
+        if (!owner->IsStream()) {
+            if (r.Int64(1) != 0) {
+                return CorruptRow("segments.track");
+            }
+            owner->segments.push_back(segment);
+            continue;
+        }
+        model::MediaTrack* track = FindTrack(byId, r);
+        if (track == nullptr || !track->wholeFile) {
+            return CorruptRow("segments.track");
+        }
+        track->ranges.push_back(segment);
     }
 }
 
-base::Status SqliteStore::WriteSegments(const model::Download& download)
+base::Status SqliteStore::LoadTracks(std::vector<model::Download>& downloads)
 {
-    base::Result<Statement> clear = connection_.Prepare("DELETE FROM segments WHERE download_id = ?1");
+    const DownloadsById byId = IndexById(downloads);
+    base::Result<Statement> tracks = connection_.Prepare(
+        "SELECT download_id, track, role, source_url, codecs, language, name, whole_file FROM media_tracks "
+        "ORDER BY download_id, track");
+    if (!tracks) {
+        return tracks.GetError();
+    }
+    for (;;) {
+        base::Result<bool> row = tracks.Value().Step();
+        if (!row) {
+            return row.GetError();
+        }
+        if (!row.Value()) {
+            break;
+        }
+        const Statement& r = tracks.Value();
+        model::Download* owner = FindOwner(byId, r.Int64(0));
+        if (owner == nullptr) {
+            continue;
+        }
+        // Rows come in index order, so each one is the next track of its download.
+        const auto role = model::ParseTrackRole(r.Text(2));
+        if (!role || r.Int64(1) != static_cast<std::int64_t>(owner->tracks.size())) {
+            return CorruptRow("media_tracks");
+        }
+        model::MediaTrack track;
+        track.role = *role;
+        track.sourceUrl = r.Text(3);
+        track.codecs = r.Text(4);
+        track.language = r.Text(5);
+        track.name = r.Text(6);
+        track.wholeFile = r.Int64(7) != 0;
+        owner->tracks.push_back(std::move(track));
+    }
+
+    base::Result<Statement> keys = connection_.Prepare(
+        "SELECT download_id, track, idx, url, value FROM media_keys ORDER BY download_id, track, idx");
+    if (!keys) {
+        return keys.GetError();
+    }
+    for (;;) {
+        base::Result<bool> row = keys.Value().Step();
+        if (!row) {
+            return row.GetError();
+        }
+        if (!row.Value()) {
+            break;
+        }
+        const Statement& r = keys.Value();
+        model::MediaTrack* track = FindTrack(byId, r);
+        if (track == nullptr) {
+            continue;
+        }
+        if (r.Int64(2) != static_cast<std::int64_t>(track->keys.size())) {
+            return CorruptRow("media_keys.idx");
+        }
+        track->keys.push_back(model::MediaKey{r.Text(3), ReadKey(r, 4)});
+    }
+
+    base::Result<Statement> pieces = connection_.Prepare(
+        "SELECT download_id, track, idx, kind, url, range_offset, range_length, duration_us, sequence, "
+        "discontinuity, init_idx, key_idx, iv, done, bytes FROM media_segments ORDER BY download_id, track, idx");
+    if (!pieces) {
+        return pieces.GetError();
+    }
+    for (;;) {
+        base::Result<bool> row = pieces.Value().Step();
+        if (!row) {
+            return row.GetError();
+        }
+        if (!row.Value()) {
+            break;
+        }
+        const Statement& r = pieces.Value();
+        model::MediaTrack* track = FindTrack(byId, r);
+        if (track == nullptr) {
+            continue;
+        }
+        const std::string kind = r.Text(3);
+        if (r.Int64(2) != static_cast<std::int64_t>(track->pieces.size()) || (kind != "init" && kind != "media")) {
+            return CorruptRow("media_segments");
+        }
+        model::MediaPiece piece;
+        piece.kind = kind == "init" ? model::MediaPiece::Kind::Init : model::MediaPiece::Kind::Media;
+        piece.url = r.Text(4);
+        piece.rangeOffset = r.OptionalInt64(5);
+        piece.rangeLength = r.OptionalInt64(6);
+        piece.durationUs = r.Int64(7);
+        piece.sequence = static_cast<std::uint64_t>(r.Int64(8));  // stored as its two's complement
+        piece.discontinuity = r.Int64(9) != 0;
+        piece.init = ReadIndex(r, 10);
+        piece.key = ReadIndex(r, 11);
+        piece.iv = ReadKey(r, 12);
+        piece.done = r.Int64(13) != 0;
+        piece.bytes = r.OptionalInt64(14);
+        track->pieces.push_back(std::move(piece));
+    }
+
+    for (const model::Download& download : downloads) {
+        for (const model::MediaTrack& track : download.tracks) {
+            if (!TrackIsConsistent(track)) {
+                return CorruptRow("media_segments references");
+            }
+        }
+    }
+    return {};
+}
+
+base::Status SqliteStore::WriteRanges(model::DownloadId id, std::uint32_t track,
+                                      const std::vector<model::Segment>& ranges)
+{
+    base::Result<Statement> clear = connection_.Prepare("DELETE FROM segments WHERE download_id = ?1 AND track = ?2");
     if (!clear) {
         return clear.GetError();
     }
-    base::Status cleared = clear.Value().Bind(1, download.id.value).Run();
+    base::Status cleared = clear.Value().Bind(1, id.value).Bind(2, std::int64_t{track}).Run();
     if (!cleared) {
         return cleared;
     }
     base::Result<Statement> insert = connection_.Prepare(
-        "INSERT INTO segments (download_id, idx, start_offset, end_offset, done_bytes) VALUES (?1, ?2, ?3, ?4, ?5)");
+        "INSERT INTO segments (download_id, track, idx, start_offset, end_offset, done_bytes) "
+        "VALUES (?1, ?2, ?3, ?4, ?5, ?6)");
     if (!insert) {
         return insert.GetError();
     }
-    for (size_t index = 0; index < download.segments.size(); ++index) {
-        const model::Segment& segment = download.segments[index];
+    for (size_t index = 0; index < ranges.size(); ++index) {
+        const model::Segment& segment = ranges[index];
         Statement& statement = insert.Value();
         statement.Reset();
-        base::Status inserted = statement.Bind(1, download.id.value)
-                                    .Bind(2, static_cast<std::int64_t>(index))
-                                    .Bind(3, segment.start)
-                                    .Bind(4, segment.end)
-                                    .Bind(5, segment.done)
+        base::Status inserted = statement.Bind(1, id.value)
+                                    .Bind(2, std::int64_t{track})
+                                    .Bind(3, static_cast<std::int64_t>(index))
+                                    .Bind(4, segment.start)
+                                    .Bind(5, segment.end)
+                                    .Bind(6, segment.done)
                                     .Run();
         if (!inserted) {
             return inserted;
         }
     }
     return {};
+}
+
+base::Status SqliteStore::WriteSegments(const model::Download& download)
+{
+    if (!download.IsStream()) {
+        return WriteRanges(download.id, 0, download.segments);
+    }
+    for (size_t index = 0; index < download.tracks.size(); ++index) {
+        const model::MediaTrack& track = download.tracks[index];
+        if (!track.wholeFile) {
+            continue;
+        }
+        base::Status written = WriteRanges(download.id, static_cast<std::uint32_t>(index), track.ranges);
+        if (!written) {
+            return written;
+        }
+    }
+    return {};
+}
+
+base::Status SqliteStore::DeleteTrack(model::DownloadId id, std::uint32_t track)
+{
+    // Keys and pieces go with the track row (ON DELETE CASCADE); ranges hang off the download.
+    base::Result<Statement> remove =
+        connection_.Prepare("DELETE FROM media_tracks WHERE download_id = ?1 AND track = ?2");
+    if (!remove) {
+        return remove.GetError();
+    }
+    base::Status removed = remove.Value().Bind(1, id.value).Bind(2, std::int64_t{track}).Run();
+    if (!removed) {
+        return removed;
+    }
+    return WriteRanges(id, track, {});
+}
+
+base::Status SqliteStore::WriteTrack(model::DownloadId id, std::uint32_t index, const model::MediaTrack& track)
+{
+    base::Result<Statement> insertTrack = connection_.Prepare(
+        "INSERT INTO media_tracks (download_id, track, role, source_url, codecs, language, name, whole_file) "
+        "VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)");
+    if (!insertTrack) {
+        return insertTrack.GetError();
+    }
+    base::Status inserted = insertTrack.Value()
+                                .Bind(1, id.value)
+                                .Bind(2, std::int64_t{index})
+                                .Bind(3, model::ToString(track.role))
+                                .Bind(4, track.sourceUrl)
+                                .Bind(5, track.codecs)
+                                .Bind(6, track.language)
+                                .Bind(7, track.name)
+                                .Bind(8, track.wholeFile)
+                                .Run();
+    if (!inserted) {
+        return inserted;
+    }
+
+    base::Result<Statement> insertKey = connection_.Prepare(
+        "INSERT INTO media_keys (download_id, track, idx, url, value) VALUES (?1, ?2, ?3, ?4, ?5)");
+    if (!insertKey) {
+        return insertKey.GetError();
+    }
+    for (size_t k = 0; k < track.keys.size(); ++k) {
+        Statement& statement = insertKey.Value();
+        statement.Reset();
+        statement.Bind(1, id.value)
+            .Bind(2, std::int64_t{index})
+            .Bind(3, static_cast<std::int64_t>(k))
+            .Bind(4, track.keys[k].url);
+        BindKey(statement, 5, track.keys[k].value);
+        base::Status keyInserted = statement.Run();
+        if (!keyInserted) {
+            return keyInserted;
+        }
+    }
+
+    base::Result<Statement> insertPiece = connection_.Prepare(
+        "INSERT INTO media_segments (download_id, track, idx, kind, url, range_offset, range_length, duration_us, "
+        "sequence, discontinuity, init_idx, key_idx, iv, done, bytes) "
+        "VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)");
+    if (!insertPiece) {
+        return insertPiece.GetError();
+    }
+    for (size_t p = 0; p < track.pieces.size(); ++p) {
+        const model::MediaPiece& piece = track.pieces[p];
+        Statement& statement = insertPiece.Value();
+        statement.Reset();
+        statement.Bind(1, id.value)
+            .Bind(2, std::int64_t{index})
+            .Bind(3, static_cast<std::int64_t>(p))
+            .Bind(4, piece.kind == model::MediaPiece::Kind::Init ? "init" : "media")
+            .Bind(5, piece.url)
+            .Bind(6, piece.rangeOffset)
+            .Bind(7, piece.rangeLength)
+            .Bind(8, piece.durationUs)
+            .Bind(9, static_cast<std::int64_t>(piece.sequence))
+            .Bind(10, piece.discontinuity)
+            .Bind(11, ToOptionalIndex(piece.init))
+            .Bind(12, ToOptionalIndex(piece.key));
+        BindKey(statement, 13, piece.iv);
+        statement.Bind(14, piece.done).Bind(15, piece.bytes);
+        base::Status pieceInserted = statement.Run();
+        if (!pieceInserted) {
+            return pieceInserted;
+        }
+    }
+    return track.wholeFile ? WriteRanges(id, index, track.ranges) : base::Status{};
 }
 
 base::Result<model::DownloadId> SqliteStore::InsertDownload(const model::Download& download)
@@ -298,9 +625,17 @@ base::Result<model::DownloadId> SqliteStore::InsertDownload(const model::Downloa
     }
     model::Download stored = download;
     stored.id = model::DownloadId{connection_.LastInsertRowId()};
-    base::Status segments = WriteSegments(stored);
-    if (!segments) {
-        return segments.GetError();
+    for (size_t index = 0; index < stored.tracks.size(); ++index) {
+        base::Status track = WriteTrack(stored.id, static_cast<std::uint32_t>(index), stored.tracks[index]);
+        if (!track) {
+            return track.GetError();
+        }
+    }
+    if (!stored.IsStream()) {
+        base::Status segments = WriteSegments(stored);  // a stream's ranges were written with its tracks
+        if (!segments) {
+            return segments.GetError();
+        }
     }
     base::Status committed = transaction.Value().Commit();
     if (!committed) {
@@ -320,7 +655,7 @@ base::Status SqliteStore::SaveDownload(const model::Download& download)
         return update.GetError();
     }
     BindDownloadColumns(update.Value(), download);
-    update.Value().Bind(33, download.id.value);
+    update.Value().Bind(35, download.id.value);
     base::Status updated = update.Value().Run();
     if (!updated) {
         return updated;
@@ -331,6 +666,53 @@ base::Status SqliteStore::SaveDownload(const model::Download& download)
     base::Status segments = WriteSegments(download);
     if (!segments) {
         return segments;
+    }
+    return transaction.Value().Commit();
+}
+
+base::Status SqliteStore::MarkMediaPiecesDone(model::DownloadId id, std::span<const core::MediaPieceDone> pieces)
+{
+    base::Result<Transaction> transaction = Transaction::Begin(connection_);
+    if (!transaction) {
+        return transaction.GetError();
+    }
+    base::Result<Statement> update = connection_.Prepare(
+        "UPDATE media_segments SET done = 1, bytes = ?4 WHERE download_id = ?1 AND track = ?2 AND idx = ?3");
+    if (!update) {
+        return update.GetError();
+    }
+    for (const core::MediaPieceDone& piece : pieces) {
+        Statement& statement = update.Value();
+        statement.Reset();
+        base::Status updated = statement.Bind(1, id.value)
+                                   .Bind(2, std::int64_t{piece.track})
+                                   .Bind(3, std::int64_t{piece.index})
+                                   .Bind(4, piece.bytes)
+                                   .Run();
+        if (!updated) {
+            return updated;
+        }
+        if (connection_.ChangedRows() != 1) {
+            return base::MakeError(base::ErrorCode::NotFound, "media segment does not exist");
+        }
+    }
+    return transaction.Value().Commit();
+}
+
+base::Status SqliteStore::ReplaceMediaTrack(model::DownloadId id, std::uint32_t track,
+                                            const model::MediaTrack& replacement)
+{
+    base::Result<Transaction> transaction = Transaction::Begin(connection_);
+    if (!transaction) {
+        return transaction.GetError();
+    }
+    base::Status removed = DeleteTrack(id, track);
+    if (!removed) {
+        return removed;
+    }
+    base::Status written = WriteTrack(id, track, replacement);
+    if (!written) {
+        return written;
     }
     return transaction.Value().Commit();
 }
