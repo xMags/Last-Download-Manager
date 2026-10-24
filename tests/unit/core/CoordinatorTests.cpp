@@ -2006,6 +2006,18 @@ TEST_F(QueueTest, MovingDownloadsToAQueueKeepsTheListOrder)
     EXPECT_FALSE(Stored(a)->queueId);
 }
 
+TEST_F(QueueTest, ANewQueueCanTakeMembersAtOnce)
+{
+    const DownloadId a = *Add("http://x.test/a.dat", AddMode::Later).id;
+    ldm::model::Queue queue;
+    queue.name = "Fresh";
+    coordinator_->Handle(ldm::core::SaveQueueCommand{queue, {a}});
+    Publish();
+    const auto fresh = observer_.snapshot->queues.back().queue.id;
+    EXPECT_EQ(View(a).download.queueId, fresh);
+    EXPECT_EQ(QueueOf(fresh).members, 1);
+}
+
 TEST_F(QueueTest, SavingQueuesChecksWhatTheyAreGiven)
 {
     const auto nightly = NewQueue("  Nightly ", 2);

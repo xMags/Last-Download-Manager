@@ -80,7 +80,7 @@ std::optional<std::string> ScheduleProblem(const model::Schedule& schedule)
 
 }  // namespace
 
-void Coordinator::SaveQueue(model::Queue queue)
+void Coordinator::SaveQueue(model::Queue queue, const std::vector<model::DownloadId>& members)
 {
     queue.name = Trimmed(queue.name);
     model::Queue* existing = queue.id.value == 0 ? nullptr : FindQueue(queue.id);
@@ -133,9 +133,12 @@ void Coordinator::SaveQueue(model::Queue queue)
             return;
         }
         queue.id = id.Value();
-        queues_.push_back(std::move(queue));
+        queues_.push_back(queue);
         snapshotDirty_ = true;
         PlanSchedules();
+        if (!members.empty()) {
+            SetQueue(members, queue.id);
+        }
         return;
     }
     queue.kind = existing->kind;

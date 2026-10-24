@@ -78,7 +78,7 @@ std::wstring CommandLineHelp()
            L"--name FILE: save as FILE\n"
            L"--silent: add without showing any dialog\n"
            L"--queue-only: add without starting the download\n"
-           L"--start-queue: reserved for download queues, which are not available yet\n"
+           L"--start-queue: start the main download queue\n"
            L"--tray: start hidden in the notification area\n"
            L"--help: show this help\n"
            L"\n"

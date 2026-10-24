@@ -463,3 +463,19 @@
 #define IDC_MEDIA_MINIMUM 1614
 #define IDC_MEDIA_SITES 1615
 #define IDC_MEDIA_DRM 1616
+
+// Download queues (M4): the tree's queue menu, row entries and the queue lists of the menus
+#define ID_QUEUE_START 40400
+#define ID_QUEUE_STOP 40401
+#define ID_QUEUE_DELETE 40402
+#define ID_QUEUE_CREATE 40403
+#define ID_ROW_DELETE_FROM_QUEUE 40404
+#define ID_ROW_ADD_TO_NEW_QUEUE 40405
+#define ID_ADD_TO_QUEUE_FIRST 40410
+#define ID_ADD_TO_QUEUE_LAST 40459
+#define ID_START_QUEUE_FIRST 40460
+#define ID_START_QUEUE_LAST 40509
+#define ID_STOP_QUEUE_FIRST 40510
+#define ID_STOP_QUEUE_LAST 40559
+#define IDD_QUEUE_NAME 338
+#define IDC_QUEUE_NAME 1620

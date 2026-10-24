@@ -13,6 +13,7 @@
 #include "ui/ImportExportFlow.h"
 #include "ui/PlaylistOffer.h"
 #include "ui/ListModel.h"
+#include "ui/QueueCommands.h"
 #include "ui/ShellActions.h"
 #include "ui/StartupRegistration.h"
 #include "ui/StreamChoice.h"
@@ -77,6 +78,10 @@ public:
 
     void ShowRowMenu(POINT screen);
     void ShowCategoryMenu(std::optional<model::CategoryId> category, POINT screen);
+    // The tree's Queues node (no queue) or one of its queues.
+    void ShowQueueMenu(std::optional<model::QueueId> queue, POINT screen);
+    // The toolbar's Start Queue or Stop Queue drop-down.
+    void ShowQueueToolbarMenu(int command, POINT screen);
     void ShowTrayMenu(POINT screen);
 
     // A command line or a second launch (checklist A-10, W-05).
@@ -128,6 +133,7 @@ private:
     AddFlow adds_;
     ImportExportFlow importExport_;
     PlaylistOffer playlists_;
+    QueueCommands queues_;
     ClipboardMonitor clipboard_;
     std::unique_ptr<FindDialog> find_;
     FindOptions findOptions_;

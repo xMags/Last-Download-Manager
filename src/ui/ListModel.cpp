@@ -149,6 +149,9 @@ int Compare(const core::DownloadView& a, const core::DownloadView& b, SortKey ke
 
 bool Matches(const core::DownloadView& view, const ListFilter& filter)
 {
+    if (filter.status == StatusFilter::Queued) {
+        return view.download.queueId && (!filter.queue || view.download.queueId == filter.queue);
+    }
     const bool finished = view.download.status == model::DownloadStatus::Completed;
     if (filter.status == StatusFilter::Unfinished && finished) {
         return false;
@@ -211,7 +214,11 @@ std::vector<size_t> BuildIndex(const core::Snapshot& snapshot, const ListFilter&
         }
     }
     // Snapshot order is the order of addition, so a stable sort keeps it for ties.
+    const bool queueOrder = filter.status == StatusFilter::Queued && filter.queue && sort.key == SortKey::OrderOfAddition;
     std::stable_sort(index.begin(), index.end(), [&](size_t a, size_t b) {
+        if (queueOrder) {
+            return snapshot.downloads[a]->download.queuePosition < snapshot.downloads[b]->download.queuePosition;
+        }
         const int order = Compare(*snapshot.downloads[a], *snapshot.downloads[b], sort.key);
         return sort.descending ? order > 0 : order < 0;
     });

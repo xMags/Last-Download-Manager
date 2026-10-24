@@ -5,6 +5,7 @@
 
 #include <windows.h>
 
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -26,8 +27,12 @@ public:
     void Refresh(bool largeButtons, const Theme& theme);
     void SetEnabled(int commandId, bool enabled);
     void Customize();
+    // Start Queue and Stop Queue open a menu instead of running a command: `handler` shows it at the
+    // screen point under the button.
+    void SetDropDownHandler(std::function<void(int command, POINT screen)> handler);
 
-    // The current button order, in the form `Create` accepts ("cmd,cmd,0,cmd": 0 is a separator).
+    // The current button order, in the form `Create` accepts ("2|cmd,cmd,0,cmd": 0 is a separator,
+    // "2|" marks a layout that knows the queue buttons).
     [[nodiscard]] std::string Layout() const;
 
     // WM_NOTIFY from the toolbar. Returns true when handled; `result` is the message result.
@@ -43,6 +48,7 @@ private:
     UniqueImageList images_;
     UniqueImageList disabledImages_;
     std::vector<int> savedOrder_;  // restored by the Customize dialog's Reset button
+    std::function<void(int, POINT)> dropDown_;
     COLORREF textColor_ = 0;
     COLORREF background_ = 0;
     COLORREF hotColor_ = 0;

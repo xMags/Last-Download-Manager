@@ -127,6 +127,9 @@ std::wstring FormatStatus(const core::DownloadView& view)
     if (view.waitingForAddress && view.download.status != DownloadStatus::Stopping) {
         return L"Waiting for new address";
     }
+    if (view.waitingInQueue) {
+        return L"Waiting in queue";
+    }
     const bool live = view.stream && view.stream->live;
     switch (view.download.status) {
     case DownloadStatus::Queued:

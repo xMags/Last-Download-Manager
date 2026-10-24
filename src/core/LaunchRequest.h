@@ -15,7 +15,7 @@ struct LaunchRequest {
     std::optional<std::string> fileName;  // UTF-8
     bool silent = false;     // add without any dialog
     bool queueOnly = false;  // add without starting
-    bool startQueue = false;  // start the main queue (queues arrive in M4)
+    bool startQueue = false;  // start the main download queue
     bool tray = false;        // start hidden in the tray (used by Launch on startup)
     bool help = false;
 };

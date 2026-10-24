@@ -1,11 +1,13 @@
 #pragma once
 
 #include "core/Snapshot.h"
+#include "model/Queue.h"
 #include "ui/Handles.h"
 #include "ui/ListModel.h"
 #include "ui/Theme.h"
 
 #include <windows.h>
+#include <commctrl.h>
 
 #include <functional>
 #include <map>
@@ -64,6 +66,10 @@ private:
     [[nodiscard]] std::wstring CellText(const core::DownloadView& view, Column column) const;
     [[nodiscard]] int IconFor(const core::DownloadView& view);
     [[nodiscard]] std::optional<size_t> FocusedPosition() const;
+    // The Q column (checklist L-01): a mark on members of a download queue, drawn over the empty
+    // cell, with the queue's name as the tip.
+    void DrawQueueMark(const NMLVCUSTOMDRAW& draw) const;
+    [[nodiscard]] const model::Queue* QueueOf(const core::DownloadView& view) const;
 
     Callbacks callbacks_;
     HWND list_ = nullptr;
@@ -78,6 +84,8 @@ private:
     std::map<Column, int> chosenWidths96_;
     bool fitting_ = false;
     std::map<std::wstring, int> iconCache_;  // extension -> system image list index
+    UniqueIcon queueIcon_;
+    UniqueIcon syncQueueIcon_;
     bool updating_ = false;
 };
 

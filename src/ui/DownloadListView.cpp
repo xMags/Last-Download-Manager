@@ -4,6 +4,7 @@
 #include "core/FileNames.h"
 #include "ui/Dpi.h"
 #include "ui/Format.h"
+#include "ui/GlyphIcons.h"
 
 #include <commctrl.h>
 #include <shellapi.h>
@@ -13,6 +14,12 @@
 
 namespace ldm::ui {
 
+namespace {
+
+constexpr int kQueueMark96 = 12;
+
+}  // namespace
+
 void DownloadListView::Create(HWND parent, Callbacks callbacks)
 {
     callbacks_ = std::move(callbacks);
@@ -21,7 +28,7 @@ void DownloadListView::Create(HWND parent, Callbacks callbacks)
                                   LVS_SHAREIMAGELISTS,
                               0, 0, 0, 0, parent, nullptr, ::GetModuleHandleW(nullptr), nullptr);
     ListView_SetExtendedListViewStyle(list_, LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER | LVS_EX_HEADERDRAGDROP |
-                                                 LVS_EX_LABELTIP | LVS_EX_SUBITEMIMAGES);
+                                                 LVS_EX_LABELTIP | LVS_EX_SUBITEMIMAGES | LVS_EX_INFOTIP);
     // The shell's own small icons, so every file type looks as it does in Explorer.
     SHFILEINFOW info{};
     const auto systemImages = reinterpret_cast<HIMAGELIST>(::SHGetFileInfoW(  // documented to return the list
@@ -193,6 +200,9 @@ void DownloadListView::ApplyTheme(const Theme& theme)
     ListView_SetTextColor(list_, theme.Colors().text);
     // Grid lines; the list control draws them in a light system color that glares in dark mode.
     ListView_SetExtendedListViewStyleEx(list_, LVS_EX_GRIDLINES, theme.IsDark() ? 0 : LVS_EX_GRIDLINES);
+    const int mark = Scale(kQueueMark96, DpiOf(list_));
+    queueIcon_ = CreateGlyphIcon(Glyph{0xE8FD, RGB(0x1E, 0x88, 0xE5)}, mark);      // BulletedList
+    syncQueueIcon_ = CreateGlyphIcon(Glyph{0xE895, RGB(0x2E, 0xA0, 0x43)}, mark);  // Sync
     ::InvalidateRect(list_, nullptr, TRUE);
 }
 
@@ -299,6 +309,42 @@ std::wstring DownloadListView::CellText(const core::DownloadView& view, Column c
     return {};
 }
 
+const model::Queue* DownloadListView::QueueOf(const core::DownloadView& view) const
+{
+    if (!snapshot_ || !view.download.queueId) {
+        return nullptr;
+    }
+    for (const core::QueueView& queue : snapshot_->queues) {
+        if (queue.queue.id == *view.download.queueId) {
+            return &queue.queue;
+        }
+    }
+    return nullptr;
+}
+
+void DownloadListView::DrawQueueMark(const NMLVCUSTOMDRAW& draw) const
+{
+    const auto row = static_cast<size_t>(draw.nmcd.dwItemSpec);  // an owner-data list numbers rows
+    if (!snapshot_ || row >= index_.size()) {
+        return;
+    }
+    const model::Queue* queue = QueueOf(*snapshot_->downloads[index_[row]]);
+    if (queue == nullptr) {
+        return;
+    }
+    RECT cell{};
+    // The first column's bounds are the whole row; its label is the cell.
+    if (!ListView_GetSubItemRect(list_, static_cast<int>(row), draw.iSubItem, draw.iSubItem == 0 ? LVIR_LABEL : LVIR_BOUNDS,
+                                 &cell)) {
+        return;
+    }
+    const int size = Scale(kQueueMark96, DpiOf(list_));
+    const int x = static_cast<int>(cell.left) + std::max(0, static_cast<int>(cell.right - cell.left - size) / 2);
+    const int y = static_cast<int>(cell.top) + std::max(0, static_cast<int>(cell.bottom - cell.top - size) / 2);
+    const HICON icon = queue->kind == model::QueueKind::Sync ? syncQueueIcon_.get() : queueIcon_.get();
+    ::DrawIconEx(draw.nmcd.hdc, x, y, icon, size, size, 0, nullptr, DI_NORMAL);
+}
+
 int DownloadListView::IconFor(const core::DownloadView& view)
 {
     const std::wstring extension = base::ToUtf16(core::FileExtension(view.download.fileName));
@@ -354,6 +400,51 @@ bool DownloadListView::HandleNotify(const NMHDR& header, LRESULT& result)
         }
         if ((item.mask & LVIF_IMAGE) != 0) {
             item.iImage = column == Column::FileName ? IconFor(view) : I_IMAGENONE;
+        }
+        result = 0;
+        return true;
+    }
+    case NM_CUSTOMDRAW: {
+        const auto& draw = reinterpret_cast<const NMLVCUSTOMDRAW&>(header);
+        const auto isQueue = [this](int subItem) {
+            return subItem >= 0 && static_cast<size_t>(subItem) < shown_.size() &&
+                   shown_[static_cast<size_t>(subItem)] == Column::Queue;
+        };
+        switch (draw.nmcd.dwDrawStage) {
+        case CDDS_PREPAINT:
+            result = CDRF_NOTIFYITEMDRAW;
+            break;
+        case CDDS_ITEMPREPAINT:
+            result = CDRF_NOTIFYSUBITEMDRAW;
+            break;
+        case CDDS_ITEMPREPAINT | CDDS_SUBITEM:
+            result = isQueue(draw.iSubItem) ? CDRF_NOTIFYPOSTPAINT : CDRF_DODEFAULT;
+            break;
+        case CDDS_ITEMPOSTPAINT | CDDS_SUBITEM:
+            if (isQueue(draw.iSubItem)) {
+                DrawQueueMark(draw);
+            }
+            result = CDRF_DODEFAULT;
+            break;
+        default:
+            result = CDRF_DODEFAULT;
+            break;
+        }
+        return true;
+    }
+    case LVN_GETINFOTIPW: {
+        // Over the Q column, the queue's name; elsewhere the list's own tip.
+        auto& tip = const_cast<NMLVGETINFOTIPW&>(reinterpret_cast<const NMLVGETINFOTIPW&>(header));  // documented in-out
+        LVHITTESTINFO hit{};
+        ::GetCursorPos(&hit.pt);
+        ::ScreenToClient(list_, &hit.pt);
+        if (snapshot_ && ListView_SubItemHitTest(list_, &hit) >= 0 && hit.iSubItem >= 0 &&
+            static_cast<size_t>(hit.iSubItem) < shown_.size() && shown_[static_cast<size_t>(hit.iSubItem)] == Column::Queue &&
+            static_cast<size_t>(hit.iItem) < index_.size() && tip.pszText != nullptr && tip.cchTextMax > 0) {
+            if (const model::Queue* queue = QueueOf(*snapshot_->downloads[index_[static_cast<size_t>(hit.iItem)]])) {
+                const std::wstring text = L"Queue: " + base::ToUtf16(queue->name);
+                wcsncpy_s(tip.pszText, static_cast<size_t>(tip.cchTextMax), text.c_str(), _TRUNCATE);
+            }
         }
         result = 0;
         return true;

@@ -112,6 +112,33 @@ TEST(ListModel, FiltersByStatusAndCategory)
     EXPECT_TRUE(BuildIndex(snapshot, {StatusFilter::Finished, CategoryId{5}}, {}).empty());
 }
 
+TEST(ListModel, QueueNodesListTheMembersInQueueOrder)
+{
+    Snapshot snapshot = Sample();
+    auto first = std::make_shared<DownloadView>(*snapshot.downloads[3]);
+    first->download.queueId = ldm::model::QueueId{7};
+    first->download.queuePosition = 1;
+    auto second = std::make_shared<DownloadView>(*snapshot.downloads[0]);
+    second->download.queueId = ldm::model::QueueId{7};
+    second->download.queuePosition = 2;
+    auto other = std::make_shared<DownloadView>(*snapshot.downloads[2]);
+    other->download.queueId = ldm::model::QueueId{9};
+    snapshot.downloads[3] = first;
+    snapshot.downloads[0] = second;
+    snapshot.downloads[2] = other;
+
+    const ldm::ui::ListFilter queue{StatusFilter::Queued, std::nullopt, ldm::model::QueueId{7}};
+    EXPECT_EQ(Ids(snapshot, BuildIndex(snapshot, queue, {})), (std::vector<std::int64_t>{4, 1})) << "queue order";
+    EXPECT_EQ(Ids(snapshot, BuildIndex(snapshot, queue, {SortKey::FileName, false})), (std::vector<std::int64_t>{1, 4}))
+        << "another sort still applies";
+    EXPECT_EQ(Ids(snapshot, BuildIndex(snapshot, {StatusFilter::Queued, std::nullopt, std::nullopt}, {})),
+              (std::vector<std::int64_t>{1, 3, 4})) << "the Queues node lists every member";
+
+    auto waiting = std::make_shared<DownloadView>(*first);
+    waiting->waitingInQueue = true;
+    EXPECT_EQ(FormatStatus(*waiting), L"Waiting in queue");
+}
+
 TEST(ListModel, SortsNamesNaturallyAndUnknownSizesFirst)
 {
     const Snapshot snapshot = Sample();
