@@ -119,6 +119,9 @@ private:
         std::set<std::int64_t> unsaved;
 
         bool exploring = false;
+        // Counts explorations and stops: an answer to a fetch of an earlier one is dropped, since
+        // a new exploration may have given its item id to another address.
+        std::uint64_t run = 0;
         std::optional<std::string> startPageFailure;  // of the last exploration
         bool scheduledRun = false;      // its schedule started the current run
         bool downloadAfterExplore = false;
@@ -134,7 +137,9 @@ private:
 
         bool downloading = false;
         std::deque<std::int64_t> downloadQueue;
-        std::map<std::uint64_t, std::int64_t> adding;  // add token -> item
+        // Add token -> item. Kept after a stop until answered, so the answer can adopt or stop the
+        // download it made and the item is never added twice.
+        std::map<std::uint64_t, std::int64_t> adding;
         std::map<model::DownloadId, std::int64_t> active;  // download -> item
         std::set<model::DownloadId> seenRunning;  // active downloads seen running since started
     };
@@ -143,6 +148,7 @@ private:
         model::GrabberProjectId project;
         std::int64_t item = 0;
         bool head = false;
+        std::uint64_t run = 0;  // Project::run when it was sent
     };
 
     // Commands.
@@ -156,6 +162,10 @@ private:
     void StopDownloads(Project& project);
     void AddToMainList(Project& project, const std::vector<std::int64_t>& items);
     void RemoveHiddenDownloads(model::GrabberProjectId id);
+    // Adds whose items are gone (a new list, a deleted project): their downloads are removed when
+    // the answers come.
+    void AbandonPendingAdds(Project& project);
+    [[nodiscard]] static bool AddPending(const Project& project, std::int64_t itemId);
 
     // Exploring.
     void PumpFetches(Project& project);
@@ -173,6 +183,7 @@ private:
     void StartDownload(Project& project, Item& item);
     void OnDownloadEnded(Project& project, std::int64_t itemId, bool completed, const std::string& finalPath,
                          std::optional<std::int64_t> size);
+    void OnAddAnswered(Project& project, std::int64_t itemId, std::optional<model::DownloadId> downloadId);
     void FinishDownloadsIfDone(Project& project);
     [[nodiscard]] const core::DownloadView* FindDownload(model::DownloadId id) const;
 
@@ -205,6 +216,7 @@ private:
     std::map<model::GrabberProjectId, Project> projects_;
     std::map<std::int64_t, Fetch> fetches_;                       // by fetch id
     std::map<std::int64_t, core::FetchRequest> waitingForProxy_;  // by fetch id
+    std::set<std::uint64_t> abandonedAdds_;                        // add tokens, see AbandonPendingAdds
     std::int64_t nextFetchId_ = core::kGrabberFetchIdBase;
     std::uint64_t nextToken_ = kTokenBase;
     std::shared_ptr<const core::Snapshot> core_;
