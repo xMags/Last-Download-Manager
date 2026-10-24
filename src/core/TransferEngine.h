@@ -281,6 +281,13 @@ struct FetchRequest {
     std::optional<std::string> proxy;
     std::size_t maxBytes = 0;  // a longer body fails the fetch
     bool refusePrivateAddresses = false;  // as in TransferRequest
+    // Basic, Digest, NTLM or Negotiate credentials, sent to the address's own host only.
+    std::optional<TransferCredentials> credentials;
+    // A HEAD request: the answer has the type and length but no body (the Grabber's size filter).
+    bool headOnly = false;
+    // Media types whose body is wanted ("text/html"); empty for any. Another type ends the fetch
+    // after the headers, as a success with FetchFinished::bodySkipped and no body.
+    std::vector<std::string> bodyTypes;
 };
 
 // The answer to a FetchRequest: exactly one per request.
@@ -289,7 +296,9 @@ struct FetchFinished {
     std::optional<TransferFailure> failure;  // nothing: `body` is the whole 2xx response
     std::string finalUrl;  // after redirects; relative addresses in the body resolve against it
     std::optional<std::string> contentType;
+    std::optional<std::int64_t> contentLength;  // as the server announced it
     std::string body;
+    bool bodySkipped = false;  // FetchRequest::bodyTypes did not name the type
     // The answer came from a loopback or private address, or a host named so: what the media
     // the body lists may point at (MediaRequest::refusePrivateAddresses).
     bool fromPrivateNetwork = false;

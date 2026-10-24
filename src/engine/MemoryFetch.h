@@ -34,12 +34,16 @@ public:
 
 private:
     static size_t OnWrite(char* data, size_t size, size_t count, void* userdata);
+    // Whether the response's type is one of FetchRequest::bodyTypes (or the list is empty).
+    [[nodiscard]] bool WantsBody() const;
 
     CURLM* multi_;
     core::FetchRequest request_;
     CurlEasy easy_;
     std::string body_;
     bool tooLarge_ = false;
+    bool typeChecked_ = false;
+    bool bodySkipped_ = false;
     bool added_ = false;
     std::array<char, CURL_ERROR_SIZE> error_{};
     AddressGuard addressGuard_;
