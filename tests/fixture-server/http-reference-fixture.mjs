@@ -17,6 +17,10 @@
 //   /flaky.bin           first request answers 503
 //   /page.bin            a web page (text/html) where a file is expected
 //   /empty.bin           a zero-length file
+//   /site/...            a small web site for the Site Grabber: pages with relative, absolute,
+//                        cyclic and parent-folder links, a script link, a picture, files of
+//                        several sizes, a file on another host (localhost instead of 127.0.0.1)
+//                        and a file behind Basic auth; /outside.html lies above it
 //   /large.bin           ranges; --large-size bytes (default 2 GiB) of the same pattern, generated
 //                        on the fly, for stress tests
 //   /media/<path>        a file under --media-root, with ranges: generated HLS and DASH fixtures
@@ -76,6 +80,32 @@ function parseDigest(header) {
   }
   return fields;
 }
+
+// The Site Grabber's fixture site: page path -> HTML, with PORT replaced by the server's port.
+const SITE_PAGES = {
+  '/site/': `<!doctype html><title>Fixture site</title>
+<p><a href="a.html">Page A</a> <a href="/site/b/b.html">Page B</a> <a href="../outside.html">Outside</a>
+<a href="./">Again</a> <a href="javascript:void(0)">Script</a></p>
+<p><img src="img/pic.png" alt="Picture"></p>
+<p><a href="files/small.bin">Small file</a> <a href="files/large.bin">Large file</a>
+<a href="http://localhost:PORT/site/files/other.bin">Other host</a> <a href="private/secret.bin">Secret</a></p>`,
+  '/site/a.html': '<!doctype html><a href="deep/c.html">Deep</a><img src="img/pic.png"><a href="files/a.bin">A file</a>',
+  '/site/b/b.html': '<!doctype html><a href="../files/b.bin">B file</a><a href="../a.html">Back to A</a>',
+  '/site/deep/c.html': '<!doctype html><a href="../files/deep.bin">Deep file</a>',
+  '/outside.html': '<!doctype html><a href="/site/files/outside.bin">Outside file</a>',
+};
+// The site's files: path -> [size, content type].
+const SITE_FILES = {
+  '/site/img/pic.png': [200, 'image/png'],
+  '/site/files/small.bin': [100, 'application/octet-stream'],
+  '/site/files/large.bin': [5000, 'application/octet-stream'],
+  '/site/files/other.bin': [100, 'application/octet-stream'],
+  '/site/files/a.bin': [500, 'application/octet-stream'],
+  '/site/files/b.bin': [700, 'application/octet-stream'],
+  '/site/files/deep.bin': [400, 'application/octet-stream'],
+  '/site/files/outside.bin': [100, 'application/octet-stream'],
+  '/site/private/secret.bin': [300, 'application/octet-stream'],
+};
 
 const MEDIA_TYPES = {
   '.m3u8': 'application/vnd.apple.mpegurl', '.mpd': 'application/dash+xml', '.ts': 'video/mp2t',
@@ -309,6 +339,23 @@ export function createReferenceFixture({
       }
       const type = MEDIA_TYPES[extname(file).toLowerCase()] ?? 'application/octet-stream';
       serveBody(request, response, id, readFileSync(file), { contentType: type });
+      return;
+    }
+    if (SITE_PAGES[path] !== undefined) {
+      const port = (request.headers.host ?? '').split(':').pop();
+      finish(200, { 'Content-Type': 'text/html; charset=utf-8' }, SITE_PAGES[path].replaceAll('PORT', port));
+      return;
+    }
+    if (SITE_FILES[path] !== undefined) {
+      if (path.startsWith('/site/private/')) {
+        const expected = `Basic ${Buffer.from(`${USER}:${PASSWORD}`).toString('base64')}`;
+        if (request.headers.authorization !== expected) {
+          finish(401, { 'WWW-Authenticate': `Basic realm="${REALM}"`, 'Content-Type': 'text/plain' }, 'auth required');
+          return;
+        }
+      }
+      const [size, type] = SITE_FILES[path];
+      serveBody(request, response, id, payload(size), { contentType: type });
       return;
     }
     if (path.startsWith('/media-gone/')) {

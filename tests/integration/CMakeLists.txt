@@ -14,6 +14,7 @@ add_executable(ldm_integration_tests
     RecordingListener.h)
 target_link_libraries(ldm_integration_tests PRIVATE
     ldm_engine
+    ldm_grabber
     ldm_platform
     ldm_storage
     nlohmann_json::nlohmann_json

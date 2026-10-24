@@ -6,6 +6,7 @@
 #include "base/Utf.h"
 #include "core/CoreThread.h"
 #include "engine/CurlEngine.h"
+#include "grabber/GrabberExplorer.h"
 #include "platform/win/SystemPorts.h"
 #include "storage/DpapiSecretProtector.h"
 #include "storage/SqliteStore.h"
@@ -110,6 +111,79 @@ private:
     std::vector<ldm::core::Notification> notifications_;
 };
 
+class WaitingGrabberObserver final : public ldm::grabber::GrabberObserver {
+public:
+    void OnGrabberSnapshot(std::shared_ptr<const ldm::grabber::GrabberSnapshot> snapshot) override
+    {
+        {
+            std::lock_guard lock(mutex_);
+            snapshot_ = std::move(snapshot);
+        }
+        changed_.notify_all();
+    }
+    void OnGrabberNotification(ldm::grabber::GrabberNotification notification) override
+    {
+        {
+            std::lock_guard lock(mutex_);
+            notifications_.push_back(std::move(notification));
+        }
+        changed_.notify_all();
+    }
+
+    bool WaitSnapshot(const std::function<bool(const ldm::grabber::GrabberSnapshot&)>& predicate,
+                      std::chrono::milliseconds timeout)
+    {
+        std::unique_lock lock(mutex_);
+        return changed_.wait_for(lock, timeout, [&] { return snapshot_ && predicate(*snapshot_); });
+    }
+
+    std::optional<ldm::grabber::GrabberProjectSaved> WaitSaved(std::uint64_t token, std::chrono::milliseconds timeout = 10s)
+    {
+        std::unique_lock lock(mutex_);
+        std::optional<ldm::grabber::GrabberProjectSaved> found;
+        changed_.wait_for(lock, timeout, [&] {
+            for (const auto& notification : notifications_) {
+                if (const auto* saved = std::get_if<ldm::grabber::GrabberProjectSaved>(&notification);
+                    saved && saved->token == token) {
+                    found = *saved;
+                    return true;
+                }
+            }
+            return false;
+        });
+        return found;
+    }
+
+    // Runs that ended by themselves: explored (true) or downloaded (false).
+    int Finished(bool explored)
+    {
+        std::lock_guard lock(mutex_);
+        return static_cast<int>(std::count_if(notifications_.begin(), notifications_.end(), [explored](const auto& n) {
+            const auto* finished = std::get_if<ldm::grabber::GrabberRunFinished>(&n);
+            return finished && finished->explored == explored;
+        }));
+    }
+
+    bool WaitFinished(bool explored, int count, std::chrono::milliseconds timeout)
+    {
+        const auto deadline = std::chrono::steady_clock::now() + timeout;
+        while (std::chrono::steady_clock::now() < deadline) {
+            if (Finished(explored) >= count) {
+                return true;
+            }
+            std::unique_lock lock(mutex_);
+            changed_.wait_for(lock, 100ms);
+        }
+        return Finished(explored) >= count;
+    }
+
+private:
+    std::mutex mutex_;
+    std::condition_variable changed_;
+    std::shared_ptr<const ldm::grabber::GrabberSnapshot> snapshot_;
+    std::vector<ldm::grabber::GrabberNotification> notifications_;
+};
+
 // Production keeps ldm.exe's flush and checkpoint intervals (2 seconds each); Fast shortens them so
 // tests reach durable progress sooner.
 enum class Timing { Fast, Production };
@@ -129,10 +203,24 @@ public:
             options.flushInterval = 200ms;
         }
         engine_ = std::make_unique<ldm::engine::CurlEngine>(core_, options);
+        // The Site Grabber beside the coordinator, as in ldm.exe; it sees the core's output first.
+        ldm::grabber::ExplorerPorts grabberPorts;
+        grabberPorts.store = store_.get();
+        grabberPorts.engine = engine_.get();
+        grabberPorts.proxy = &proxy_;
+        grabberPorts.downloads = &core_;
+        grabberPorts.fileSystem = &files_;
+        grabberPorts.secrets = &secrets_;
+        grabberPorts.clock = &clock_;
+        grabberPorts.observer = &grabber;
+        ldm::grabber::ExplorerConfig grabberConfig;
+        grabberConfig.snapshotInterval = 50ms;
+        explorer_ = std::make_unique<ldm::grabber::GrabberExplorer>(grabberPorts, grabberConfig);
+        tee_ = std::make_unique<ldm::grabber::CoreOutputTee>(*explorer_, observer);
         ldm::core::CoordinatorPorts ports;
         ports.store = store_.get();
         ports.engine = engine_.get();
-        ports.observer = &observer;
+        ports.observer = tee_.get();
         ports.clock = &clock_;
         ports.fileSystem = &files_;
         ports.secrets = &secrets_;
@@ -145,7 +233,7 @@ public:
             config.checkpointInterval = 300ms;
         }
         coordinator_ = std::make_unique<ldm::core::Coordinator>(ports, config);
-        const auto started = core_.Start(*coordinator_);
+        const auto started = core_.Start(*coordinator_, explorer_.get());
         if (!started) {
             throw std::runtime_error(started.GetError().message);
         }
@@ -162,10 +250,13 @@ public:
         core_.Shutdown(timeout);  // the order of design section 3: core first, then the engine
         engine_.reset();
         coordinator_.reset();
+        tee_.reset();
+        explorer_.reset();
         store_.reset();
     }
 
     void Post(ldm::core::Command command) { core_.Post(std::move(command)); }
+    void Post(ldm::core::GrabberCommand command) { core_.Post(std::move(command)); }
 
     std::uint64_t Add(const std::string& url, ldm::core::AddMode mode = ldm::core::AddMode::StartNow)
     {
@@ -179,6 +270,7 @@ public:
     }
 
     WaitingObserver observer;
+    WaitingGrabberObserver grabber;
 
 private:
     ldm::core::CoreThread core_;  // first: the engine reports into it until it is destroyed
@@ -191,6 +283,8 @@ private:
     std::unique_ptr<ldm::storage::SqliteStore> store_;
     std::unique_ptr<ldm::engine::CurlEngine> engine_;
     std::unique_ptr<ldm::core::Coordinator> coordinator_;
+    std::unique_ptr<ldm::grabber::GrabberExplorer> explorer_;
+    std::unique_ptr<ldm::grabber::CoreOutputTee> tee_;
     std::uint64_t token_ = 0;
     bool stopped_ = false;
 };
@@ -687,6 +781,126 @@ TEST_F(CoreTest, AQueueRunsAtMostItsConcurrencyAtOnce)
 
 // M4 design section 5: the synchronization queue replaces a file that changed on the server and
 // leaves an unchanged one alone.
+// M4 design section 8: a crawl of the fixture site finds the expected items, downloads the checked
+// ones into the right folders and rewrites the saved start page's links.
+TEST_F(CoreTest, TheGrabberExploresASiteAndSavesItForOfflineBrowsing)
+{
+    auto stack = Launch();
+    const std::string start = server_->Url("/site/");
+    const auto startUrl = ldm::core::ParseUrl(start);
+    ASSERT_TRUE(startUrl);
+    const std::string port = std::to_string(*startUrl->port);
+
+    ldm::core::GrabberSaveProjectCommand save;
+    save.token = 1;
+    save.project.name = "Fixture site";
+    save.project.loginUser = "ldm";
+    save.loginPassword = "secret";
+    ldm::model::GrabberProjectDefinition& d = save.project.definition;
+    d.startPage = start;
+    d.saveMode = ldm::model::GrabberSaveMode::OneFolder;
+    d.folder = ldm::base::ToUtf8((root_ / "grab").wstring());
+    d.keepSiteFolders = true;
+    d.savePages = true;
+    d.convertLinks = true;
+    d.explore.baseSiteDepth = 1;
+    d.explore.otherSitesDepth = 0;
+    d.explore.noParentDirectories = true;
+    d.files.minBytes = 50;
+    d.files.maxBytes = 2000;
+    d.exploreConcurrency = 2;
+    d.downloadConcurrency = 2;
+    stack->Post(std::move(save));
+    const auto saved = stack->grabber.WaitSaved(1);
+    ASSERT_TRUE(saved && saved->id) << (saved && saved->error ? *saved->error : "no answer");
+    const ldm::model::GrabberProjectId project = *saved->id;
+
+    stack->Post(ldm::core::GrabberOpenCommand{project, true});
+    stack->Post(ldm::core::GrabberExploreCommand{project, false, {}, false});
+    ASSERT_TRUE(stack->grabber.WaitFinished(true, 1, 60s)) << "exploring did not end";
+
+    std::vector<ldm::model::GrabberItem> items;
+    ASSERT_TRUE(stack->grabber.WaitSnapshot(
+        [&](const ldm::grabber::GrabberSnapshot& snapshot) {
+            for (const auto& view : snapshot.projects) {
+                if (view.project.id == project && !view.exploring && !view.items.empty()) {
+                    items.clear();
+                    for (const auto& item : view.items) {
+                        items.push_back(*item);
+                    }
+                    return true;
+                }
+            }
+            return false;
+        },
+        10s));
+    const auto find = [&items](const std::string& path) -> const ldm::model::GrabberItem* {
+        for (const auto& item : items) {
+            if (item.url.ends_with(path)) {
+                return &item;
+            }
+        }
+        return nullptr;
+    };
+    using ldm::model::GrabberItemKind;
+    using ldm::model::GrabberItemState;
+    ASSERT_TRUE(find("/site/") && find("/site/a.html") && find("/site/b/b.html"));
+    EXPECT_EQ(find("/site/a.html")->state, GrabberItemState::Done);
+    EXPECT_EQ(find("/site/a.html")->linkText, "Page A");
+    ASSERT_TRUE(find("/site/deep/c.html"));
+    EXPECT_EQ(find("/site/deep/c.html")->state, GrabberItemState::Found) << "two levels away: listed, not read";
+    ASSERT_TRUE(find("/outside.html"));
+    EXPECT_EQ(find("/outside.html")->state, GrabberItemState::Found) << "above the start folder: not read";
+    EXPECT_FALSE(find("/site/files/deep.bin"));
+    EXPECT_FALSE(find("/site/files/outside.bin"));
+    EXPECT_TRUE(std::none_of(items.begin(), items.end(), [](const auto& item) { return item.url.starts_with("javascript"); }));
+    for (const char* path : {"/site/img/pic.png", "/site/files/small.bin", "/site/files/a.bin", "/site/files/b.bin",
+                             "/site/files/other.bin", "/site/private/secret.bin"}) {
+        const auto* item = find(path);
+        ASSERT_TRUE(item) << path;
+        EXPECT_EQ(item->kind, GrabberItemKind::File) << path;
+        EXPECT_TRUE(item->checked) << path << " passes the size filter, its size asked with a HEAD request";
+    }
+    ASSERT_TRUE(find("/site/files/large.bin"));
+    EXPECT_EQ(find("/site/files/large.bin")->state, GrabberItemState::Filtered);
+    EXPECT_EQ(std::count_if(items.begin(), items.end(), [](const auto& item) { return item.url.ends_with("/site/img/pic.png"); }), 1);
+
+    stack->Post(ldm::core::GrabberDownloadCommand{project});
+    ASSERT_TRUE(stack->grabber.WaitFinished(false, 1, 120s)) << "downloading did not end";
+
+    const fs::path site = root_ / "grab" / ("127.0.0.1_" + port) / "site";
+    const std::map<fs::path, std::int64_t> expected{
+        {site / "img" / "pic.png", 200},   {site / "files" / "small.bin", 100}, {site / "files" / "a.bin", 500},
+        {site / "files" / "b.bin", 700},    {site / "private" / "secret.bin", 300},
+        {root_ / "grab" / ("localhost_" + port) / "site" / "files" / "other.bin", 100},
+    };
+    for (const auto& [path, size] : expected) {
+        std::error_code error;
+        EXPECT_EQ(static_cast<std::int64_t>(fs::file_size(path, error)), size) << path.string();
+    }
+    EXPECT_FALSE(fs::exists(site / "files" / "large.bin"));
+
+    std::ifstream page(site / "index.html", std::ios::binary);
+    ASSERT_TRUE(page) << "the start page was saved";
+    const std::string html((std::istreambuf_iterator<char>(page)), {});
+    for (const std::string link : {std::string("href=\"a.html\""), std::string("href=\"b/b.html\""),
+                                   std::string("href=\"index.html\""), std::string("src=\"img/pic.png\""),
+                                   std::string("href=\"files/small.bin\""),
+                                   "href=\"../../localhost_" + port + "/site/files/other.bin\"",
+                                   "href=\"http://127.0.0.1:" + port + "/outside.html\"",
+                                   "href=\"http://127.0.0.1:" + port + "/site/files/large.bin\""}) {
+        EXPECT_NE(html.find(link), std::string::npos) << link << " in\n" << html;
+    }
+    EXPECT_TRUE(fs::exists(site / "a.html"));
+    EXPECT_TRUE(fs::exists(site / "b" / "b.html"));
+
+    // None of it shows in the main list until it is added there.
+    const auto core = stack->observer.Latest();
+    ASSERT_TRUE(core);
+    EXPECT_TRUE(std::none_of(core->downloads.begin(), core->downloads.end(),
+                             [](const auto& view) { return view->download.InMainList(); }));
+}
+
 TEST_F(CoreTest, TheSynchronizationQueueReplacesOnlyAChangedFile)
 {
     auto stack = Launch();
