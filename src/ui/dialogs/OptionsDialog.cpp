@@ -129,6 +129,24 @@ void SetRow(HWND list, int row, const std::wstring& first, const std::wstring& s
     ListView_SetItemText(list, row, 1, const_cast<wchar_t*>(second.c_str()));
 }
 
+// The file field of a Sounds row, from its browse or play button.
+int SoundFileField(int button)
+{
+    switch (button) {
+    case IDC_OPT_SOUND_FAIL_BROWSE:
+    case IDC_OPT_SOUND_FAIL_PLAY:
+        return IDC_OPT_SOUND_FAIL_FILE;
+    case IDC_OPT_SOUND_QSTART_BROWSE:
+    case IDC_OPT_SOUND_QSTART_PLAY:
+        return IDC_OPT_SOUND_QSTART_FILE;
+    case IDC_OPT_SOUND_QSTOP_BROWSE:
+    case IDC_OPT_SOUND_QSTOP_PLAY:
+        return IDC_OPT_SOUND_QSTOP_FILE;
+    default:
+        return IDC_OPT_SOUND_DONE_FILE;
+    }
+}
+
 }  // namespace
 
 OptionsDialog::OptionsDialog(const Theme& theme, Input input, core::SecretProtector& secrets, SystemActions& system)
@@ -426,6 +444,10 @@ void OptionsDialog::Load()
     Put(IDC_OPT_SOUND_DONE_FILE, base::ToUtf16(s.soundComplete.file));
     Check(IDC_OPT_SOUND_FAIL_ON, s.soundFailed.enabled);
     Put(IDC_OPT_SOUND_FAIL_FILE, base::ToUtf16(s.soundFailed.file));
+    Check(IDC_OPT_SOUND_QSTART_ON, s.soundQueueStarted.enabled);
+    Put(IDC_OPT_SOUND_QSTART_FILE, base::ToUtf16(s.soundQueueStarted.file));
+    Check(IDC_OPT_SOUND_QSTOP_ON, s.soundQueueStopped.enabled);
+    Put(IDC_OPT_SOUND_QSTOP_FILE, base::ToUtf16(s.soundQueueStopped.file));
 }
 
 void OptionsDialog::LoadCategory(int index)
@@ -702,13 +724,17 @@ void OptionsDialog::OnPageCommand(int id, int code)
     }
     case IDC_OPT_SOUND_DONE_BROWSE:
     case IDC_OPT_SOUND_FAIL_BROWSE:
+    case IDC_OPT_SOUND_QSTART_BROWSE:
+    case IDC_OPT_SOUND_QSTOP_BROWSE:
         if (auto file = PickOpenFile(Handle(), L"Sounds", L"*.wav")) {
-            Put(id == IDC_OPT_SOUND_DONE_BROWSE ? IDC_OPT_SOUND_DONE_FILE : IDC_OPT_SOUND_FAIL_FILE, *file);
+            Put(SoundFileField(id), *file);
         }
         break;
     case IDC_OPT_SOUND_DONE_PLAY:
-    case IDC_OPT_SOUND_FAIL_PLAY: {
-        const std::wstring file = Get(id == IDC_OPT_SOUND_DONE_PLAY ? IDC_OPT_SOUND_DONE_FILE : IDC_OPT_SOUND_FAIL_FILE);
+    case IDC_OPT_SOUND_FAIL_PLAY:
+    case IDC_OPT_SOUND_QSTART_PLAY:
+    case IDC_OPT_SOUND_QSTOP_PLAY: {
+        const std::wstring file = Get(SoundFileField(id));
         if (!file.empty()) {
             system_.PlaySoundFile(std::filesystem::path(file));
         }
@@ -860,6 +886,8 @@ bool OptionsDialog::Store()
 
     s.soundComplete = model::SoundEvent{IsChecked(IDC_OPT_SOUND_DONE_ON), base::ToUtf8(Get(IDC_OPT_SOUND_DONE_FILE))};
     s.soundFailed = model::SoundEvent{IsChecked(IDC_OPT_SOUND_FAIL_ON), base::ToUtf8(Get(IDC_OPT_SOUND_FAIL_FILE))};
+    s.soundQueueStarted = model::SoundEvent{IsChecked(IDC_OPT_SOUND_QSTART_ON), base::ToUtf8(Get(IDC_OPT_SOUND_QSTART_FILE))};
+    s.soundQueueStopped = model::SoundEvent{IsChecked(IDC_OPT_SOUND_QSTOP_ON), base::ToUtf8(Get(IDC_OPT_SOUND_QSTOP_FILE))};
 
     Output output;
     output.settings = std::move(s);
@@ -923,6 +951,8 @@ void OptionsDialog::ApplyEditedFields(const model::Settings& edited, model::Sett
     current.ftpPassive = edited.ftpPassive;
     current.soundComplete = edited.soundComplete;
     current.soundFailed = edited.soundFailed;
+    current.soundQueueStarted = edited.soundQueueStarted;
+    current.soundQueueStopped = edited.soundQueueStopped;
 }
 
 bool OptionsDialog::OnCommand(int id, int code, HWND control)

@@ -46,12 +46,14 @@ bool WinSystemActions::StartProgram(const std::filesystem::path& program, const 
     return true;
 }
 
-bool WinSystemActions::ShutDown()
+bool WinSystemActions::ShutDown(bool forceTerminate)
 {
     if (!EnableShutdownPrivilege()) {
         return false;
     }
-    return ::InitiateShutdownW(nullptr, nullptr, 0, SHUTDOWN_POWEROFF | SHUTDOWN_FORCE_OTHERS,
+    // SHUTDOWN_FORCE_SELF ends this session's programs instead of asking them first.
+    const DWORD flags = SHUTDOWN_POWEROFF | SHUTDOWN_FORCE_OTHERS | (forceTerminate ? SHUTDOWN_FORCE_SELF : 0);
+    return ::InitiateShutdownW(nullptr, nullptr, 0, flags,
                                SHTDN_REASON_MAJOR_APPLICATION | SHTDN_REASON_FLAG_PLANNED) == ERROR_SUCCESS;
 }
 
