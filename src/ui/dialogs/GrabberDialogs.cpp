@@ -204,13 +204,15 @@ bool GrabberProjectsDialog::OnCommand(int id, int code, HWND control)
         return true;
     case IDC_GP_DELETE:
         if (const grabber::GrabberProjectView* view = Selected()) {
+            // Copied: a newer snapshot replaces `view` while the question is open.
+            const model::GrabberProjectId project = view->project.id;
             const std::wstring question =
                 L"Delete \"" + base::ToUtf16(view->project.name) +
                 L"\"? Its list of pages and files goes too, and its downloads that are not in the main list leave "
                 L"the list. Files already on disk stay.";
             if (ShowMessage(Handle(), CurrentTheme(), MessageRequest{question, MessageKind::Question, MessageButtons::YesNo}) ==
                 IDYES) {
-                callbacks_.remove(view->project.id);
+                callbacks_.remove(project);
             }
         }
         return true;

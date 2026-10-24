@@ -175,7 +175,9 @@ void GrabberController::SaveAsTemplate(model::GrabberProjectId id)
     if (view == nullptr) {
         return;
     }
-    GrabberNameDialog dialog(*context_.theme, L"Save as template", base::ToUtf16(view->project.name) + L" template",
+    // Copied: a newer snapshot replaces `view` while the dialog is open.
+    const model::GrabberProject source = view->project;
+    GrabberNameDialog dialog(*context_.theme, L"Save as template", base::ToUtf16(source.name) + L" template",
                              GrabberNames(snapshot_.get(), std::nullopt));
     const auto name = dialog.Run(DialogOwner());
     if (!name) {
@@ -185,8 +187,8 @@ void GrabberController::SaveAsTemplate(model::GrabberProjectId id)
     save.token = nextToken_++;
     save.project.name = *name;
     save.project.isTemplate = true;
-    save.project.definition = view->project.definition;
-    save.project.loginUser = view->project.loginUser;
+    save.project.definition = source.definition;
+    save.project.loginUser = source.loginUser;
     pendingSaves_.emplace(save.token, AfterSave::Nothing);
     Post(std::move(save));
 }
