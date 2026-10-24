@@ -8,6 +8,8 @@
 #include "ui/CategoryPane.h"
 #include "ui/DownloadListView.h"
 #include "ui/DropTargetWindow.h"
+#include "ui/GrabberBridge.h"
+#include "ui/GrabberController.h"
 #include "ui/Handles.h"
 #include "ui/LinkDropTarget.h"
 #include "ui/MainController.h"
@@ -52,6 +54,9 @@ public:
         BrowserWindows* browserWindows = nullptr;
         std::function<base::Result<media::XmlElement>(std::string_view)> readXml;
         bool elevated = false;  // LDM runs as administrator, which browsers cannot reach (checklist B-10)
+        // The Site Grabber; without both, Tasks > Run site grabber does nothing.
+        core::GrabberSink* grabber = nullptr;
+        GrabberBridge* grabberBridge = nullptr;
     };
 
     explicit MainWindow(const Services& services);
@@ -136,6 +141,7 @@ private:
     std::unique_ptr<MainController> controller_;
     std::unique_ptr<BrowserSessions> browserSessions_;
     std::unique_ptr<MediaPanelController> mediaPanel_;  // uses browserSessions_; declared after it
+    std::unique_ptr<GrabberController> grabber_;  // uses browserSessions_; declared after it
 
     UniqueFont uiFont_;
     UniqueFont listFont_;

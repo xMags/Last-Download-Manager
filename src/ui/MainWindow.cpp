@@ -11,6 +11,7 @@
 #include <windowsx.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
 
 namespace ldm::ui {
@@ -30,6 +31,9 @@ constexpr UINT kExternalInputMessage = WM_APP + 11;
 constexpr UINT kBrowserEventMessage = WM_APP + 12;
 constexpr UINT_PTR kExternalInputRetryTimer = 1;
 constexpr UINT kExternalInputRetryMs = 500;
+// A browser that does not hand over its cookies for the Site Grabber within this is given up on.
+constexpr UINT_PTR kCookiesTimer = 2;
+constexpr std::chrono::seconds kCookiesWait{10};
 
 std::wstring WindowTitle()
 {
@@ -169,6 +173,9 @@ bool MainWindow::PreTranslate(MSG& message)
     if (controller_ && controller_->PreTranslate(message)) {
         return true;
     }
+    if (grabber_ && grabber_->PreTranslate(message)) {
+        return true;
+    }
     if (window_ != nullptr && accelerators_ != nullptr && (message.hwnd == window_ || ::IsChild(window_, message.hwnd))) {
         return ::TranslateAcceleratorW(window_, accelerators_, &message) != 0;
     }
@@ -239,6 +246,24 @@ void MainWindow::OnCreate()
     if (browserSessions_ && services_.browserWindows != nullptr && services_.readXml) {
         CreateMediaPanel();
     }
+    if (services_.grabber != nullptr && services_.grabberBridge != nullptr) {
+        GrabberController::Context grabber;
+        grabber.owner = window_;
+        grabber.grabber = services_.grabber;
+        grabber.shell = services_.shell;
+        grabber.theme = theme_.get();
+        grabber.snapshot = [this] { return snapshot_; };
+        grabber.requestCookies = [this](const std::string& url, GrabberController::CookiesAnswer answer) {
+            if (!browserSessions_ ||
+                !browserSessions_->RequestCookies(url, std::move(answer), std::chrono::steady_clock::now() + kCookiesWait)) {
+                return false;
+            }
+            ::SetTimer(window_, kCookiesTimer,
+                       static_cast<UINT>(std::chrono::milliseconds(kCookiesWait).count()) + 100, nullptr);
+            return true;
+        };
+        grabber_ = std::make_unique<GrabberController>(std::move(grabber));
+    }
 
     list_.SetColumns(ParseColumns(settings.columnLayout));
     list_.SetSort(ParseSort(settings.listSortKey));
@@ -248,6 +273,9 @@ void MainWindow::OnCreate()
     tray_.Attach(window_);
     ApplySnapshot(snapshot_);
     services_.bridge->Attach(window_);
+    if (grabber_) {
+        services_.grabberBridge->Attach(window_);
+    }
     ::AddClipboardFormatListener(window_);
     // Links dropped anywhere on the main window are added like drops on the drop target.
     (void)linkDrop_.Register(window_, LinkDropTarget::Callbacks{
@@ -568,6 +596,9 @@ void MainWindow::ApplySnapshot(std::shared_ptr<const core::Snapshot> snapshot)
     list_.SetSnapshot(snapshot_);
     ApplyViewSettings(snapshot_->settings, false);
     controller_->OnSnapshot(*snapshot_);
+    if (grabber_) {
+        grabber_->OnCoreSnapshot(*snapshot_);
+    }
     if (browserSessions_) {
         browserSessions_->OnSettingsChanged(snapshot_->settings);
     }
@@ -694,6 +725,12 @@ LRESULT MainWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         if (control != nullptr && categories_.OwnsControl(control) && categories_.HandleCommand(control)) {
             return 0;
         }
+        if (LOWORD(wParam) == ID_TASKS_GRABBER) {
+            if (grabber_) {
+                grabber_->OpenChooser();
+            }
+            return 0;
+        }
         if (controller_ && controller_->OnCommand(LOWORD(wParam))) {
             return 0;
         }
@@ -787,6 +824,13 @@ LRESULT MainWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
             DrainExternalInput();
             return 0;
         }
+        if (wParam == kCookiesTimer) {
+            ::KillTimer(window_, kCookiesTimer);
+            if (browserSessions_) {
+                browserSessions_->ExpireCookieRequests(std::chrono::steady_clock::now());
+            }
+            return 0;
+        }
         break;
     case WM_CLIPBOARDUPDATE:
         if (controller_) {
@@ -808,6 +852,16 @@ LRESULT MainWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         controller_->OnNotifications(std::move(notifications));
         return 0;
     }
+    case kGrabberSnapshotMessage:
+        if (grabber_) {
+            grabber_->OnSnapshot(services_.grabberBridge->TakeSnapshot());
+        }
+        return 0;
+    case kGrabberNotificationMessage:
+        if (grabber_) {
+            grabber_->OnNotifications(services_.grabberBridge->TakeNotifications());
+        }
+        return 0;
     case kTrayMessage:
         OnTrayEvent(LOWORD(lParam), POINT{GET_X_LPARAM(wParam), GET_Y_LPARAM(wParam)});
         return 0;
@@ -844,6 +898,11 @@ LRESULT MainWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         linkDrop_.Revoke();
         dropTarget_.Destroy();
         services_.bridge->Attach(nullptr);
+        ::KillTimer(window_, kCookiesTimer);
+        if (grabber_) {
+            services_.grabberBridge->Attach(nullptr);
+            grabber_->CloseAll();
+        }
         ::PostQuitMessage(0);
         return 0;
     default:

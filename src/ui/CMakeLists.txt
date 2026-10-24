@@ -37,6 +37,14 @@ add_library(ldm_ui STATIC
     Format.h
     GlyphIcons.cpp
     GlyphIcons.h
+    GrabberBridge.cpp
+    GrabberBridge.h
+    GrabberController.cpp
+    GrabberController.h
+    GrabberFields.cpp
+    GrabberFields.h
+    GrabberView.cpp
+    GrabberView.h
     Handles.h
     History.cpp
     History.h
@@ -108,6 +116,12 @@ add_library(ldm_ui STATIC
     dialogs/ConfirmDialogs.h
     dialogs/DownloadInfoDialog.cpp
     dialogs/DownloadInfoDialog.h
+    dialogs/GrabberDialogs.cpp
+    dialogs/GrabberDialogs.h
+    dialogs/GrabberWindow.cpp
+    dialogs/GrabberWindow.h
+    dialogs/GrabberWizard.cpp
+    dialogs/GrabberWizard.h
     dialogs/ListDialogs.cpp
     dialogs/ListDialogs.h
     dialogs/MessageDialog.cpp
@@ -125,7 +139,7 @@ add_library(ldm_ui STATIC
     dialogs/SchedulerWindow.cpp
     dialogs/SchedulerWindow.h)
 target_link_libraries(ldm_ui
-    PUBLIC ldm_browser ldm_core ldm_media
+    PUBLIC ldm_browser ldm_core ldm_grabber ldm_media
     PRIVATE nlohmann_json::nlohmann_json comctl32 uxtheme dwmapi shell32 comdlg32 ole32 shcore)
 target_include_directories(ldm_ui PRIVATE ${PROJECT_SOURCE_DIR}/src/resources)
 target_compile_definitions(ldm_ui PRIVATE "LDM_VERSION_WIDE=L\"${PROJECT_VERSION}\"")

@@ -40,6 +40,7 @@ add_executable(ldm_unit_tests
     ui/BrowserSessionsTests.cpp
     ui/CaptureFollowUpTests.cpp
     ui/ExportAndLaunchTests.cpp
+    ui/GrabberViewTests.cpp
     ui/ListModelTests.cpp
     ui/MediaCatalogTests.cpp
     ui/MediaPanelMenuTests.cpp

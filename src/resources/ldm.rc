@@ -62,6 +62,8 @@ BEGIN
         MENUITEM SEPARATOR
         MENUITEM "Show &drop target", ID_TASKS_DROP_TARGET
         MENUITEM SEPARATOR
+        MENUITEM "Run &site grabber...", ID_TASKS_GRABBER
+        MENUITEM SEPARATOR
         POPUP "E&xport"
         BEGIN
             MENUITEM "To LDM export &file...", ID_TASKS_EXPORT_LDM
@@ -919,6 +921,135 @@ BEGIN
     PUSHBUTTON "S&top", IDC_SCHED_STOP, 188, 242, 60, 14, WS_TABSTOP
     PUSHBUTTON "&Apply", IDC_SCHED_APPLY, 309, 242, 60, 14, WS_TABSTOP
     PUSHBUTTON "Close", IDCANCEL, 373, 242, 60, 14, WS_TABSTOP
+END
+
+// Site Grabber (M4 design section 6.5).
+IDD_GRABBER_PROJECTS DIALOGEX 0, 0, 380, 200
+STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Site Grabber"
+FONT 9, "Segoe UI", 400, 0, 0x1
+BEGIN
+    LTEXT "&Projects and templates:", -1, 7, 7, 200, 8
+    CONTROL "", IDC_GP_LIST, "SysListView32", LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS | WS_BORDER | WS_TABSTOP, 7, 18, 286, 175
+    PUSHBUTTON "&New project...", IDC_GP_NEW, 299, 18, 74, 14, WS_TABSTOP
+    PUSHBUTTON "New from &template...", IDC_GP_FROM_TEMPLATE, 299, 36, 74, 14, WS_TABSTOP
+    DEFPUSHBUTTON "&Open", IDC_GP_OPEN, 299, 60, 74, 14, WS_TABSTOP
+    PUSHBUTTON "&Settings...", IDC_GP_EDIT, 299, 78, 74, 14, WS_TABSTOP
+    PUSHBUTTON "&Rename...", IDC_GP_RENAME, 299, 96, 74, 14, WS_TABSTOP
+    PUSHBUTTON "&Delete", IDC_GP_DELETE, 299, 114, 74, 14, WS_TABSTOP
+    PUSHBUTTON "Close", IDCANCEL, 299, 179, 74, 14, WS_TABSTOP
+END
+
+IDD_GRABBER_NAME DIALOGEX 0, 0, 230, 50
+STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Name"
+FONT 9, "Segoe UI", 400, 0, 0x1
+BEGIN
+    LTEXT "&Name:", IDC_GN_LABEL, 7, 9, 50, 8
+    EDITTEXT IDC_GN_NAME, 60, 7, 163, 13, ES_AUTOHSCROLL | WS_TABSTOP
+    DEFPUSHBUTTON "OK", IDOK, 119, 29, 50, 14
+    PUSHBUTTON "Cancel", IDCANCEL, 173, 29, 50, 14
+END
+
+IDD_GRABBER_WIZARD DIALOGEX 0, 0, 330, 242
+STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Site Grabber project"
+FONT 9, "Segoe UI", 400, 0, 0x1
+BEGIN
+    LTEXT "", IDC_GW_TITLE, 10, 8, 310, 10
+    // Page 1: the project
+    LTEXT "Project &name:", 1720, 10, 28, 82, 8
+    EDITTEXT IDC_GW_NAME, 95, 26, 225, 13, ES_AUTOHSCROLL | WS_TABSTOP
+    LTEXT "&Start page:", 1722, 10, 46, 82, 8
+    EDITTEXT IDC_GW_START, 95, 44, 225, 13, ES_AUTOHSCROLL | WS_TABSTOP
+    LTEXT "&What to grab:", 1724, 10, 64, 82, 8
+    COMBOBOX IDC_GW_TEMPLATE, 95, 62, 225, 120, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT "", IDC_GW_TEMPLATE_NOTE, 95, 80, 225, 24
+    GROUPBOX "Sign-in", 1727, 10, 108, 310, 92
+    LTEXT "&User name:", 1728, 20, 124, 72, 8
+    EDITTEXT IDC_GW_USER, 95, 122, 140, 13, ES_AUTOHSCROLL | WS_TABSTOP
+    LTEXT "&Password:", 1730, 20, 142, 72, 8
+    EDITTEXT IDC_GW_PASSWORD, 95, 140, 140, 13, ES_AUTOHSCROLL | ES_PASSWORD | WS_TABSTOP
+    AUTOCHECKBOX "Use the &cookies of a connected browser for this site", IDC_GW_COOKIES, 20, 160, 290, 10, WS_TABSTOP
+    LTEXT "LDM asks your browser for the cookies it sends to the start page, so a site you signed in to there lets LDM in too.", IDC_GW_COOKIES_NOTE, 32, 174, 280, 18
+    // Page 2: where to save
+    LTEXT "Save the files:", 1740, 10, 28, 300, 8
+    AUTORADIOBUTTON "In the folder of each file's &category", IDC_GW_SAVE_CATEGORY, 20, 42, 290, 10, WS_GROUP | WS_TABSTOP
+    AUTORADIOBUTTON "All in one c&ategory:", IDC_GW_SAVE_ONE_CATEGORY, 20, 58, 100, 10
+    COMBOBOX IDC_GW_CATEGORY, 125, 56, 140, 120, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    AUTORADIOBUTTON "All in one &folder:", IDC_GW_SAVE_FOLDER, 20, 76, 100, 10
+    EDITTEXT IDC_GW_FOLDER, 125, 74, 172, 13, ES_AUTOHSCROLL | WS_TABSTOP
+    PUSHBUTTON "...", IDC_GW_FOLDER_BROWSE, 300, 74, 20, 13, WS_TABSTOP
+    AUTOCHECKBOX "&Keep the site's folders below it", IDC_GW_KEEP_FOLDERS, 20, 98, 290, 10, WS_GROUP | WS_TABSTOP
+    AUTOCHECKBOX "Save the &pages too, linked to the saved files for offline browsing", IDC_GW_SAVE_PAGES, 20, 114, 290, 10, WS_TABSTOP
+    AUTOCHECKBOX "&Replace files that already exist", IDC_GW_OVERWRITE, 20, 130, 290, 10, WS_TABSTOP
+    AUTOCHECKBOX "Add the checked files to the &main list when the Grabber window closes", IDC_GW_ADD_ON_CLOSE, 20, 146, 290, 10, WS_TABSTOP
+    LTEXT "Saved pages need one folder for their links: in category folders, the pages and files go to the General category's folder.", IDC_GW_SAVE_NOTE, 20, 166, 290, 18
+    // Page 3: which pages to explore
+    LTEXT "Pages to explore on the start page's site:", 1760, 10, 28, 300, 8
+    AUTORADIOBUTTON "The &whole site", IDC_GW_WHOLE_SITE, 20, 42, 120, 10, WS_GROUP | WS_TABSTOP
+    AUTORADIOBUTTON "&Links up to", IDC_GW_LEVELS, 20, 58, 58, 10
+    EDITTEXT IDC_GW_LEVELS_COUNT, 80, 56, 24, 13, ES_NUMBER | WS_TABSTOP
+    LTEXT "levels away from the start page", 1764, 108, 58, 200, 8
+    LTEXT "Follow links into &other sites for", 1765, 10, 80, 118, 8
+    EDITTEXT IDC_GW_OTHER_LEVELS, 132, 78, 24, 13, ES_NUMBER | WS_TABSTOP
+    LTEXT "levels (0: not at all)", 1767, 160, 80, 150, 8
+    AUTOCHECKBOX "Stay below the start page's fol&der", IDC_GW_NO_PARENT, 10, 98, 300, 10, WS_TABSTOP
+    AUTOCHECKBOX "Treat every site in the start page's &domain as the same site", IDC_GW_MAIN_DOMAIN, 10, 114, 300, 10, WS_TABSTOP
+    LTEXT "E&xplore only these paths:", 1770, 10, 134, 112, 8
+    EDITTEXT IDC_GW_EXPLORE_INCLUDE, 125, 132, 195, 13, ES_AUTOHSCROLL | WS_TABSTOP
+    LTEXT "&Never explore these paths:", 1772, 10, 152, 112, 8
+    EDITTEXT IDC_GW_EXPLORE_EXCLUDE, 125, 150, 195, 13, ES_AUTOHSCROLL | WS_TABSTOP
+    LTEXT "Masks such as /docs/ or */private/*, separated by spaces.", 1774, 125, 166, 195, 8
+    LTEXT "Pages read at the &same time:", 1775, 10, 184, 112, 8
+    EDITTEXT IDC_GW_EXPLORE_CONCURRENCY, 125, 182, 24, 13, ES_NUMBER | WS_TABSTOP
+    LTEXT "(1 to 10)", 1777, 153, 184, 60, 8
+    // Page 4: which files to list
+    LTEXT "&File types to list:", 1780, 10, 28, 112, 8
+    EDITTEXT IDC_GW_TYPES_INCLUDE, 125, 26, 195, 13, ES_AUTOHSCROLL | WS_TABSTOP
+    LTEXT "File types to &leave out:", 1782, 10, 46, 112, 8
+    EDITTEXT IDC_GW_TYPES_EXCLUDE, 125, 44, 195, 13, ES_AUTOHSCROLL | WS_TABSTOP
+    LTEXT "Masks such as *.jpg *.png; nothing lists every type.", 1784, 125, 60, 195, 8
+    LTEXT "Si&ze at least:", 1785, 10, 76, 112, 8
+    EDITTEXT IDC_GW_MIN_KB, 125, 74, 50, 13, ES_NUMBER | WS_TABSTOP
+    LTEXT "KB, at &most", 1787, 179, 76, 44, 8
+    EDITTEXT IDC_GW_MAX_KB, 225, 74, 50, 13, ES_NUMBER | WS_TABSTOP
+    LTEXT "KB", 1789, 279, 76, 20, 8
+    LTEXT "Only files in these pat&hs:", 1790, 10, 94, 112, 8
+    EDITTEXT IDC_GW_FILES_INCLUDE, 125, 92, 195, 13, ES_AUTOHSCROLL | WS_TABSTOP
+    LTEXT "Leave out files in these p&aths:", 1792, 10, 112, 112, 8
+    EDITTEXT IDC_GW_FILES_EXCLUDE, 125, 110, 195, 13, ES_AUTOHSCROLL | WS_TABSTOP
+    AUTOCHECKBOX "Only files on the start page's s&ite", IDC_GW_THIS_SITE, 10, 130, 300, 10, WS_TABSTOP
+    AUTOCHECKBOX "List each address only &once", IDC_GW_DUPLICATES, 10, 144, 300, 10, WS_TABSTOP
+    AUTOCHECKBOX "Download the matching files &while exploring", IDC_GW_IMMEDIATELY, 10, 158, 300, 10, WS_TABSTOP
+    AUTOCHECKBOX "Use the link &text as the description", IDC_GW_LINK_TEXT, 10, 172, 300, 10, WS_TABSTOP
+    LTEXT "Downloads at the same tim&e:", 1798, 10, 190, 112, 8
+    EDITTEXT IDC_GW_DOWNLOAD_CONCURRENCY, 125, 188, 24, 13, ES_NUMBER | WS_TABSTOP
+    LTEXT "(1 to 10)", IDC_GW_P4_LAST, 153, 190, 60, 8
+    PUSHBUTTON "< &Back", IDC_GW_BACK, 120, 220, 50, 14, WS_TABSTOP
+    PUSHBUTTON "N&ext >", IDC_GW_NEXT, 172, 220, 50, 14, WS_TABSTOP
+    DEFPUSHBUTTON "&Finish", IDC_GW_FINISH, 224, 220, 50, 14, WS_TABSTOP
+    PUSHBUTTON "Cancel", IDCANCEL, 276, 220, 50, 14, WS_TABSTOP
+END
+
+// Laid out at run time (GrabberWindow.cpp); the positions here are only the first ones.
+IDD_GRABBER DIALOGEX 0, 0, 520, 300
+STYLE DS_SETFONT | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX
+CAPTION "Site Grabber"
+FONT 9, "Segoe UI", 400, 0, 0x1
+BEGIN
+    PUSHBUTTON "&Explore", IDC_GG_EXPLORE, 7, 7, 46, 14, WS_TABSTOP
+    PUSHBUTTON "&Update all", IDC_GG_UPDATE, 55, 7, 46, 14, WS_TABSTOP
+    PUSHBUTTON "&Stop", IDC_GG_STOP, 103, 7, 40, 14, WS_TABSTOP
+    PUSHBUTTON "&Download checked", IDC_GG_DOWNLOAD, 149, 7, 70, 14, WS_TABSTOP
+    PUSHBUTTON "Stop do&wnloads", IDC_GG_STOP_DOWNLOADS, 221, 7, 62, 14, WS_TABSTOP
+    PUSHBUTTON "Add to &main list", IDC_GG_ADD_MAIN, 285, 7, 62, 14, WS_TABSTOP
+    PUSHBUTTON "Pro&ject...", IDC_GG_EDIT, 353, 7, 46, 14, WS_TABSTOP
+    PUSHBUTTON "Save as &template...", IDC_GG_TEMPLATE, 401, 7, 66, 14, WS_TABSTOP
+    PUSHBUTTON "Stati&stics", IDC_GG_STATS, 469, 7, 44, 14, WS_TABSTOP
+    CONTROL "", IDC_GG_TREE, "SysTreeView32", TVS_HASBUTTONS | TVS_HASLINES | TVS_LINESATROOT | TVS_SHOWSELALWAYS | WS_BORDER | WS_TABSTOP, 7, 26, 110, 255
+    CONTROL "", IDC_GG_LIST, "SysListView32", LVS_REPORT | LVS_OWNERDATA | LVS_SHOWSELALWAYS | WS_BORDER | WS_TABSTOP, 121, 26, 392, 255
+    LTEXT "", IDC_GG_STATUS, 7, 286, 506, 8, SS_NOPREFIX | SS_ENDELLIPSIS
 END
 
 // Sized to its text at run time (MessageDialog.cpp).

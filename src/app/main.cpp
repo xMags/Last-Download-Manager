@@ -4,6 +4,7 @@
 #include "core/CoreThread.h"
 #include "core/LaunchRequest.h"
 #include "engine/CurlEngine.h"
+#include "grabber/GrabberExplorer.h"
 #include "platform/win/BrowserBridge.h"
 #include "platform/win/WinBrowserWindows.h"
 #include "platform/win/XmlLiteReader.h"
@@ -17,6 +18,7 @@
 #include "platform/win/WinSystemActions.h"
 #include "storage/DpapiSecretProtector.h"
 #include "storage/SqliteStore.h"
+#include "ui/GrabberBridge.h"
 #include "ui/MainWindow.h"
 #include "ui/Theme.h"
 #include "ui/UiBridge.h"
@@ -172,6 +174,7 @@ int WINAPI wWinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int sho
     // ordered shutdown below.
     ldm::core::CoreThread core;
     ldm::ui::UiBridge bridge;
+    ldm::ui::GrabberBridge grabberBridge;
     ldm::platform::SystemClock clock;
     ldm::platform::WinFileSystem fileSystem;
     ldm::storage::DpapiSecretProtector secrets;
@@ -188,10 +191,25 @@ int WINAPI wWinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int sho
     // ffmpeg.exe and ffprobe.exe ship next to ldm.exe; joins answer through the core thread.
     ldm::platform::FfmpegMediaTools mediaTools(ProgramFolder(), core);
 
+    // The Site Grabber runs on the core thread beside the coordinator (M4 design section 6.2) and
+    // sees the coordinator's output first, taking what belongs to its own downloads.
+    ldm::grabber::ExplorerPorts grabberPorts;
+    grabberPorts.store = storeInstance.get();
+    grabberPorts.engine = engine.get();
+    grabberPorts.proxy = &proxy;
+    grabberPorts.downloads = &core;
+    grabberPorts.fileSystem = &fileSystem;
+    grabberPorts.secrets = &secrets;
+    grabberPorts.clock = &clock;
+    grabberPorts.timeZone = &timeZone;
+    grabberPorts.observer = &grabberBridge;
+    ldm::grabber::GrabberExplorer explorer(grabberPorts, ldm::grabber::ExplorerConfig{});
+    ldm::grabber::CoreOutputTee coreOutput(explorer, bridge);
+
     ldm::core::CoordinatorPorts ports;
     ports.store = storeInstance.get();
     ports.engine = engine.get();
-    ports.observer = &bridge;
+    ports.observer = &coreOutput;
     ports.clock = &clock;
     ports.fileSystem = &fileSystem;
     ports.secrets = &secrets;
@@ -204,7 +222,7 @@ int WINAPI wWinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int sho
     ldm::core::CoordinatorConfig config;
     config.downloadsFolder = *downloads;
     ldm::core::Coordinator coordinator(ports, config);
-    if (const auto started = core.Start(coordinator); !started) {
+    if (const auto started = core.Start(coordinator, &explorer); !started) {
         Fatal(L"Last Download Manager could not start:\n" + ldm::base::ToUtf16(started.GetError().message));
         return 1;
     }
@@ -225,7 +243,7 @@ int WINAPI wWinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int sho
         ldm::ui::MainWindow window(
             ldm::ui::MainWindow::Services{&core, &bridge, &shell, &system, &secrets, &startup, &browserBridge,
                                           &browserWindows, &ldm::platform::ReadXml,
-                                          ldm::platform::IsProcessElevated()});
+                                          ldm::platform::IsProcessElevated(), &core, &grabberBridge});
         auto snapshot = bridge.TakeSnapshot();
         // --tray (Launch on startup) starts hidden, unless the tray icon is hidden too.
         const bool startHidden = launch.tray && snapshot && snapshot->settings.trayIconStyle != ldm::model::TrayIconStyle::Hidden;
