@@ -126,11 +126,16 @@ std::unique_ptr<InstanceLock> InstanceLock::TryAcquire()
         ::CloseHandle(mutex);
         return nullptr;
     }
-    return std::unique_ptr<InstanceLock>(new InstanceLock(mutex));  // private constructor
+    // Only its existence matters; without it the uninstaller cannot tell LDM runs, nothing else.
+    HANDLE running = ::CreateMutexW(nullptr, FALSE, kRunningMutexName);
+    return std::unique_ptr<InstanceLock>(new InstanceLock(mutex, running));  // private constructor
 }
 
 InstanceLock::~InstanceLock()
 {
+    if (running_ != nullptr) {
+        ::CloseHandle(running_);
+    }
     if (mutex_ != nullptr) {
         ::ReleaseMutex(mutex_);
         ::CloseHandle(mutex_);

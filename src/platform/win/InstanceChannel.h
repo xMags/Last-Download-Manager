@@ -37,9 +37,14 @@ public:
     InstanceLock& operator=(const InstanceLock&) = delete;
 
 private:
-    explicit InstanceLock(HANDLE mutex) noexcept : mutex_(mutex) {}
+    InstanceLock(HANDLE mutex, HANDLE running) noexcept : mutex_(mutex), running_(running) {}
     HANDLE mutex_ = nullptr;
+    HANDLE running_ = nullptr;  // kRunningMutexName, for the uninstaller; may be null
 };
+
+// Exists while LDM runs in this session. Its name is fixed, unlike the instance lock's, so the
+// uninstaller (installer/ldm.iss.in) can ask the user to exit LDM before removing its files.
+inline constexpr wchar_t kRunningMutexName[] = L"Local\\LastDownloadManager.Running";
 
 // Serves the pipe on its own thread. `onRequest` runs on that thread and must only post.
 class InstanceServer {

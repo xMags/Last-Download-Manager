@@ -84,6 +84,26 @@ Type: files; Name: "{#DataFolder}\browser\firefox-host.json"
 Type: dirifempty; Name: "{#DataFolder}\browser"
 
 [Code]
+// A running LDM keeps its files and its database open, so they could not be removed: the user exits
+// it first. LDM holds this mutex while it runs (kRunningMutexName in InstanceChannel.h). Setup
+// itself closes LDM through Windows' Restart Manager instead (CloseApplications), which the
+// uninstaller does not use.
+function InitializeUninstall(): Boolean;
+begin
+  Result := True;
+  while CheckForMutexes('Local\LastDownloadManager.Running') do
+  begin
+    if UninstallSilent or
+       (MsgBox('Last Download Manager is running.' + #13#10#13#10 +
+               'Exit it (right-click its icon in the notification area, then choose Exit), then choose OK.',
+               mbError, MB_OKCANCEL) = IDCANCEL) then
+    begin
+      Result := False;
+      exit;
+    end;
+  end;
+end;
+
 // The download list and settings stay unless the user asks to delete them too (decision 4).
 // Downloaded files are never touched. A silent uninstall keeps them.
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
