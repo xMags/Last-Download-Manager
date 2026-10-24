@@ -39,6 +39,9 @@ public:
     // rather than deleting it for good. A file that does not exist counts as recycled.
     [[nodiscard]] virtual base::Status Recycle(const std::filesystem::path& path) = 0;
     [[nodiscard]] virtual base::Status CreateDirectories(const std::filesystem::path& path) = 0;
+    // Deletes a folder with everything in it: a stream's parts folder. A folder that does not
+    // exist counts as deleted.
+    [[nodiscard]] virtual base::Status RemoveFolder(const std::filesystem::path& path) = 0;
 };
 
 // Protects passwords at rest (DPAPI for the current user in production).

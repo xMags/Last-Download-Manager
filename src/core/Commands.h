@@ -1,10 +1,12 @@
 #pragma once
 
+#include "media/MediaModel.h"
 #include "model/Category.h"
 #include "model/ConnectionRules.h"
 #include "model/Cookie.h"
 #include "model/Download.h"
 #include "model/Ids.h"
+#include "model/Media.h"
 #include "model/Settings.h"
 
 #include <chrono>
@@ -39,6 +41,32 @@ struct PostData {
     std::string body;  // bytes, sent as is
 };
 
+// One track of a stream, as the user chose it in the media panel.
+struct MediaTrackChoice {
+    model::TrackRole role = model::TrackRole::Video;
+    std::string sourceUrl;  // HLS: the media playlist; DASH: the MPD
+    std::string codecs;
+    std::string language;
+    std::string name;
+    // DASH: the track's list, which the MPD already gave. HLS: nothing; LDM reads the media
+    // playlist when the download first starts.
+    std::optional<media::TrackSegments> segments;
+};
+
+// A stream to download instead of a file (M3 design section 6). The command's `url` is then the
+// manifest's address and `fileName` the name of the file LDM makes from the tracks.
+struct MediaChoice {
+    model::DownloadKind kind = model::DownloadKind::Hls;  // Hls or Dash
+    // The manifest came from a loopback or private address (FetchFinished::fromPrivateNetwork);
+    // otherwise the stream's pieces may not be on such addresses.
+    bool fromPrivateNetwork = false;
+    std::vector<MediaTrackChoice> tracks;
+    std::optional<std::int64_t> approximateBytes;  // shown until the stream's size is known
+};
+
+// At most this many tracks in one stream download: video, audio and some to spare.
+inline constexpr size_t kMaxMediaTracks = 8;
+
 struct AddDownloadCommand {
     std::uint64_t token = 0;  // echoed in AddResult so the caller can match the answer
     std::string url;
@@ -61,6 +89,7 @@ struct AddDownloadCommand {
     // Set after the user answered the duplicate prompt; otherwise Options > Downloads applies.
     std::optional<model::DuplicatePolicy> duplicatePolicy;
     ExistingFilePolicy existingFilePolicy = ExistingFilePolicy::AutoRename;
+    std::optional<MediaChoice> media;
 };
 
 // The user pressed Start Download or Download Later in the info dialog of a speculative add.

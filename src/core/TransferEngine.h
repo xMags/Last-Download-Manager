@@ -121,7 +121,8 @@ enum class FailureReason {
     DiskError,
     PermissionDenied,
     Protocol,
-    PrivateAddress,  // a stream from a public host pointed at a loopback or private address
+    PrivateAddress,     // a stream from a public host pointed at a loopback or private address
+    UnsupportedStream,  // a live or protected stream, which LDM does not download
     Internal,
 };
 
@@ -226,6 +227,19 @@ struct ProxyResolved {
     std::optional<std::string> proxy;  // nothing: connect directly
 };
 
+// The media tools' answer to a MuxRequest (core/MediaTools.h). Sent through the engine listener,
+// like ProxyResolved, so it is ordered with engine events and dropped by its epoch when stale.
+struct MuxFinished {
+    bool stopped = false;  // MediaTools::Cancel ended it
+    std::optional<TransferFailure> failure;
+    std::filesystem::path output;  // in the parts folder
+    std::string extension;         // of `output`: "mp4", "mkv" or "vtt"
+    std::int64_t bytes = 0;
+    // What the file holds, for the description (checklist C-04): "1280x720, 30 fps, H.264; AAC,
+    // stereo, 48 kHz; 4:05". Empty when FFmpeg could not say.
+    std::string mediaInfo;
+};
+
 // A small download into memory: a streaming manifest LDM reads itself (M3 design section 6).
 // Not a download of the list, so it has no DownloadId; its answer carries `fetchId`.
 struct FetchRequest {
@@ -252,7 +266,7 @@ struct FetchFinished {
 };
 
 using EnginePayload = std::variant<ResponseInfo, ProgressInfo, TransferFinished, FinalizeFinished, ProxyResolved,
-                                   FetchFinished, MediaProgress, MediaFinished>;
+                                   FetchFinished, MediaProgress, MediaFinished, MuxFinished>;
 
 struct EngineEvent {
     model::DownloadId id;

@@ -52,6 +52,15 @@ public:
     std::optional<std::int64_t> globalLimit;
 };
 
+class FakeMediaTools final : public ldm::core::MediaTools {
+public:
+    void Mux(ldm::core::MuxRequest request) override { muxes.push_back(std::move(request)); }
+    void Cancel(DownloadId id, std::int64_t epoch) override { cancels.emplace_back(id, epoch); }
+
+    std::vector<ldm::core::MuxRequest> muxes;
+    std::vector<std::pair<DownloadId, std::int64_t>> cancels;
+};
+
 class FakeFileSystem final : public ldm::core::FileSystem {
 public:
     bool Exists(const fs::path& path) override { return files.contains(ldm::base::PathComparisonKey(path)); }
@@ -73,12 +82,20 @@ public:
         return {};
     }
     ldm::base::Status CreateDirectories(const fs::path&) override { return {}; }
+    ldm::base::Status RemoveFolder(const fs::path& path) override
+    {
+        const std::wstring prefix = ldm::base::PathComparisonKey(path) + L"\\";
+        std::erase_if(files, [&prefix](const auto& file) { return file.first.starts_with(prefix); });
+        removedFolders.push_back(path);
+        return {};
+    }
 
     void Put(const fs::path& path, std::int64_t size) { files[ldm::base::PathComparisonKey(path)] = size; }
 
     std::map<std::wstring, std::int64_t> files;
     std::vector<fs::path> removed;
     std::vector<fs::path> recycled;
+    std::vector<fs::path> removedFolders;
 };
 
 class FakeClock final : public ldm::core::Clock {
@@ -180,6 +197,7 @@ protected:
         ports.ids = &ids_;
         ports.power = &power_;
         ports.proxy = &proxy_;
+        ports.media = &media_;
         ldm::core::CoordinatorConfig config;
         config.downloadsFolder = kRoot;
         coordinator_ = std::make_unique<Coordinator>(ports, config);
@@ -263,6 +281,7 @@ protected:
     CountingIds ids_;
     FakePower power_;
     FakeProxy proxy_;
+    FakeMediaTools media_;
     RecordingObserver observer_;
     std::unique_ptr<Coordinator> coordinator_;
     std::uint64_t token_ = 0;
@@ -851,6 +870,319 @@ TEST_F(CoordinatorTest, NamesStayUniqueAcrossDownloads)
         EXPECT_TRUE(paths.insert(ldm::base::PathComparisonKey(path)).second);
     }
     EXPECT_TRUE(paths.contains(ldm::base::PathComparisonKey(kRoot / L"Compressed" / L"same (5).zip")));
+}
+
+
+// ---- streams (M3 design section 6) ----
+
+ldm::media::TrackSegments DashSegments(const std::string& base, int count)
+{
+    ldm::media::TrackSegments segments;
+    segments.inits.push_back(ldm::media::InitSection{base + "init.mp4", std::nullopt});
+    for (int i = 0; i < count; ++i) {
+        ldm::media::Segment segment;
+        segment.url = base + "seg" + std::to_string(i) + ".m4s";
+        segment.seconds = 2.0;
+        segment.sequence = static_cast<std::uint64_t>(i + 1);
+        segment.init = 0;
+        segments.segments.push_back(segment);
+    }
+    return segments;
+}
+
+ldm::core::MediaChoice DashChoice()
+{
+    ldm::core::MediaChoice media;
+    media.kind = ldm::model::DownloadKind::Dash;
+    ldm::core::MediaTrackChoice video;
+    video.role = ldm::model::TrackRole::Video;
+    video.sourceUrl = "https://cdn.test/v.mpd";
+    video.codecs = "avc1.64001f";
+    video.segments = DashSegments("https://cdn.test/v/", 3);
+    ldm::core::MediaTrackChoice audio;
+    audio.role = ldm::model::TrackRole::Audio;
+    audio.sourceUrl = "https://cdn.test/v.mpd";
+    audio.codecs = "mp4a.40.2";
+    audio.language = "en";
+    audio.segments = DashSegments("https://cdn.test/a/", 3);
+    media.tracks = {video, audio};
+    media.approximateBytes = 3'000'000;
+    return media;
+}
+
+TEST_F(CoordinatorTest, ADashStreamStartsWithEveryPieceInItsPartsFolder)
+{
+    const AddResult result = Add("https://cdn.test/v.mpd", AddMode::StartNow, [](AddDownloadCommand& c) {
+        c.fileName = "Clip.mp4";
+        c.referer = "https://site.test/watch";
+        c.media = DashChoice();
+    });
+    ASSERT_TRUE(result.id) << result.error.value_or("");
+    EXPECT_TRUE(engine_.starts.empty()) << "streams are not file transfers";
+    ASSERT_EQ(engine_.mediaStarts.size(), 1u);
+    const auto& request = engine_.mediaStarts[0];
+    EXPECT_EQ(request.referer, "https://site.test/watch");
+    EXPECT_TRUE(request.refusePrivateAddresses);
+    ASSERT_EQ(request.tracks.size(), 2u);
+    ASSERT_EQ(request.tracks[0].pieces.size(), 4u) << "the init section and three segments";
+    EXPECT_EQ(request.tracks[0].pieces[0].url, "https://cdn.test/v/init.mp4");
+    EXPECT_EQ(request.tracks[0].pieces[1].path, kRoot / L"Video" / L"Clip.mp4.ldmparts" / L"t0" / L"000001.m4s");
+    EXPECT_EQ(request.tracks[1].track, 1u);
+
+    const auto stored = Stored(*result.id);
+    ASSERT_TRUE(stored);
+    EXPECT_EQ(stored->kind, ldm::model::DownloadKind::Dash);
+    ASSERT_EQ(stored->tracks.size(), 2u);
+    EXPECT_EQ(stored->tracks[1].language, "en");
+    const auto& view = View(*result.id);
+    ASSERT_TRUE(view.stream);
+    EXPECT_EQ(view.stream->piecesTotal, 8);
+    EXPECT_EQ(view.stream->estimatedBytes, 3'000'000) << "the panel's estimate until pieces arrive";
+    EXPECT_TRUE(view.download.tracks[0].pieces.empty()) << "snapshots leave the piece lists out";
+}
+
+TEST_F(CoordinatorTest, AStreamIsJoinedRenamedDescribedAndMovedWhenItsPiecesAreDone)
+{
+    const AddResult result = Add("https://cdn.test/v.mpd", AddMode::StartNow, [](AddDownloadCommand& c) {
+        c.fileName = "Clip.mp4";
+        c.media = DashChoice();
+    });
+    ASSERT_TRUE(result.id);
+    const DownloadId id = *result.id;
+    ldm::core::MediaProgress progress;
+    progress.done = {{0, 0, 100}, {0, 1, 1000}};
+    progress.receivedBytes = 1100;
+    Send(id, 1, progress);
+    clock_.Advance(std::chrono::seconds(3));
+    Send(id, 1, progress);  // a checkpoint is due; the same pieces again change nothing
+    auto stored = Stored(id);
+    ASSERT_TRUE(stored);
+    EXPECT_TRUE(stored->tracks[0].pieces[1].done);
+    EXPECT_EQ(stored->tracks[0].pieces[1].bytes, 1000);
+
+    ldm::core::MediaFinished finished;
+    finished.outcome = TransferOutcome::Completed;
+    finished.done = {{0, 2, 1000}, {0, 3, 1000}, {1, 0, 50}, {1, 1, 500}, {1, 2, 500}, {1, 3, 500}};
+    Send(id, 1, finished);
+    ASSERT_EQ(media_.muxes.size(), 1u);
+    const auto& mux = media_.muxes[0];
+    EXPECT_EQ(mux.preferredExtension, "mp4");
+    ASSERT_EQ(mux.inputs.size(), 2u);
+    ASSERT_EQ(mux.inputs[0].pieces.size(), 4u);
+    EXPECT_TRUE(mux.inputs[0].pieces[0].init);
+    EXPECT_EQ(mux.inputs[0].pieces[2].initPiece, 0u);
+    EXPECT_EQ(mux.inputs[0].pieces[2].durationUs, 2'000'000);
+    EXPECT_EQ(View(id).download.status, DownloadStatus::Finalizing);
+    EXPECT_TRUE(engine_.finalizes.empty()) << "nothing moves before the pieces are joined";
+
+    ldm::core::MuxFinished muxed;
+    muxed.output = kRoot / L"Video" / L"Clip.mp4.ldmparts" / L"output.mkv";
+    muxed.extension = "mkv";
+    muxed.bytes = 4321;
+    muxed.mediaInfo = "320x240, 25 fps, MPEG-4; AAC, stereo";
+    Send(id, 1, muxed);
+    ASSERT_EQ(engine_.finalizes.size(), 1u);
+    const auto& finalize = engine_.finalizes[0];
+    EXPECT_EQ(finalize.partialPath, muxed.output);
+    EXPECT_EQ(finalize.finalPath, kRoot / L"Video" / L"Clip.mkv");
+    EXPECT_EQ(finalize.removeFolder, kRoot / L"Video" / L"Clip.mp4.ldmparts");
+
+    Send(id, 1, ldm::core::FinalizeFinished{});
+    const auto& view = View(id);
+    EXPECT_EQ(view.download.status, DownloadStatus::Completed);
+    EXPECT_EQ(view.download.fileName, "Clip.mkv");
+    EXPECT_EQ(view.download.totalSize, 4321);
+    EXPECT_EQ(view.download.description, "320x240, 25 fps, MPEG-4; AAC, stereo");
+    ASSERT_TRUE(view.stream);
+    EXPECT_DOUBLE_EQ(view.stream->fraction, 1.0);
+    const auto completed = observer_.All<ldm::core::DownloadCompleted>();
+    ASSERT_EQ(completed.size(), 1u);
+    EXPECT_EQ(completed[0].size, 4321);
+}
+
+TEST_F(CoordinatorTest, AnHlsStreamReadsItsPlaylistsBeforeTheRun)
+{
+    proxy_.pending = false;
+    const AddResult result = Add("https://cdn.test/master.m3u8", AddMode::StartNow, [](AddDownloadCommand& c) {
+        c.fileName = "Show.mp4";
+        ldm::core::MediaChoice media;
+        media.kind = ldm::model::DownloadKind::Hls;
+        ldm::core::MediaTrackChoice video;
+        video.sourceUrl = "https://cdn.test/v/index.m3u8";
+        media.tracks = {video};
+        c.media = media;
+    });
+    ASSERT_TRUE(result.id);
+    const DownloadId id = *result.id;
+    EXPECT_TRUE(engine_.mediaStarts.empty());
+    ASSERT_EQ(engine_.fetches.size(), 1u);
+    const auto fetch = engine_.fetches[0];
+    EXPECT_LT(fetch.fetchId, 0) << "the media panel's fetch ids are positive";
+    EXPECT_EQ(fetch.url, "https://cdn.test/v/index.m3u8");
+    EXPECT_TRUE(fetch.refusePrivateAddresses);
+
+    ldm::core::FetchFinished answer;
+    answer.fetchId = fetch.fetchId;
+    answer.finalUrl = "https://cdn.test/v/index.m3u8";
+    answer.body = "#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXTINF:4,\na.ts\n#EXTINF:4,\nb.ts\n#EXT-X-ENDLIST\n";
+    Send(DownloadId{}, 0, answer);
+    ASSERT_EQ(engine_.mediaStarts.size(), 1u);
+    ASSERT_EQ(engine_.mediaStarts[0].tracks[0].pieces.size(), 2u);
+    EXPECT_EQ(engine_.mediaStarts[0].tracks[0].pieces[1].url, "https://cdn.test/v/b.ts");
+    const auto stored = Stored(id);
+    ASSERT_TRUE(stored);
+    EXPECT_EQ(stored->tracks[0].pieces.size(), 2u) << "the list is stored once read";
+
+    Send(DownloadId{}, 0, answer);  // a second answer for the same fetch starts nothing
+    EXPECT_EQ(engine_.mediaStarts.size(), 1u);
+}
+
+TEST_F(CoordinatorTest, ALiveHlsStreamFailsWithAClearReason)
+{
+    const AddResult result = Add("https://cdn.test/live.m3u8", AddMode::StartNow, [](AddDownloadCommand& c) {
+        ldm::core::MediaChoice media;
+        ldm::core::MediaTrackChoice video;
+        video.sourceUrl = "https://cdn.test/live.m3u8";
+        media.tracks = {video};
+        c.media = media;
+    });
+    ASSERT_TRUE(result.id);
+    ASSERT_EQ(engine_.fetches.size(), 1u);
+    ldm::core::FetchFinished answer;
+    answer.fetchId = engine_.fetches[0].fetchId;
+    answer.finalUrl = "https://cdn.test/live.m3u8";
+    answer.body = "#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXTINF:4,\na.ts\n";
+    Send(DownloadId{}, 0, answer);
+    EXPECT_TRUE(engine_.mediaStarts.empty());
+    const auto failed = observer_.All<ldm::core::DownloadFailed>();
+    ASSERT_EQ(failed.size(), 1u);
+    EXPECT_EQ(failed[0].failure.reason, FailureReason::UnsupportedStream);
+    EXPECT_EQ(View(*result.id).download.status, DownloadStatus::Failed);
+}
+
+TEST_F(CoordinatorTest, StoppingWhilePlaylistsAreFetchedPausesAtOnce)
+{
+    const AddResult result = Add("https://cdn.test/m.m3u8", AddMode::StartNow, [](AddDownloadCommand& c) {
+        ldm::core::MediaChoice media;
+        ldm::core::MediaTrackChoice video;
+        video.sourceUrl = "https://cdn.test/v.m3u8";
+        media.tracks = {video};
+        c.media = media;
+    });
+    ASSERT_TRUE(result.id);
+    ASSERT_EQ(engine_.fetches.size(), 1u);
+    coordinator_->Handle(ldm::core::StopCommand{{*result.id}});
+    EXPECT_EQ(View(*result.id).download.status, DownloadStatus::Paused);
+
+    ldm::core::FetchFinished late;
+    late.fetchId = engine_.fetches[0].fetchId;
+    late.body = "#EXTM3U\n#EXTINF:4,\na.ts\n#EXT-X-ENDLIST\n";
+    late.finalUrl = "https://cdn.test/v.m3u8";
+    Send(DownloadId{}, 0, late);
+    EXPECT_TRUE(engine_.mediaStarts.empty()) << "a late playlist starts no run";
+}
+
+TEST_F(CoordinatorTest, APublicStreamThatPointsIntoTheHomeNetworkIsRefused)
+{
+    const AddResult refused = Add("https://cdn.test/v.mpd", AddMode::StartNow, [](AddDownloadCommand& c) {
+        ldm::core::MediaChoice media = DashChoice();
+        media.tracks[0].segments->segments[1].url = "http://192.168.1.1/admin";
+        c.media = media;
+    });
+    EXPECT_FALSE(refused.id);
+    EXPECT_TRUE(refused.error);
+    EXPECT_TRUE(engine_.mediaStarts.empty());
+
+    // The same stream from a private host may point at private hosts.
+    const AddResult local = Add("http://192.168.1.20/v.mpd", AddMode::StartNow, [](AddDownloadCommand& c) {
+        ldm::core::MediaChoice media = DashChoice();
+        media.tracks[0].segments->segments[1].url = "http://192.168.1.1/seg.m4s";
+        c.media = media;
+    });
+    ASSERT_TRUE(local.id) << local.error.value_or("");
+    ASSERT_EQ(engine_.mediaStarts.size(), 1u);
+    EXPECT_FALSE(engine_.mediaStarts[0].refusePrivateAddresses);
+}
+
+TEST_F(CoordinatorTest, AStoppedStreamResumesWithOnlyItsMissingPieces)
+{
+    const AddResult result = Add("https://cdn.test/v.mpd", AddMode::StartNow, [](AddDownloadCommand& c) {
+        c.fileName = "Clip.mp4";
+        c.media = DashChoice();
+    });
+    ASSERT_TRUE(result.id);
+    const DownloadId id = *result.id;
+    coordinator_->Handle(ldm::core::StopCommand{{id}});
+    ldm::core::MediaFinished stopped;
+    stopped.outcome = TransferOutcome::Stopped;
+    stopped.done = {{0, 0, 100}, {0, 1, 1000}, {1, 0, 50}};
+    Send(id, 1, stopped);
+    EXPECT_EQ(View(id).download.status, DownloadStatus::Paused);
+
+    // A restart: the files of two done pieces are there, one is gone.
+    const fs::path parts = kRoot / L"Video" / L"Clip.mp4.ldmparts";
+    files_.Put(parts / L"t0" / L"000000.mp4", 100);
+    files_.Put(parts / L"t0" / L"000001.m4s", 1000);
+    Recreate();
+    coordinator_->Handle(ldm::core::ResumeCommand{{id}});
+    ASSERT_EQ(engine_.mediaStarts.size(), 2u);
+    const auto& again = engine_.mediaStarts[1];
+    EXPECT_EQ(again.epoch, 2);
+    EXPECT_EQ(again.tracks[0].pieces.size(), 2u) << "pieces 2 and 3 of the video";
+    EXPECT_EQ(again.tracks[1].pieces.size(), 4u) << "the audio init section's file was gone";
+}
+
+TEST_F(CoordinatorTest, StoppingWhileJoiningKeepsThePiecesAndJoinsOnResume)
+{
+    const AddResult result = Add("https://cdn.test/v.mpd", AddMode::StartNow, [](AddDownloadCommand& c) {
+        c.media = DashChoice();
+    });
+    ASSERT_TRUE(result.id);
+    const DownloadId id = *result.id;
+    ldm::core::MediaFinished finished;
+    finished.outcome = TransferOutcome::Completed;
+    Send(id, 1, finished);
+    ASSERT_EQ(media_.muxes.size(), 1u);
+    coordinator_->Handle(ldm::core::StopCommand{{id}});
+    ASSERT_EQ(media_.cancels.size(), 1u);
+    ldm::core::MuxFinished cancelled;
+    cancelled.stopped = true;
+    Send(id, 1, cancelled);
+    EXPECT_EQ(View(id).download.status, DownloadStatus::Paused);
+    EXPECT_TRUE(engine_.finalizes.empty());
+
+    coordinator_->Handle(ldm::core::ResumeCommand{{id}});
+    EXPECT_EQ(engine_.mediaStarts.size(), 2u);
+}
+
+TEST_F(CoordinatorTest, DeletingAStreamRemovesItsPartsFolder)
+{
+    const AddResult result = Add("https://cdn.test/v.mpd", AddMode::StartNow, [](AddDownloadCommand& c) {
+        c.fileName = "Clip.mp4";
+        c.media = DashChoice();
+    });
+    ASSERT_TRUE(result.id);
+    coordinator_->Handle(ldm::core::DeleteCommand{{*result.id}, false});
+    ldm::core::MediaFinished stopped;
+    stopped.outcome = TransferOutcome::Stopped;
+    Send(*result.id, 1, stopped);
+    EXPECT_FALSE(InSnapshot(*result.id));
+    ASSERT_EQ(files_.removedFolders.size(), 1u);
+    EXPECT_EQ(files_.removedFolders[0], kRoot / L"Video" / L"Clip.mp4.ldmparts");
+}
+
+TEST_F(CoordinatorTest, ASecondQualityOfTheSameStreamIsNotADuplicate)
+{
+    ASSERT_TRUE(Add("https://cdn.test/v.mpd", AddMode::Later, [](AddDownloadCommand& c) { c.media = DashChoice(); }).id);
+    const AddResult same = Add("https://cdn.test/v.mpd", AddMode::Later, [](AddDownloadCommand& c) { c.media = DashChoice(); });
+    EXPECT_TRUE(same.duplicateOf);
+    const AddResult other = Add("https://cdn.test/v.mpd", AddMode::Later, [](AddDownloadCommand& c) {
+        ldm::core::MediaChoice media = DashChoice();
+        media.tracks[0].sourceUrl = "https://cdn.test/v.mpd#1080";
+        c.media = media;
+    });
+    EXPECT_TRUE(other.id);
+    EXPECT_FALSE(other.duplicateOf);
 }
 
 }  // namespace

@@ -47,6 +47,8 @@ std::string_view DescribeFailureReason(FailureReason reason) noexcept
         return "Invalid server response";
     case FailureReason::PrivateAddress:
         return "The stream points into your own network, which LDM refuses for streams from the internet";
+    case FailureReason::UnsupportedStream:
+        return "This stream cannot be downloaded";
     case FailureReason::Internal:
         return "Internal error";
     }

@@ -127,6 +127,16 @@ base::Status WinFileSystem::CreateDirectories(const std::filesystem::path& path)
     return {};
 }
 
+base::Status WinFileSystem::RemoveFolder(const std::filesystem::path& path)
+{
+    std::error_code error;
+    std::filesystem::remove_all(std::filesystem::path(base::ToExtendedLengthPath(path)), error);
+    if (error) {
+        return base::MakeError(base::ErrorCode::Io, error.message());
+    }
+    return {};
+}
+
 std::string RandomIdGenerator::NewPublicId()
 {
     std::array<unsigned char, 16> bytes{};
