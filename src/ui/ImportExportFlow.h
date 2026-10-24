@@ -7,12 +7,13 @@
 #include <windows.h>
 
 #include <functional>
+#include <optional>
 #include <vector>
 
 namespace ldm::ui {
 
-// Tasks > Export and Tasks > Import (checklist A-11). Exports the selected downloads, or every
-// download when nothing is selected. Files are small and the user waits on a modal file dialog
+// Tasks > Export and Tasks > Import (checklist A-11). Exports the selected downloads; when nothing
+// is selected, the queue chosen in the tree, or else every download. Files are small and the user waits on a modal file dialog
 // anyway, so reading and writing happen on the UI thread.
 class ImportExportFlow {
 public:
@@ -22,6 +23,8 @@ public:
         AddFlow* adds = nullptr;
         std::function<std::shared_ptr<const core::Snapshot>()> snapshot;
         std::function<std::vector<const core::DownloadView*>()> selection;
+        // The queue whose node the tree shows, if any.
+        std::function<std::optional<model::QueueId>()> currentQueue;
     };
 
     explicit ImportExportFlow(Context context);
@@ -32,7 +35,8 @@ public:
     void ImportTextFile();
 
 private:
-    // The selection, or every download; nothing when the list is empty.
+    // The selection, or the current queue's members in queue order, or every download; nothing
+    // when there is none of them.
     [[nodiscard]] std::vector<const core::DownloadView*> ExportSet(std::shared_ptr<const core::Snapshot>& keepAlive) const;
     void ShowError(const std::wstring& message) const;
 

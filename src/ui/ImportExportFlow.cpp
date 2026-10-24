@@ -10,6 +10,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <algorithm>
 #include <optional>
 #include <string>
 
@@ -71,10 +72,19 @@ std::vector<const core::DownloadView*> ImportExportFlow::ExportSet(std::shared_p
 {
     keepAlive = context_.snapshot();
     std::vector<const core::DownloadView*> views = context_.selection();
-    if (views.empty() && keepAlive) {
-        for (const auto& view : keepAlive->downloads) {
+    if (!views.empty() || !keepAlive) {
+        return views;
+    }
+    const auto queue = context_.currentQueue ? context_.currentQueue() : std::nullopt;
+    for (const auto& view : keepAlive->downloads) {
+        if (!queue || view->download.queueId == queue) {
             views.push_back(view.get());
         }
+    }
+    if (queue) {
+        std::stable_sort(views.begin(), views.end(), [](const core::DownloadView* a, const core::DownloadView* b) {
+            return a->download.queuePosition < b->download.queuePosition;
+        });
     }
     return views;
 }
