@@ -406,6 +406,8 @@ void Coordinator::Handle(Command command)
                 StopQueue(typed.id);
             } else if constexpr (std::is_same_v<T, ClockChangedCommand>) {
                 CheckSchedules();
+            } else if constexpr (std::is_same_v<T, SetListedCommand>) {
+                SetListed(typed.ids);
             } else {
                 static_assert(sizeof(T) == 0, "unhandled command");
             }
@@ -582,6 +584,8 @@ void Coordinator::Add(const AddDownloadCommand& command)
         download.queueId = queue;
         download.queuePosition = NextQueuePosition(*queue);
     }
+    download.projectId = command.projectId;
+    download.listed = command.listed || !command.projectId;  // only a Grabber download starts hidden
 
     auto inserted = ports_.store->InsertDownload(download);
     if (!inserted) {
@@ -791,6 +795,19 @@ void Coordinator::DeleteCompleted()
         }
     }
     Delete(completed, false);
+}
+
+void Coordinator::SetListed(const std::vector<model::DownloadId>& ids)
+{
+    for (const model::DownloadId id : ids) {
+        Entry* entry = Find(id);
+        if (entry == nullptr || entry->download.listed) {
+            continue;
+        }
+        entry->download.listed = true;
+        Save(*entry);
+        MarkChanged(*entry);
+    }
 }
 
 void Coordinator::Redownload(model::DownloadId id)

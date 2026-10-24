@@ -16,8 +16,10 @@ add_executable(ldm_unit_tests
     core/SegmentPlannerTests.cpp
     core/UrlAndNamesTests.cpp
     engine/Aes128CbcTests.cpp
+    grabber/GrabberExplorerTests.cpp
     grabber/GrabberFiltersTests.cpp
     grabber/HtmlLinksTests.cpp
+    grabber/LocalPathsTests.cpp
     grabber/ProjectDefinitionTests.cpp
     engine/FailurePolicyTests.cpp
     engine/HttpHeadersTests.cpp

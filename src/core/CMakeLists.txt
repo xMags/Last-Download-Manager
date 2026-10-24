@@ -9,6 +9,8 @@ add_library(ldm_core STATIC
     FailureText.h
     FileNames.cpp
     FileNames.h
+    GrabberCommands.h
+    GrabberStore.h
     LaunchRequest.cpp
     LaunchRequest.h
     ManifestFetches.cpp
