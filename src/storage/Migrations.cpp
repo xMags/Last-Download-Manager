@@ -216,6 +216,46 @@ ALTER TABLE downloads ADD COLUMN queue_position INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE downloads ADD COLUMN queue_failures INTEGER NOT NULL DEFAULT 0 CHECK (queue_failures >= 0);
 CREATE INDEX downloads_queue ON downloads(queue_id, queue_position);
 )sql"},
+    // Site Grabber projects, templates and the pages and files they found (M4 design section
+    // 6.1). A project's definition is one JSON document, read back as untrusted input. Its
+    // downloads are ordinary rows, hidden from the main list until they are added to it.
+    Migration{9, R"sql(
+CREATE TABLE grabber_projects (
+  id            INTEGER PRIMARY KEY,
+  name          TEXT NOT NULL UNIQUE COLLATE NOCASE,
+  is_template   INTEGER NOT NULL DEFAULT 0 CHECK (is_template IN (0, 1)),
+  definition    TEXT NOT NULL,
+  login_user    TEXT NOT NULL DEFAULT '',
+  login_secret  BLOB,
+  schedule_id   INTEGER REFERENCES schedules(id) ON DELETE SET NULL,
+  schedule_mode TEXT NOT NULL DEFAULT 'explore'
+                  CHECK (schedule_mode IN ('explore', 'explore_download', 'download_checked')),
+  created_at    INTEGER NOT NULL,
+  last_run_at   INTEGER
+) STRICT;
+
+CREATE TABLE grabber_items (
+  project_id   INTEGER NOT NULL REFERENCES grabber_projects(id) ON DELETE CASCADE,
+  id           INTEGER NOT NULL CHECK (id >= 1),
+  url          TEXT NOT NULL,
+  kind         TEXT NOT NULL CHECK (kind IN ('page', 'file')),
+  parent_id    INTEGER,
+  depth        INTEGER NOT NULL CHECK (depth >= 0),
+  link_text    TEXT NOT NULL DEFAULT '',
+  size         INTEGER CHECK (size >= 0),
+  content_type TEXT NOT NULL DEFAULT '',
+  checked      INTEGER NOT NULL DEFAULT 0 CHECK (checked IN (0, 1)),
+  state        TEXT NOT NULL CHECK (state IN ('found', 'filtered', 'downloading', 'done', 'failed')),
+  download_id  INTEGER REFERENCES downloads(id) ON DELETE SET NULL,
+  local_path   TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY (project_id, id)
+) STRICT;
+
+CREATE INDEX grabber_items_download ON grabber_items(download_id) WHERE download_id IS NOT NULL;
+
+ALTER TABLE downloads ADD COLUMN project_id INTEGER REFERENCES grabber_projects(id) ON DELETE SET NULL;
+ALTER TABLE downloads ADD COLUMN listed INTEGER NOT NULL DEFAULT 1 CHECK (listed IN (0, 1));
+)sql"},
 };
 
 base::Result<int> CurrentVersion(Connection& connection)

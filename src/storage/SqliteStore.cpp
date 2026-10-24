@@ -27,7 +27,7 @@ SELECT id, public_id, url, final_url, referer, parent_page, user_agent, file_nam
        last_modified, content_type, max_connections, speed_limit_bps, login_user, login_secret,
        completion_action, created_at, last_try_at, completed_at, last_result, sort_order, cookie_secret,
        post_secret, post_content_type, awaiting_confirmation, kind, media_private_source, queue_id,
-       queue_position, queue_failures
+       queue_position, queue_failures, project_id, listed
 FROM downloads ORDER BY sort_order, id
 )sql";
 
@@ -38,9 +38,9 @@ INSERT INTO downloads (
   last_modified, content_type, max_connections, speed_limit_bps, login_user, login_secret,
   completion_action, created_at, last_try_at, completed_at, last_result, sort_order, cookie_secret,
   post_secret, post_content_type, awaiting_confirmation, kind, media_private_source, queue_id,
-  queue_position, queue_failures)
+  queue_position, queue_failures, project_id, listed)
 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20,
-        ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37)
+        ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39)
 )sql";
 
 constexpr std::string_view kUpdateDownload = R"sql(
@@ -52,8 +52,8 @@ UPDATE downloads SET
   login_secret = ?22, completion_action = ?23, created_at = ?24, last_try_at = ?25,
   completed_at = ?26, last_result = ?27, sort_order = ?28, cookie_secret = ?29, post_secret = ?30,
   post_content_type = ?31, awaiting_confirmation = ?32, kind = ?33, media_private_source = ?34,
-  queue_id = ?35, queue_position = ?36, queue_failures = ?37
-WHERE id = ?38
+  queue_id = ?35, queue_position = ?36, queue_failures = ?37, project_id = ?38, listed = ?39
+WHERE id = ?40
 )sql";
 
 base::Error CorruptRow(std::string_view what)
@@ -163,7 +163,7 @@ bool TrackIsConsistent(const model::MediaTrack& track)
     return !track.wholeFile || track.pieces.size() <= 1;
 }
 
-// Binds parameters ?1..?37 in the column order of kInsertDownload / kUpdateDownload.
+// Binds parameters ?1..?39 in the column order of kInsertDownload / kUpdateDownload.
 void BindDownloadColumns(Statement& statement, const model::Download& d)
 {
     statement.Bind(1, d.publicId)
@@ -214,7 +214,9 @@ void BindDownloadColumns(Statement& statement, const model::Download& d)
         .Bind(34, std::int64_t{d.mediaFromPrivateNetwork ? 1 : 0})
         .Bind(35, ToOptionalId(d.queueId))
         .Bind(36, d.queuePosition)
-        .Bind(37, d.queueFailures);
+        .Bind(37, d.queueFailures)
+        .Bind(38, d.projectId ? std::optional<std::int64_t>(d.projectId->value) : std::nullopt)
+        .Bind(39, d.listed);
 }
 
 base::Result<model::Download> ReadDownload(const Statement& row)
@@ -282,6 +284,10 @@ base::Result<model::Download> ReadDownload(const Statement& row)
         return CorruptRow("downloads.queue_failures");
     }
     d.queueFailures = static_cast<int>(failures);
+    if (const auto project = row.OptionalInt64(38)) {
+        d.projectId = model::GrabberProjectId{*project};
+    }
+    d.listed = row.Int64(39) != 0;
     return d;
 }
 
@@ -697,7 +703,7 @@ base::Status SqliteStore::SaveDownload(const model::Download& download)
         return update.GetError();
     }
     BindDownloadColumns(update.Value(), download);
-    update.Value().Bind(38, download.id.value);
+    update.Value().Bind(40, download.id.value);
     base::Status updated = update.Value().Run();
     if (!updated) {
         return updated;
@@ -1302,6 +1308,280 @@ base::Status SqliteStore::ReplaceServerLimits(const std::vector<model::ServerLim
         }
     }
     return transaction.Value().Commit();
+}
+
+// ---- Site Grabber ----
+
+namespace {
+
+constexpr std::string_view kSelectGrabberProjects = R"sql(
+SELECT p.id, p.name, p.is_template, p.definition, p.login_user, p.login_secret, p.schedule_mode, p.created_at,
+       p.last_run_at, s.id, s.enabled, s.mode, s.start_minutes, s.start_day, s.weekdays, s.repeat_minutes,
+       s.stop_enabled, s.stop_minutes, s.start_on_app_start, s.last_started_at
+FROM grabber_projects p LEFT JOIN schedules s ON s.id = p.schedule_id
+ORDER BY p.name, p.id
+)sql";
+
+// Binds ?2..?9 of the project columns that can change; the caller binds ?1.
+void BindGrabberProjectColumns(Statement& statement, const model::GrabberProject& project, std::string_view definition,
+                               std::int64_t scheduleId)
+{
+    statement.Bind(2, project.name).Bind(3, project.isTemplate).Bind(4, definition).Bind(5, project.loginUser);
+    if (project.loginSecret.empty()) {
+        statement.BindNull(6);
+    } else {
+        statement.Bind(6, std::span<const std::uint8_t>(project.loginSecret));
+    }
+    statement.Bind(7, scheduleId).Bind(8, model::ToString(project.scheduleMode)).Bind(9, project.lastRunAtMs);
+}
+
+std::optional<std::int64_t> FindGrabberSchedule(Connection& connection, model::GrabberProjectId id,
+                                                base::Status& status)
+{
+    base::Result<Statement> query = connection.Prepare("SELECT schedule_id FROM grabber_projects WHERE id = ?1");
+    if (!query) {
+        status = query.GetError();
+        return std::nullopt;
+    }
+    query.Value().Bind(1, id.value);
+    base::Result<bool> row = query.Value().Step();
+    if (!row) {
+        status = row.GetError();
+        return std::nullopt;
+    }
+    if (!row.Value()) {
+        status = base::MakeError(base::ErrorCode::NotFound, "Grabber project does not exist");
+        return std::nullopt;
+    }
+    return query.Value().OptionalInt64(0);
+}
+
+}  // namespace
+
+base::Result<std::vector<core::StoredGrabberProject>> SqliteStore::LoadGrabberProjects()
+{
+    base::Result<Statement> query = connection_.Prepare(kSelectGrabberProjects);
+    if (!query) {
+        return query.GetError();
+    }
+    std::vector<core::StoredGrabberProject> projects;
+    for (;;) {
+        base::Result<bool> row = query.Value().Step();
+        if (!row) {
+            return row.GetError();
+        }
+        if (!row.Value()) {
+            return projects;
+        }
+        const Statement& r = query.Value();
+        core::StoredGrabberProject stored;
+        model::GrabberProject& project = stored.project;
+        project.id = model::GrabberProjectId{r.Int64(0)};
+        project.name = r.Text(1);
+        project.isTemplate = r.Int64(2) != 0;
+        stored.definitionJson = r.Text(3);
+        project.loginUser = r.Text(4);
+        project.loginSecret = r.Blob(5);
+        const auto mode = model::ParseGrabberScheduleMode(r.Text(6));
+        if (!mode) {
+            return CorruptRow("grabber_projects.schedule_mode");
+        }
+        project.scheduleMode = *mode;
+        project.createdAtMs = r.Int64(7);
+        project.lastRunAtMs = r.OptionalInt64(8);
+        base::Result<model::Schedule> schedule = ReadSchedule(r, 9);
+        if (!schedule) {
+            return schedule.GetError();
+        }
+        project.schedule = std::move(schedule).Value();
+        projects.push_back(std::move(stored));
+    }
+}
+
+base::Result<model::GrabberProjectId> SqliteStore::InsertGrabberProject(const model::GrabberProject& project,
+                                                                        std::string_view definitionJson)
+{
+    base::Result<Transaction> transaction = Transaction::Begin(connection_);
+    if (!transaction) {
+        return transaction.GetError();
+    }
+    base::Result<std::int64_t> schedule = WriteSchedule(std::nullopt, project.schedule);
+    if (!schedule) {
+        return schedule.GetError();
+    }
+    base::Result<Statement> insert = connection_.Prepare(
+        "INSERT INTO grabber_projects (created_at, name, is_template, definition, login_user, login_secret, "
+        "schedule_id, schedule_mode, last_run_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)");
+    if (!insert) {
+        return insert.GetError();
+    }
+    insert.Value().Bind(1, project.createdAtMs);
+    BindGrabberProjectColumns(insert.Value(), project, definitionJson, schedule.Value());
+    base::Status inserted = insert.Value().Run();
+    if (!inserted) {
+        return inserted.GetError();
+    }
+    const model::GrabberProjectId id{connection_.LastInsertRowId()};
+    base::Status committed = transaction.Value().Commit();
+    if (!committed) {
+        return committed.GetError();
+    }
+    return id;
+}
+
+base::Status SqliteStore::SaveGrabberProject(const model::GrabberProject& project, std::string_view definitionJson)
+{
+    base::Result<Transaction> transaction = Transaction::Begin(connection_);
+    if (!transaction) {
+        return transaction.GetError();
+    }
+    base::Status found;
+    const std::optional<std::int64_t> scheduleId = FindGrabberSchedule(connection_, project.id, found);
+    if (!found) {
+        return found;
+    }
+    base::Result<std::int64_t> schedule = WriteSchedule(scheduleId, project.schedule);
+    if (!schedule) {
+        return schedule.GetError();
+    }
+    base::Result<Statement> update = connection_.Prepare(
+        "UPDATE grabber_projects SET name = ?2, is_template = ?3, definition = ?4, login_user = ?5, "
+        "login_secret = ?6, schedule_id = ?7, schedule_mode = ?8, last_run_at = ?9 WHERE id = ?1");
+    if (!update) {
+        return update.GetError();
+    }
+    update.Value().Bind(1, project.id.value);
+    BindGrabberProjectColumns(update.Value(), project, definitionJson, schedule.Value());
+    base::Status updated = update.Value().Run();
+    if (!updated) {
+        return updated;
+    }
+    return transaction.Value().Commit();
+}
+
+base::Status SqliteStore::DeleteGrabberProject(model::GrabberProjectId id)
+{
+    base::Result<Transaction> transaction = Transaction::Begin(connection_);
+    if (!transaction) {
+        return transaction.GetError();
+    }
+    base::Status found;
+    const std::optional<std::int64_t> scheduleId = FindGrabberSchedule(connection_, id, found);
+    if (!found) {
+        return found;
+    }
+    // Items go with the project (cascade); downloads lose their project (set null).
+    base::Result<Statement> remove = connection_.Prepare("DELETE FROM grabber_projects WHERE id = ?1");
+    if (!remove) {
+        return remove.GetError();
+    }
+    base::Status removed = remove.Value().Bind(1, id.value).Run();
+    if (!removed) {
+        return removed;
+    }
+    if (scheduleId) {
+        base::Result<Statement> schedule = connection_.Prepare("DELETE FROM schedules WHERE id = ?1");
+        if (!schedule) {
+            return schedule.GetError();
+        }
+        base::Status scheduleRemoved = schedule.Value().Bind(1, *scheduleId).Run();
+        if (!scheduleRemoved) {
+            return scheduleRemoved;
+        }
+    }
+    return transaction.Value().Commit();
+}
+
+base::Result<std::vector<model::GrabberItem>> SqliteStore::LoadGrabberItems(model::GrabberProjectId id)
+{
+    base::Result<Statement> query = connection_.Prepare(
+        "SELECT id, url, kind, parent_id, depth, link_text, size, content_type, checked, state, download_id, "
+        "local_path FROM grabber_items WHERE project_id = ?1 ORDER BY id");
+    if (!query) {
+        return query.GetError();
+    }
+    query.Value().Bind(1, id.value);
+    std::vector<model::GrabberItem> items;
+    for (;;) {
+        base::Result<bool> row = query.Value().Step();
+        if (!row) {
+            return row.GetError();
+        }
+        if (!row.Value()) {
+            return items;
+        }
+        const Statement& r = query.Value();
+        model::GrabberItem item;
+        item.id = r.Int64(0);
+        item.url = r.Text(1);
+        const auto kind = model::ParseGrabberItemKind(r.Text(2));
+        const auto state = model::ParseGrabberItemState(r.Text(9));
+        const std::int64_t depth = r.Int64(4);
+        if (!kind || !state || depth > std::numeric_limits<int>::max()) {
+            return CorruptRow("grabber_items");
+        }
+        item.kind = *kind;
+        item.parentId = r.OptionalInt64(3);
+        item.depth = static_cast<int>(depth);
+        item.linkText = r.Text(5);
+        item.size = r.OptionalInt64(6);
+        item.contentType = r.Text(7);
+        item.checked = r.Int64(8) != 0;
+        item.state = *state;
+        if (const auto download = r.OptionalInt64(10)) {
+            item.downloadId = model::DownloadId{*download};
+        }
+        item.localPath = r.Text(11);
+        items.push_back(std::move(item));
+    }
+}
+
+base::Status SqliteStore::SaveGrabberItems(model::GrabberProjectId id, std::span<const model::GrabberItem> items)
+{
+    base::Result<Transaction> transaction = Transaction::Begin(connection_);
+    if (!transaction) {
+        return transaction.GetError();
+    }
+    // A download deleted since the item was last saved is stored as none, not refused.
+    base::Result<Statement> insert = connection_.Prepare(
+        "INSERT OR REPLACE INTO grabber_items (project_id, id, url, kind, parent_id, depth, link_text, size, "
+        "content_type, checked, state, download_id, local_path) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, "
+        "?11, (SELECT id FROM downloads WHERE id = ?12), ?13)");
+    if (!insert) {
+        return insert.GetError();
+    }
+    for (const model::GrabberItem& item : items) {
+        insert.Value().Reset();
+        base::Status inserted =
+            insert.Value()
+                .Bind(1, id.value)
+                .Bind(2, item.id)
+                .Bind(3, item.url)
+                .Bind(4, model::ToString(item.kind))
+                .Bind(5, item.parentId)
+                .Bind(6, item.depth)
+                .Bind(7, item.linkText)
+                .Bind(8, item.size)
+                .Bind(9, item.contentType)
+                .Bind(10, item.checked)
+                .Bind(11, model::ToString(item.state))
+                .Bind(12, item.downloadId ? std::optional<std::int64_t>(item.downloadId->value) : std::nullopt)
+                .Bind(13, item.localPath)
+                .Run();
+        if (!inserted) {
+            return inserted;
+        }
+    }
+    return transaction.Value().Commit();
+}
+
+base::Status SqliteStore::ClearGrabberItems(model::GrabberProjectId id)
+{
+    base::Result<Statement> remove = connection_.Prepare("DELETE FROM grabber_items WHERE project_id = ?1");
+    if (!remove) {
+        return remove.GetError();
+    }
+    return remove.Value().Bind(1, id.value).Run();
 }
 
 }  // namespace ldm::storage

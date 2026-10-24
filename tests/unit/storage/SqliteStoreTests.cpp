@@ -327,6 +327,131 @@ TEST(SqliteStore, TheBuiltInQueuesCannotBeDeleted)
     EXPECT_EQ(store.LoadQueues().Value().size(), 2u);
 }
 
+ldm::model::GrabberProject SampleProject(std::string name)
+{
+    ldm::model::GrabberProject project;
+    project.name = std::move(name);
+    project.loginUser = "me";
+    project.loginSecret = {1, 2, 3};
+    project.scheduleMode = ldm::model::GrabberScheduleMode::ExploreDownload;
+    project.schedule.enabled = true;
+    project.schedule.mode = ScheduleMode::Once;
+    project.schedule.startMinutes = 600;
+    project.schedule.startDay = 20'000;
+    project.createdAtMs = 1'700'000'000'000;
+    return project;
+}
+
+TEST(SqliteStore, GrabberProjectRoundTripsWithItsSchedule)
+{
+    SqliteStore store = OpenMemoryStore();
+    const auto project = SampleProject("Gallery");
+    auto id = store.InsertGrabberProject(project, R"({"version":1})");
+    ASSERT_TRUE(id.Ok()) << id.GetError().message;
+    auto loaded = store.LoadGrabberProjects();
+    ASSERT_TRUE(loaded.Ok()) << loaded.GetError().message;
+    ASSERT_EQ(loaded.Value().size(), 1u);
+    auto expected = project;
+    expected.id = id.Value();
+    EXPECT_EQ(loaded.Value()[0].project, expected);
+    EXPECT_EQ(loaded.Value()[0].definitionJson, R"({"version":1})");
+
+    expected.name = "Renamed";
+    expected.loginSecret.clear();
+    expected.lastRunAtMs = 5;
+    expected.schedule.enabled = false;
+    expected.isTemplate = true;
+    ASSERT_TRUE(store.SaveGrabberProject(expected, "{}").Ok());
+    loaded = store.LoadGrabberProjects();
+    ASSERT_TRUE(loaded.Ok());
+    EXPECT_EQ(loaded.Value()[0].project, expected);
+    EXPECT_EQ(loaded.Value()[0].definitionJson, "{}");
+
+    EXPECT_FALSE(store.InsertGrabberProject(SampleProject("renamed"), "{}").Ok()) << "names are unique ignoring case";
+    auto missing = expected;
+    missing.id = ldm::model::GrabberProjectId{99};
+    EXPECT_FALSE(store.SaveGrabberProject(missing, "{}").Ok());
+}
+
+TEST(SqliteStore, GrabberItemsRoundTripAndGoWithTheirProject)
+{
+    SqliteStore store = OpenMemoryStore();
+    auto id = store.InsertGrabberProject(SampleProject("Site"), "{}");
+    ASSERT_TRUE(id.Ok());
+    auto download = SampleDownload("g");
+    download.projectId = id.Value();
+    download.listed = false;
+    auto downloadId = store.InsertDownload(download);
+    ASSERT_TRUE(downloadId.Ok()) << downloadId.GetError().message;
+
+    std::vector<ldm::model::GrabberItem> items(2);
+    items[0].id = 1;
+    items[0].url = "https://example.test/";
+    items[0].kind = ldm::model::GrabberItemKind::Page;
+    items[0].state = ldm::model::GrabberItemState::Done;
+    items[0].localPath = "C:\\Mirror\\index.html";
+    items[1].id = 2;
+    items[1].url = "https://example.test/a.zip";
+    items[1].parentId = 1;
+    items[1].depth = 1;
+    items[1].linkText = "A";
+    items[1].size = 1234;
+    items[1].contentType = "application/zip";
+    items[1].checked = true;
+    items[1].state = ldm::model::GrabberItemState::Downloading;
+    items[1].downloadId = downloadId.Value();
+    ASSERT_TRUE(store.SaveGrabberItems(id.Value(), items).Ok());
+    auto loaded = store.LoadGrabberItems(id.Value());
+    ASSERT_TRUE(loaded.Ok()) << loaded.GetError().message;
+    EXPECT_EQ(loaded.Value(), items);
+
+    // Saving again replaces; a download deleted in between is stored as none.
+    items[1].state = ldm::model::GrabberItemState::Done;
+    ASSERT_TRUE(store.DeleteDownload(downloadId.Value()).Ok());
+    ASSERT_TRUE(store.SaveGrabberItems(id.Value(), std::span(items).subspan(1)).Ok());
+    loaded = store.LoadGrabberItems(id.Value());
+    ASSERT_TRUE(loaded.Ok());
+    ASSERT_EQ(loaded.Value().size(), 2u);
+    EXPECT_EQ(loaded.Value()[1].state, ldm::model::GrabberItemState::Done);
+    EXPECT_FALSE(loaded.Value()[1].downloadId);
+
+    // The downloads of a deleted project stay, without it.
+    auto kept = SampleDownload("k");
+    kept.projectId = id.Value();
+    ASSERT_TRUE(store.InsertDownload(kept).Ok());
+    ASSERT_TRUE(store.ClearGrabberItems(id.Value()).Ok());
+    EXPECT_TRUE(store.LoadGrabberItems(id.Value()).Value().empty());
+    ASSERT_TRUE(store.SaveGrabberItems(id.Value(), items).Ok());
+    ASSERT_TRUE(store.DeleteGrabberProject(id.Value()).Ok());
+    EXPECT_TRUE(store.LoadGrabberProjects().Value().empty());
+    EXPECT_TRUE(store.LoadGrabberItems(id.Value()).Value().empty());
+    const auto downloads = store.LoadDownloads();
+    ASSERT_TRUE(downloads.Ok());
+    ASSERT_EQ(downloads.Value().size(), 1u);
+    EXPECT_FALSE(downloads.Value()[0].projectId);
+    EXPECT_FALSE(store.DeleteGrabberProject(id.Value()).Ok());
+}
+
+TEST(SqliteStore, ProjectAndListedRoundTripOnDownloads)
+{
+    SqliteStore store = OpenMemoryStore();
+    auto project = store.InsertGrabberProject(SampleProject("Site"), "{}");
+    ASSERT_TRUE(project.Ok());
+    auto download = SampleDownload("h");
+    download.projectId = project.Value();
+    download.listed = false;
+    auto id = store.InsertDownload(download);
+    ASSERT_TRUE(id.Ok());
+    auto loaded = store.LoadDownloads();
+    ASSERT_TRUE(loaded.Ok());
+    EXPECT_EQ(loaded.Value()[0].projectId, project.Value());
+    EXPECT_FALSE(loaded.Value()[0].listed);
+    download.id = id.Value();
+    download.listed = true;
+    ASSERT_TRUE(store.SaveDownload(download).Ok());
+    EXPECT_TRUE(store.LoadDownloads().Value()[0].listed);
+}
+
 TEST(SqliteStore, QueueMembershipRoundTrips)
 {
     SqliteStore store = OpenMemoryStore();
@@ -692,6 +817,25 @@ TEST(Migrations, SchemaEightLeavesEarlierDownloadsOutsideAnyQueue)
     // A second main queue is refused by the schema itself.
     EXPECT_FALSE(
         connection.Value().Execute("INSERT INTO queues (name, kind, sort_order) VALUES ('Another', 'main', 9)").Ok());
+}
+
+TEST(Migrations, SchemaNineListsEarlierDownloads)
+{
+    auto connection = ldm::storage::Connection::Open(":memory:");
+    ASSERT_TRUE(connection.Ok());
+    ASSERT_TRUE(connection.Value().Execute("PRAGMA foreign_keys = ON").Ok());
+    ASSERT_TRUE(ldm::storage::MigrateTo(connection.Value(), 8).Ok());
+    ASSERT_TRUE(connection.Value()
+                    .Execute("INSERT INTO downloads (id, public_id, url, file_name, save_dir, status, created_at, "
+                             "sort_order) VALUES (7, 'p', 'https://x.test/f', 'f', 'C:\\\\D', 'paused', 1, 1);")
+                    .Ok());
+    const auto migrated = ldm::storage::Migrate(connection.Value());
+    ASSERT_TRUE(migrated.Ok()) << migrated.GetError().message;
+    auto query = connection.Value().Prepare("SELECT project_id, listed FROM downloads");
+    ASSERT_TRUE(query.Ok());
+    ASSERT_TRUE(query.Value().Step().Value());
+    EXPECT_FALSE(query.Value().OptionalInt64(0).has_value());
+    EXPECT_EQ(query.Value().Int64(1), 1);
 }
 
 TEST(Migrations, RefusesNewerSchema)
