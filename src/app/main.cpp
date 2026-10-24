@@ -137,6 +137,19 @@ int WINAPI wWinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int sho
         ::MessageBoxW(nullptr, ldm::core::CommandLineHelp().c_str(), kAppTitle, MB_OK | MB_ICONINFORMATION);
         return 0;
     }
+    if (launch.writeHostManifests) {
+        // The installer's last step: the browsers can start LDM before it was ever launched. No
+        // window, no instance lock; LDM writes the same registration again on every start.
+        const auto localData = KnownFolder(FOLDERID_LocalAppData);
+        const std::filesystem::path programFolder = ProgramFolder();
+        if (!localData || programFolder.empty()) {
+            return 1;
+        }
+        return ldm::platform::RegisterBrowserHosts(*localData / L"Last Download Manager" / L"browser",
+                                                   programFolder / L"ldm-host.exe")
+                   ? 0
+                   : 1;
+    }
     const auto instanceLock = ldm::platform::InstanceLock::TryAcquire();
     if (!instanceLock) {
         ldm::platform::AllowRunningInstanceToActivate();

@@ -64,6 +64,9 @@ TEST(CommandLine, ParsesSwitches)
     EXPECT_TRUE(ParseCommandLine({L"--tray"}).request.tray);
     EXPECT_TRUE(ParseCommandLine({L"--help"}).request.help);
     EXPECT_FALSE(ParseCommandLine({}).error);
+    const auto install = ParseCommandLine({L"--write-host-manifests"});
+    EXPECT_FALSE(install.error);
+    EXPECT_TRUE(install.request.writeHostManifests);
 }
 
 TEST(CommandLine, RejectsBadInput)
@@ -76,6 +79,8 @@ TEST(CommandLine, RejectsBadInput)
              {L"https://x.test/a", L"--name", L"..\\up.zip"},
              {L"--silent"},
              {L"https://x.test/a", L"--unknown"},
+             {L"--write-host-manifests", L"--tray"},
+             {L"https://x.test/a", L"--write-host-manifests"},
          }) {
         EXPECT_TRUE(ParseCommandLine(arguments).error) << arguments.size();
     }

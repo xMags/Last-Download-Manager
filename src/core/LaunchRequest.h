@@ -18,6 +18,9 @@ struct LaunchRequest {
     bool startQueue = false;  // start the main download queue
     bool tray = false;        // start hidden in the tray (used by Launch on startup)
     bool help = false;
+    // Register the browser helper for the current user and exit, without starting LDM: the
+    // installer's last step (M5 design section 2.2). Never forwarded to a running instance.
+    bool writeHostManifests = false;
 };
 
 struct CommandLineParse {
