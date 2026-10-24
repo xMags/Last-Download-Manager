@@ -18,7 +18,8 @@
   </p>
 
   <p>
-    <a href="https://github.com/xMags/Last-Download-Manager/releases/latest/download/LastDownloadManager-windows-x64.zip"><img alt="Download Last Download Manager for Windows" src="https://img.shields.io/badge/Download-Windows_x64-16A34A?style=for-the-badge&logo=windows&logoColor=white" /></a>
+    <a href="https://github.com/xMags/Last-Download-Manager/releases/latest/download/LastDownloadManager-windows-x64-setup.exe"><img alt="Download the Last Download Manager installer for Windows" src="https://img.shields.io/badge/Download-Installer_x64-16A34A?style=for-the-badge&logo=windows&logoColor=white" /></a>
+    <a href="https://github.com/xMags/Last-Download-Manager/releases/latest/download/LastDownloadManager-windows-x64.zip"><img alt="Download the portable Last Download Manager" src="https://img.shields.io/badge/Download-Portable_zip-15803D?style=for-the-badge&logo=windows&logoColor=white" /></a>
     <a href="https://github.com/xMags/Last-Download-Manager/releases/latest/download/LastDownloadManager-browser-extension.zip"><img alt="Download the browser extension" src="https://img.shields.io/badge/Download-Browser_extension-0097B2?style=for-the-badge&logo=googlechrome&logoColor=white" /></a>
   </p>
 
@@ -40,16 +41,21 @@
 </div>
 
 > [!NOTE]
-> Last Download Manager is a complete rewrite in progress. The previous wxWidgets version has been retired; the new app is plain Win32 C++ with no web views. There is no installer yet: download the latest build below, or build it from source.
+> Last Download Manager 5 is a complete rewrite: the previous wxWidgets version (1.x and 2.x) has been retired, and the new app is plain Win32 C++ with no web views. If the old version is installed, uninstall it first; it installed for all users into Program Files, while version 5 installs for your user only.
 
 ---
 
 ## Install
 
-1. Download [**LastDownloadManager-windows-x64.zip**](https://github.com/xMags/Last-Download-Manager/releases/latest/download/LastDownloadManager-windows-x64.zip), unzip it to a folder of your choice and run `ldm.exe`. Keep `ldm-host.exe`, `ffmpeg.exe` and `ffprobe.exe` beside it.
-2. Download [**LastDownloadManager-browser-extension.zip**](https://github.com/xMags/Last-Download-Manager/releases/latest/download/LastDownloadManager-browser-extension.zip), unzip it, and load the folder for your browser as described in [Browser extension](#browser-extension).
+1. Download [**LastDownloadManager-windows-x64-setup.exe**](https://github.com/xMags/Last-Download-Manager/releases/latest/download/LastDownloadManager-windows-x64-setup.exe) and run it. It installs for your Windows user only and needs no administrator rights. It registers the browser helper, so the extension can reach LDM right away, and can start LDM in the notification area when you sign in.
+2. Add the browser extension: load it from [**LastDownloadManager-browser-extension.zip**](https://github.com/xMags/Last-Download-Manager/releases/latest/download/LastDownloadManager-browser-extension.zip) as described in [Browser extension](#browser-extension). Store listings for Chrome, Edge and Firefox are on the way.
 
-Every build is listed on the [releases page](https://github.com/xMags/Last-Download-Manager/releases/latest).
+> [!IMPORTANT]
+> The installer is not code-signed yet, so Windows SmartScreen may say "Windows protected your PC". Choose **More info**, then **Run anyway**. The message goes away as more people install the release.
+
+**Portable:** [**LastDownloadManager-windows-x64.zip**](https://github.com/xMags/Last-Download-Manager/releases/latest/download/LastDownloadManager-windows-x64.zip) holds the same program. Unzip it to a folder of your choice and run `ldm.exe`, keeping `ldm-host.exe`, `ffmpeg.exe` and `ffprobe.exe` beside it.
+
+**Uninstalling** keeps your download list and settings unless you choose to delete them too; downloaded files are never deleted. Every release is listed on the [releases page](https://github.com/xMags/Last-Download-Manager/releases/latest).
 
 ---
 
@@ -77,11 +83,25 @@ Every build is listed on the [releases page](https://github.com/xMags/Last-Downl
 - FFmpeg joins the tracks into MP4, or MKV when MP4 cannot hold them, and writes the resolution, codecs and length into the description. Subtitles save as WebVTT.
 - Streams from the internet are never allowed to make LDM send requests into your home network.
 
+### Queues and scheduler
+
+- Download queues that run a set number of files at a time, retry failed ones, and start and stop at the times you set, once or on chosen weekdays.
+- A synchronization queue that checks finished files for changes on the server and downloads only what changed.
+- After a queue finishes: exit LDM, sleep, hibernate or shut down, with a countdown you can cancel.
+
+### Site Grabber
+
+- Explores a site from a start page, as deep as you choose, and lists the pictures, audio, video or other files it links to, with templates for the common cases.
+- Filters by file type, size, folder and site, then downloads the files you check, keeping the site's folders if you like.
+- Saves whole pages for offline browsing, with their links pointing at the saved copies.
+- Signs in with a user name and password, or with the cookies of your browser, and runs on a schedule.
+
 ### Windows app
 
 - Native Win32 window with a category tree, sortable columns, progress windows and a system tray icon.
 - Light and dark themes, per-monitor DPI scaling, clipboard monitoring and a drop target.
 - Import and export of download lists, batch downloads, and command-line adds.
+- An optional check for new versions, which only shows a notice and never installs anything by itself.
 
 ---
 
@@ -123,9 +143,9 @@ One coordinator on its own thread owns all download state and the database; the 
 | --- | --- | --- |
 | 1 | Feature study and plan | Done |
 | 2 | Native shell and reliable downloads | Done |
-| 3 | Browser integration and media capture | In progress: live streams next |
-| 4 | Queues, scheduler, organization and Site Grabber | Planned |
-| 5 | Packaging and installer | Planned |
+| 3 | Browser integration and media capture | Done |
+| 4 | Queues, scheduler, organization and Site Grabber | Done, in final testing |
+| 5 | Installer, update check and first release | In progress: the release and the store listings are next |
 
 ---
 
@@ -144,7 +164,7 @@ The first configure builds the dependencies (libcurl, SQLite, FFmpeg, nlohmann-j
 
 Use the `windows-debug` preset for a debug build, `windows-asan` for AddressSanitizer, and `windows-analyze` for MSVC code analysis.
 
-To make the two release archives the download buttons point to, run `cmake --build --preset windows-release --target ldm_package`; they are written to `build/windows-release/package/`.
+To make the release files the download buttons point to, run `cmake --build --preset windows-release --target ldm_installer` (or `ldm_package` for the archives without the installer, which needs [Inno Setup 6](https://jrsoftware.org/isinfo.php)). They are written to `build/windows-release/package/`. The whole release process is in [docs/releasing.md](docs/releasing.md).
 
 ---
 
@@ -155,7 +175,9 @@ The extension comes in the release archive above, or, when Node.js is installed,
 - **Chrome or Edge:** open `chrome://extensions` (or `edge://extensions`), turn on Developer mode, choose **Load unpacked** and pick the `chromium` folder.
 - **Firefox:** open `about:debugging#/runtime/this-firefox`, choose **Load Temporary Add-on** and pick `manifest.json` in the `firefox` folder. Firefox removes it when it restarts.
 
-LDM registers its browser helper (`ldm-host.exe`) every time it starts, so start LDM once before loading the extension.
+LDM registers its browser helper (`ldm-host.exe`) when it is installed and every time it starts. With the portable zip, start LDM once before loading the extension.
+
+The extension sends what it hands over only to LDM on your computer; see the [privacy policy](docs/privacy-policy.md).
 
 ---
 
@@ -177,7 +199,8 @@ The integration tests drive the real engine against a local HTTP and FTP test se
 src/
   app/              ldm.exe entry point and wiring
   base/ model/      shared types, the download model and settings
-  core/             coordinator, commands, ports and snapshots
+  core/             coordinator, commands, ports, snapshots, queues and scheduler
+  grabber/          Site Grabber: link scanning, filters and the explorer
   engine/           libcurl transfers, stream runs and the disk writer
   media/            HLS and DASH parsing
   browser/          browser messaging protocol
@@ -187,10 +210,12 @@ src/
   host/             ldm-host.exe, the native messaging host
   resources/        icons, manifest and dialog resources
 extension/          browser extension source and its build script
+installer/          Inno Setup script for the Windows installer
+docs/               privacy policy, release process and store listing texts
 tests/              unit and integration tests, test servers
-cmake/              vcpkg triplet and release packaging
+cmake/              vcpkg triplet, release packaging, installer and license notices
 ```
 
 ## License
 
-Last Download Manager is free software under the [GNU General Public License v3.0](LICENSE). The bundled FFmpeg build is LGPL.
+Last Download Manager is free software under the [GNU General Public License v3.0](LICENSE). The bundled FFmpeg build is LGPL. Every release carries `THIRD-PARTY-NOTICES.txt` with the versions and licenses of the components it ships.
