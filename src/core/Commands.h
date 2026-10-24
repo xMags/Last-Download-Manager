@@ -110,6 +110,12 @@ struct StopCommand {
     std::vector<model::DownloadId> ids;
 };
 struct StopAllCommand {};
+// Ends live recordings (checklist P-07): what is on disk is joined into the file, and what the
+// stream lists beyond it is given up. A running recording stops first. A recording with nothing
+// on disk yet only stops. Ignored for downloads that are not live recordings.
+struct FinishRecordingCommand {
+    std::vector<model::DownloadId> ids;
+};
 struct DeleteCommand {
     std::vector<model::DownloadId> ids;
     bool deleteFiles = false;  // also delete completed files from disk (checklist L-07)
@@ -218,7 +224,7 @@ struct FetchManifestCommand {
 };
 
 using Command = std::variant<AddDownloadCommand, ConfirmDownloadCommand, ResumeCommand, StopCommand, StopAllCommand,
-                             DeleteCommand, DeleteCompletedCommand, RedownloadCommand, SetDownloadSpeedLimitCommand,
+                             FinishRecordingCommand, DeleteCommand, DeleteCompletedCommand, RedownloadCommand, SetDownloadSpeedLimitCommand,
                              SetSpeedLimiterCommand, UpdateDownloadCommand, MoveDownloadCommand, SaveCategoryCommand,
                              DeleteCategoryCommand, ReassignCategoryCommand, UpdateSettingsCommand,
                              ModifySettingsCommand, ReplaceSiteLoginsCommand, ReplaceServerLimitsCommand,

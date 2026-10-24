@@ -83,7 +83,8 @@ struct MediaTrack {
     std::vector<MediaPiece> pieces;
     std::vector<Segment> ranges;
 
-    [[nodiscard]] bool Listed() const noexcept { return !pieces.empty(); }
+    // A live track is listed once its playlist was read, even before the stream's first segment.
+    [[nodiscard]] bool Listed() const noexcept { return !pieces.empty() || live; }
 };
 
 }  // namespace ldm::model

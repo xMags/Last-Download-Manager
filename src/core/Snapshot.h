@@ -34,8 +34,10 @@ struct DownloadView {
     struct Stream {
         int piecesDone = 0;
         int piecesTotal = 0;  // 0 while a track's list is not read yet
-        double fraction = 0;  // 0..1
+        double fraction = 0;  // 0..1; of what is listed so far for a live recording
         std::optional<std::int64_t> estimatedBytes;  // of what is downloaded, before joining
+        bool live = false;  // a live recording: no total, the length grows while it runs
+        std::int64_t recordedUs = 0;  // the length on disk
     };
     std::optional<Stream> stream;
 };

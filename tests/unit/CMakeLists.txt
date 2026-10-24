@@ -8,6 +8,7 @@ add_executable(ldm_unit_tests
     browser/ProtocolTests.cpp
     core/CaptureCasesTests.cpp
     core/CoordinatorTests.cpp
+    core/MediaPiecesTests.cpp
     core/NetworkAddressTests.cpp
     core/QuotaTests.cpp
     core/SegmentPlannerTests.cpp

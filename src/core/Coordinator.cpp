@@ -28,6 +28,8 @@ constexpr int kMaxNumberedNames = 9999;
 constexpr int kMaxFinalizeAttempts = 3;
 constexpr int kMaxConnections = 32;
 constexpr int kMaxSpeedLimiterKilobytes = 10'000'000;
+// A live recording whose playlist cannot be read this many times in a row fails.
+constexpr int kMaxPlaylistReloadFailures = 6;
 
 struct BuiltinCategory {
     std::string_view name;
@@ -92,6 +94,40 @@ bool SameStream(const model::Download& download, const AddDownloadCommand& comma
         }
     }
     return true;
+}
+
+// How long until a live recording's playlists are read again (RFC 8216 section 6.3.4): the target
+// duration after a reload that brought something, half of it after one that did not. The target
+// is the longest recent piece of a live track, kept between 1 and 60 seconds.
+std::chrono::milliseconds ReloadInterval(const model::Download& download, bool changed)
+{
+    constexpr size_t kRecentPieces = 16;
+    constexpr std::int64_t kUnknownUs = 2'000'000;  // no segment yet: a common target duration
+    std::int64_t longestUs = 0;
+    for (const model::MediaTrack& track : download.tracks) {
+        if (!track.live) {
+            continue;
+        }
+        size_t seen = 0;
+        for (auto piece = track.pieces.rbegin(); piece != track.pieces.rend() && seen < kRecentPieces; ++piece) {
+            if (piece->kind == model::MediaPiece::Kind::Media) {
+                longestUs = std::max(longestUs, piece->durationUs);
+                ++seen;
+            }
+        }
+    }
+    const std::int64_t targetUs =
+        std::clamp(longestUs > 0 ? longestUs : kUnknownUs, std::int64_t{1'000'000}, std::int64_t{60'000'000});
+    return std::chrono::milliseconds((changed ? targetUs : targetUs / 2) / 1000);
+}
+
+bool HasRecordedPieces(const model::Download& download)
+{
+    return std::any_of(download.tracks.begin(), download.tracks.end(), [](const model::MediaTrack& track) {
+        return std::any_of(track.pieces.begin(), track.pieces.end(), [](const model::MediaPiece& piece) {
+            return piece.kind == model::MediaPiece::Kind::Media && piece.done;
+        });
+    });
 }
 
 std::int64_t ProgressEnd(const model::Download& download)
@@ -286,6 +322,8 @@ void Coordinator::Handle(Command command)
                 Stop(typed.ids);
             } else if constexpr (std::is_same_v<T, StopAllCommand>) {
                 StopAll();
+            } else if constexpr (std::is_same_v<T, FinishRecordingCommand>) {
+                FinishRecording(typed.ids);
             } else if constexpr (std::is_same_v<T, DeleteCommand>) {
                 Delete(typed.ids, typed.deleteFiles);
             } else if constexpr (std::is_same_v<T, DeleteCompletedCommand>) {
@@ -610,6 +648,29 @@ void Coordinator::StopAll()
     for (auto& [id, entry] : entries_) {
         if (entry.running) {
             RequestStop(entry);
+        }
+    }
+}
+
+void Coordinator::FinishRecording(const std::vector<model::DownloadId>& ids)
+{
+    for (const model::DownloadId id : ids) {
+        Entry* entry = Find(id);
+        if (entry == nullptr || entry->deleteWhenStopped || entry->finalizing || !IsRecording(entry->download)) {
+            continue;
+        }
+        if (entry->running) {
+            // Set first: a run the engine never started ends inside RequestStop.
+            entry->finishRecording = true;
+            RequestStop(*entry);
+            continue;
+        }
+        if (CanStart(entry->download.status)) {
+            if (entry->quotaHeld) {
+                entry->quotaHeld = false;
+                entry->download.lastResult.reset();
+            }
+            FinishRecordingNow(*entry);
         }
     }
 }
@@ -1191,6 +1252,20 @@ void Coordinator::OnRunEnded(Entry& entry, TransferOutcome outcome, const std::o
         return;
     }
     entry.resumeWhenStopped = false;
+    if (entry.finishRecording && outcome != TransferOutcome::Completed && !shuttingDown_) {
+        entry.finishRecording = false;
+        FinishRecordingNow(entry);
+        UpdatePowerRequest();
+        return;
+    }
+    entry.finishRecording = false;
+    if (entry.recordingFailure && outcome != TransferOutcome::Completed && !shuttingDown_) {
+        const TransferFailure failure = *std::exchange(entry.recordingFailure, std::nullopt);
+        Fail(entry, failure);
+        UpdatePowerRequest();
+        return;
+    }
+    entry.recordingFailure.reset();
 
     switch (outcome) {
     case TransferOutcome::Completed:
@@ -1303,6 +1378,14 @@ void Coordinator::Start(Entry& entry)
         return;
     }
     entry.quotaHeld = false;
+    entry.listedThisRun = false;
+    entry.nextPlaylistReload.reset();
+    entry.pendingReloads = 0;
+    entry.reloadChanged = false;
+    entry.reloadFailure.reset();
+    entry.reloadFailures = 0;
+    entry.recordingFailure.reset();
+    entry.finishRecording = false;
     d.epoch += 1;
     d.status = DownloadStatus::Downloading;
     d.lastTryAtMs = ports_.clock->NowUnixMs();
@@ -1599,7 +1682,7 @@ std::optional<std::string> Coordinator::ValidateMedia(const MediaChoice& media, 
                 return "The stream is protected (DRM), which LDM does not download.";
             }
             if (choice.segments->live) {
-                return "This is a live stream; LDM does not download live streams yet.";
+                return "LDM records live HLS streams only, and this is a live DASH stream.";
             }
             if (choice.segments->segments.empty() || choice.segments->segments.size() > media::kMaxSegmentsPerTrack) {
                 return "A track of the stream lists no segments, or too many.";
@@ -1621,31 +1704,26 @@ std::optional<std::string> Coordinator::ValidateMedia(const MediaChoice& media, 
 void Coordinator::StartStream(Entry& entry)
 {
     model::Download& d = entry.download;
-    std::vector<std::string> cookieLines;
-    if (!d.cookieSecret.empty()) {
-        if (auto cookies = ports_.secrets->Unprotect(d.cookieSecret)) {
-            cookieLines = model::CookieLines(cookies.Value());
-        }
-    }
-    const std::string userAgent = d.userAgent.value_or(settings_.userAgent);
     const std::vector<std::uint32_t> unlisted = UnlistedTracks(d);
     if (!unlisted.empty()) {
         entry.playlistFailure.reset();
         entry.pendingPlaylists = static_cast<int>(unlisted.size());
+        entry.listedThisRun = true;
         for (const std::uint32_t track : unlisted) {
-            FetchRequest fetch;
-            fetch.fetchId = --lastPlaylistFetchId_;
-            fetch.url = d.tracks[track].sourceUrl;
-            fetch.referer = d.referer;
-            fetch.userAgent = userAgent;
-            fetch.cookieLines = cookieLines;
-            fetch.proxy = entry.runProxy;
-            fetch.maxBytes = media::kMaxManifestBytes;
-            fetch.refusePrivateAddresses = !d.mediaFromPrivateNetwork;
-            playlistFetches_.emplace(fetch.fetchId, PlaylistFetch{d.id, d.epoch, track});
-            ports_.engine->Fetch(std::move(fetch));
+            FetchPlaylist(entry, track, PlaylistPurpose::Initial);
         }
         return;
+    }
+    if (!entry.listedThisRun && IsRecording(d)) {
+        // A recording that continues after a pause: what it listed then has left the stream's
+        // window by now. The first reload, at once, picks it up at the live edge.
+        std::vector<std::uint32_t> changed;
+        for (std::uint32_t t = 0; t < d.tracks.size(); ++t) {
+            if (d.tracks[t].live && SkipUnfetchedPieces(d.tracks[t])) {
+                changed.push_back(t);
+            }
+        }
+        StoreTracks(entry, changed);
     }
     if (const auto refused = CheckPrivateAddresses(d)) {
         MediaFinished failed;
@@ -1655,13 +1733,146 @@ void Coordinator::StartStream(Entry& entry)
     }
     MediaRequest request = BuildMediaRequest(d, PartsFolder(d));
     request.referer = d.referer;
-    request.userAgent = userAgent;
-    request.cookieLines = std::move(cookieLines);
+    request.userAgent = d.userAgent.value_or(settings_.userAgent);
+    request.cookieLines = StreamCookieLines(d);
     request.proxy = entry.runProxy;
     request.maxConnections = ConnectionsFor(entry, ParseUrl(d.url), false);
     request.speedLimitBytesPerSecond = d.speedLimitBytesPerSecond;
     request.maxAttemptsPerSegment = config_.maxAttemptsPerSegment;
     ports_.engine->StartMedia(std::move(request));
+    if (IsRecording(d)) {
+        const auto now = ports_.clock->Steady();
+        entry.nextPlaylistReload = entry.listedThisRun ? now + ReloadInterval(d, true) : now;
+    }
+}
+
+std::vector<std::string> Coordinator::StreamCookieLines(const model::Download& download)
+{
+    if (download.cookieSecret.empty()) {
+        return {};
+    }
+    auto cookies = ports_.secrets->Unprotect(download.cookieSecret);
+    return cookies ? model::CookieLines(cookies.Value()) : std::vector<std::string>{};
+}
+
+void Coordinator::FetchPlaylist(Entry& entry, std::uint32_t track, PlaylistPurpose purpose)
+{
+    const model::Download& d = entry.download;
+    FetchRequest fetch;
+    fetch.fetchId = --lastPlaylistFetchId_;
+    fetch.url = d.tracks[track].sourceUrl;
+    fetch.referer = d.referer;
+    fetch.userAgent = d.userAgent.value_or(settings_.userAgent);
+    fetch.cookieLines = StreamCookieLines(d);
+    fetch.proxy = entry.runProxy;
+    fetch.maxBytes = media::kMaxManifestBytes;
+    fetch.refusePrivateAddresses = !d.mediaFromPrivateNetwork;
+    playlistFetches_.emplace(fetch.fetchId, PlaylistFetch{d.id, d.epoch, track, purpose});
+    ports_.engine->Fetch(std::move(fetch));
+}
+
+void Coordinator::ReloadPlaylists(Entry& entry)
+{
+    entry.nextPlaylistReload.reset();
+    const model::Download& d = entry.download;
+    for (std::uint32_t t = 0; t < d.tracks.size(); ++t) {
+        if (d.tracks[t].live) {
+            entry.pendingReloads += 1;
+            FetchPlaylist(entry, t, PlaylistPurpose::Reload);
+        }
+    }
+}
+
+void Coordinator::OnPlaylistReloaded(Entry& entry, std::uint32_t track, const FetchFinished& fetched)
+{
+    if (entry.pendingReloads <= 0) {
+        return;
+    }
+    entry.pendingReloads -= 1;
+    model::Download& d = entry.download;
+    // A track finished meanwhile takes nothing more.
+    if (!entry.stopRequested && track < d.tracks.size() && d.tracks[track].live) {
+        if (fetched.failure) {
+            entry.reloadFailure = fetched.failure;
+        } else if (TrackReload reload = ReloadTrack(d.tracks[track], fetched); reload.failure) {
+            entry.reloadFailure = std::move(reload.failure);
+        } else if (reload.append.changed) {
+            entry.reloadChanged = true;
+            if (base::Status stored = ports_.store->AppendMediaTrack(d.id, track, d.tracks[track],
+                                                                     reload.append.firstNewKey,
+                                                                     reload.append.firstNewPiece);
+                !stored) {
+                ReportError("Download state could not be saved: " + stored.GetError().message);
+            }
+            MarkChanged(entry);
+            if (auto refused = CheckPrivateAddresses(d)) {
+                entry.recordingFailure = std::move(refused);
+            } else {
+                MediaExtension extension;
+                extension.tracks.push_back(BuildTrackExtension(d, PartsFolder(d), track, reload.append));
+                ports_.engine->ExtendMedia(d.id, d.epoch, std::move(extension));
+            }
+        }
+    }
+    if (entry.pendingReloads > 0) {
+        return;
+    }
+    // Every playlist of this reload answered.
+    const bool changed = std::exchange(entry.reloadChanged, false);
+    const std::optional<TransferFailure> failure = std::exchange(entry.reloadFailure, std::nullopt);
+    if (entry.stopRequested) {
+        return;
+    }
+    if (failure && !entry.recordingFailure) {
+        entry.reloadFailures += 1;
+        if (entry.reloadFailures >= kMaxPlaylistReloadFailures) {
+            entry.recordingFailure = failure;
+        }
+    } else if (!failure) {
+        entry.reloadFailures = 0;
+    }
+    if (entry.recordingFailure) {
+        RequestStop(entry);
+        return;
+    }
+    if (IsRecording(d)) {
+        entry.nextPlaylistReload = ports_.clock->Steady() + ReloadInterval(d, changed);
+    }
+}
+
+void Coordinator::FinishRecordingNow(Entry& entry)
+{
+    model::Download& d = entry.download;
+    if (!HasRecordedPieces(d)) {
+        // Nothing to join: it stays a recording that Resume continues.
+        d.status = DownloadStatus::Paused;
+        d.lastResult = "Nothing was recorded yet";
+        Save(entry);
+        MarkChanged(entry);
+        return;
+    }
+    std::vector<std::uint32_t> changed;
+    for (std::uint32_t t = 0; t < d.tracks.size(); ++t) {
+        model::MediaTrack& track = d.tracks[t];
+        bool trackChanged = !track.wholeFile && SkipUnfetchedPieces(track);
+        if (track.live) {
+            track.live = false;
+            trackChanged = true;
+        }
+        if (trackChanged) {
+            changed.push_back(t);
+        }
+    }
+    StoreTracks(entry, changed);
+    d.lastResult.reset();
+    MarkChanged(entry);
+    if (d.awaitingConfirmation) {
+        entry.holdFinalize = true;  // the user may still rename it in the open info dialog
+        d.status = DownloadStatus::Finalizing;
+        Save(entry);
+        return;
+    }
+    CompleteRun(entry);
 }
 
 void Coordinator::OnPlaylistFetched(const FetchFinished& fetched)
@@ -1673,7 +1884,14 @@ void Coordinator::OnPlaylistFetched(const FetchFinished& fetched)
     const PlaylistFetch fetch = it->second;
     playlistFetches_.erase(it);
     Entry* entry = Find(fetch.id);
-    if (entry == nullptr || entry->download.epoch != fetch.epoch || !entry->running || entry->pendingPlaylists <= 0) {
+    if (entry == nullptr || entry->download.epoch != fetch.epoch || !entry->running) {
+        return;
+    }
+    if (fetch.purpose == PlaylistPurpose::Reload) {
+        OnPlaylistReloaded(*entry, fetch.track, fetched);
+        return;
+    }
+    if (entry->pendingPlaylists <= 0) {
         return;
     }
     entry->pendingPlaylists -= 1;
@@ -1738,6 +1956,8 @@ void Coordinator::OnMediaFinished(Entry& entry, const MediaFinished& finished)
     entry.bytesPerSecond = 0;
     entry.connections.clear();
     entry.retrying.reset();
+    entry.nextPlaylistReload.reset();
+    entry.pendingReloads = 0;  // answers still under way find the run gone
     const std::vector<MediaPieceDone> applied = ApplyPiecesDone(d, finished.done);
     entry.unsavedPieces.insert(entry.unsavedPieces.end(), applied.begin(), applied.end());
     ApplyRanges(d, finished.ranges);
@@ -1962,6 +2182,10 @@ void Coordinator::Tick()
         if (entry.unsaved && now - entry.lastCheckpoint >= config_.checkpointInterval) {
             Save(entry);
         }
+        if (entry.running && !entry.stopRequested && entry.pendingReloads == 0 && entry.nextPlaylistReload &&
+            now >= *entry.nextPlaylistReload) {
+            ReloadPlaylists(entry);
+        }
     }
     EnforceQuota();
     if (waitingForAddress_ && now - waitingSince_ >= kAddressWaitLimit) {
@@ -1981,6 +2205,9 @@ std::chrono::steady_clock::time_point Coordinator::NextDeadline() const
     for (const auto& [id, entry] : entries_) {
         if (entry.unsaved) {
             deadline = std::min(deadline, entry.lastCheckpoint + config_.checkpointInterval);
+        }
+        if (entry.running && entry.pendingReloads == 0 && entry.nextPlaylistReload) {
+            deadline = std::min(deadline, *entry.nextPlaylistReload);
         }
     }
     // Wake when the quota period ends, to restart held downloads, or when an override runs out.
@@ -2131,14 +2358,19 @@ void Coordinator::PublishSnapshot()
                 stream.piecesDone = summary.piecesDone;
                 stream.piecesTotal = summary.piecesTotal;
                 stream.fraction = entry->download.status == DownloadStatus::Completed ? 1.0 : summary.fraction;
+                stream.live = summary.live;
+                stream.recordedUs = summary.recordedUs;
                 // From what arrived once there is enough of it; the panel's estimate before that.
+                // A recording has no end to estimate towards: it is as large as what it recorded.
                 constexpr double kEnoughToEstimate = 0.02;
-                if (summary.fraction >= kEnoughToEstimate && summary.bytesDone > 0) {
+                if (summary.live) {
+                    stream.estimatedBytes = summary.bytesDone;
+                } else if (summary.fraction >= kEnoughToEstimate && summary.bytesDone > 0) {
                     stream.estimatedBytes = static_cast<std::int64_t>(static_cast<double>(summary.bytesDone) / summary.fraction);
                 } else {
                     stream.estimatedBytes = entry->approximateBytes;
                 }
-                if (!expectedSize) {
+                if (!expectedSize && !summary.live) {
                     expectedSize = stream.estimatedBytes;
                 }
                 view->stream = stream;
