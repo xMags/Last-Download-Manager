@@ -337,6 +337,25 @@ TEST_F(BrowserHostTest, BrowserPipeCarriesLdmsIntegrityLevel)
     EXPECT_TRUE(found) << "the pipe has no integrity label";
 }
 
+// A client that connects and leaves at once makes the bridge's first read fail immediately, and
+// such a read never signals its event. The bridge must not wait for it: it still serves the next
+// host and stops cleanly (the label check above connects this way, and used to hang the bridge).
+TEST_F(BrowserHostTest, BridgeSurvivesClientsThatLeaveAtOnce)
+{
+    const std::wstring name = ldm::platform::BrowserPipeName();
+    for (int i = 0; i < 2 * ldm::platform::BrowserBridge::kMaxConnections; ++i) {
+        const HANDLE client =
+            ::CreateFileW(name.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, 0, nullptr);
+        ASSERT_NE(client, INVALID_HANDLE_VALUE) << "connection " << i << ": error " << ::GetLastError();
+        ::CloseHandle(client);
+        ::Sleep(20);  // the bridge takes the connection and tries its first read
+    }
+    StartHost(ChromiumOrigin());
+    SendToHost(kHello);
+    ExpectHostInfo();
+    EXPECT_TRUE(events_.Pop()) << "the hello reached LDM";
+}
+
 TEST_F(BrowserHostTest, ConnectionsAreNumberedAndKeptApart)
 {
     StartHost(ChromiumOrigin());
