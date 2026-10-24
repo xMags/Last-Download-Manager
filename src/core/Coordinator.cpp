@@ -85,6 +85,9 @@ std::int64_t ProgressEnd(const model::Download& download)
 Coordinator::Coordinator(const CoordinatorPorts& ports, CoordinatorConfig config)
     : ports_(ports), config_(std::move(config))
 {
+    if (ports_.engine != nullptr && ports_.proxy != nullptr && ports_.observer != nullptr) {
+        manifests_ = std::make_unique<ManifestFetches>(*ports_.engine, *ports_.proxy, *ports_.observer);
+    }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -293,6 +296,10 @@ void Coordinator::Handle(Command command)
                 WaitForAddress(typed.id);
             } else if constexpr (std::is_same_v<T, ReplaceAddressCommand>) {
                 ReplaceAddress(typed);
+            } else if constexpr (std::is_same_v<T, FetchManifestCommand>) {
+                if (manifests_) {
+                    manifests_->Start(std::move(typed), settings_.userAgent);
+                }
             } else {
                 static_assert(sizeof(T) == 0, "unhandled command");
             }
@@ -980,6 +987,19 @@ void Coordinator::ReplaceServerLimits(std::vector<model::ServerLimit> limits)
 
 void Coordinator::OnEngineEvent(EngineEvent event)
 {
+    // Manifest fetches are not downloads: their answers and proxy lookups go to their own owner.
+    if (auto* fetched = std::get_if<FetchFinished>(&event.payload)) {
+        if (manifests_) {
+            manifests_->OnFinished(std::move(*fetched));
+        }
+        return;
+    }
+    if (ManifestFetches::IsFetchKey(event.id)) {
+        if (const auto* resolved = std::get_if<ProxyResolved>(&event.payload); resolved && manifests_) {
+            manifests_->OnProxyResolved(event.id, resolved->proxy);
+        }
+        return;
+    }
     Entry* entry = Find(event.id);
     if (entry == nullptr || event.epoch != entry->download.epoch) {
         return;  // a late event from an older run (design section 3, epochs)
@@ -997,6 +1017,8 @@ void Coordinator::OnEngineEvent(EngineEvent event)
                 OnFinalized(*entry, payload);
             } else if constexpr (std::is_same_v<T, ProxyResolved>) {
                 OnProxyResolved(*entry, payload);
+            } else if constexpr (std::is_same_v<T, FetchFinished>) {
+                // handled above
             } else {
                 static_assert(sizeof(T) == 0, "unhandled engine event");
             }

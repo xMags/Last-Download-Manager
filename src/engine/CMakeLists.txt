@@ -12,6 +12,8 @@ add_library(ldm_engine STATIC
     FailurePolicy.h
     HttpHeaders.cpp
     HttpHeaders.h
+    MemoryFetch.cpp
+    MemoryFetch.h
     TokenBucket.cpp
     TokenBucket.h
     Transfer.cpp

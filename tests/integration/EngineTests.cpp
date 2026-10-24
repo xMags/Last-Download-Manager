@@ -495,6 +495,73 @@ TEST_F(EngineTest, BrowserCookiesReachOnlyTheirOwnHostOnEveryConnection)
     EXPECT_TRUE(HoldsPayload(PartialPath(2), server_->Size()));
 }
 
+// Manifest fetches (M3 design section 6): small GETs into memory beside the downloads.
+ldm::core::FetchRequest FetchOf(const std::string& url, std::size_t maxBytes)
+{
+    ldm::core::FetchRequest request;
+    request.fetchId = 7;
+    request.url = url;
+    request.userAgent = "LDM-Test";
+    request.maxBytes = maxBytes;
+    return request;
+}
+
+TEST_F(EngineTest, FetchReadsTheWholeBodyAfterRedirects)
+{
+    engine_->Fetch(FetchOf(server_->Url("/redirect"), 8 * 1024 * 1024));
+    const auto fetched = listener_.WaitFor<ldm::core::FetchFinished>(DownloadId{}, 0, 60s);
+    ASSERT_TRUE(fetched);
+    EXPECT_EQ(fetched->fetchId, 7);
+    ASSERT_FALSE(fetched->failure) << fetched->failure->message;
+    EXPECT_TRUE(fetched->finalUrl.ends_with("/range.bin")) << fetched->finalUrl;
+    EXPECT_EQ(fetched->body.size(), static_cast<size_t>(server_->Size()));
+}
+
+TEST_F(EngineTest, FetchDecodesCompressedBodies)
+{
+    engine_->Fetch(FetchOf(server_->Url("/gzip.bin"), 8 * 1024 * 1024));
+    const auto fetched = listener_.WaitFor<ldm::core::FetchFinished>(DownloadId{}, 0, 60s);
+    ASSERT_TRUE(fetched);
+    ASSERT_FALSE(fetched->failure) << fetched->failure->message;
+    EXPECT_EQ(fetched->body.size(), static_cast<size_t>(server_->Size()));
+}
+
+TEST_F(EngineTest, FetchRefusesBodiesOverItsLimit)
+{
+    engine_->Fetch(FetchOf(server_->Url("/unknown-length.bin"), 64 * 1024));  // no Content-Length to refuse early
+    const auto fetched = listener_.WaitFor<ldm::core::FetchFinished>(DownloadId{}, 0, 60s);
+    ASSERT_TRUE(fetched);
+    ASSERT_TRUE(fetched->failure);
+    EXPECT_EQ(fetched->failure->reason, FailureReason::Protocol);
+    EXPECT_TRUE(fetched->body.empty());
+}
+
+TEST_F(EngineTest, FetchSendsCookiesAndReportsHttpErrors)
+{
+    engine_->Fetch(FetchOf(server_->Url("/cookie.bin"), 8 * 1024 * 1024));
+    const auto denied = listener_.WaitFor<ldm::core::FetchFinished>(DownloadId{}, 0, 60s);
+    ASSERT_TRUE(denied);
+    ASSERT_TRUE(denied->failure);
+    EXPECT_EQ(denied->failure->httpStatus, 403);
+
+    auto request = FetchOf(server_->Url("/cookie.bin"), 8 * 1024 * 1024);
+    request.fetchId = 8;
+    request.cookieLines = {ldm::model::ToNetscapeLine({"127.0.0.1", true, "/", false, 0, "sid", "abc"})};
+    engine_->Fetch(std::move(request));
+    std::optional<ldm::core::FetchFinished> allowed;
+    for (int i = 0; i < 600 && !allowed; ++i) {
+        for (const auto& event : listener_.All<ldm::core::FetchFinished>(DownloadId{}, 0)) {
+            if (event.fetchId == 8) {
+                allowed = event;
+            }
+        }
+        std::this_thread::sleep_for(100ms);
+    }
+    ASSERT_TRUE(allowed);
+    EXPECT_FALSE(allowed->failure) << allowed->failure->message;
+    EXPECT_EQ(allowed->body.size(), static_cast<size_t>(server_->Size()));
+}
+
 TEST_F(EngineTest, FormDownloadsSendTheFormAgain)
 {
     const auto denied = Run(Request("/post.bin", 1));

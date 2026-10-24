@@ -36,6 +36,7 @@ public:
     void SetSpeedLimit(model::DownloadId id, std::int64_t epoch, std::optional<std::int64_t> bytesPerSecond) override;
     void SetGlobalSpeedLimit(std::optional<std::int64_t> bytesPerSecond) override;
     void Finalize(core::FinalizeRequest request) override;
+    void Fetch(core::FetchRequest request) override;
 
 private:
     class Loop;

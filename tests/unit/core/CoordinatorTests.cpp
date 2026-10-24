@@ -40,10 +40,12 @@ public:
     void SetSpeedLimit(DownloadId, std::int64_t, std::optional<std::int64_t> limit) override { downloadLimit = limit; }
     void SetGlobalSpeedLimit(std::optional<std::int64_t> limit) override { globalLimit = limit; }
     void Finalize(ldm::core::FinalizeRequest request) override { finalizes.push_back(std::move(request)); }
+    void Fetch(ldm::core::FetchRequest request) override { fetches.push_back(std::move(request)); }
 
     std::vector<ldm::core::TransferRequest> starts;
     std::vector<std::pair<DownloadId, std::int64_t>> stops;
     std::vector<ldm::core::FinalizeRequest> finalizes;
+    std::vector<ldm::core::FetchRequest> fetches;
     std::optional<std::int64_t> downloadLimit;
     std::optional<std::int64_t> globalLimit;
 };
@@ -931,4 +933,63 @@ TEST_F(CoordinatorTest, OnlyOneDownloadWaitsAndWaitingEnds)
     replace.url = "https://files.test/1b.zip";
     coordinator_->Handle(replace);  // must not touch a deleted download
     EXPECT_FALSE(InSnapshot(first));
+}
+
+// Manifest fetches for the media panel go to the engine with the browser's cookies, and their
+// answers go to the front end as they are.
+TEST_F(CoordinatorTest, ManifestFetchesRunOnTheEngineAndAreAnswered)
+{
+    ldm::core::FetchManifestCommand command;
+    command.fetchId = 3;
+    command.url = "https://cdn.test/master.m3u8";
+    command.referer = "https://site.test/watch";
+    command.cookies = {{"cdn.test", true, "/", true, 0, "s", "1"}};
+    command.maxBytes = 1024;
+    coordinator_->Handle(command);
+    ASSERT_EQ(engine_.fetches.size(), 1u);
+    const auto& request = engine_.fetches[0];
+    EXPECT_EQ(request.fetchId, 3);
+    EXPECT_EQ(request.url, "https://cdn.test/master.m3u8");
+    EXPECT_EQ(request.referer, "https://site.test/watch");
+    EXPECT_EQ(request.userAgent, ldm::model::Settings{}.userAgent) << "Options' User-Agent when the browser sent none";
+    EXPECT_EQ(request.maxBytes, 1024u);
+    ASSERT_EQ(request.cookieLines.size(), 1u);
+
+    ldm::core::FetchFinished finished;
+    finished.fetchId = 3;
+    finished.body = "#EXTM3U";
+    Send(DownloadId{}, 0, finished);
+    const auto answers = observer_.All<ldm::core::FetchFinished>();
+    ASSERT_EQ(answers.size(), 1u);
+    EXPECT_EQ(answers[0].body, "#EXTM3U");
+}
+
+TEST_F(CoordinatorTest, ManifestFetchesWaitForTheProxyLikeDownloads)
+{
+    proxy_.pending = true;
+    ldm::core::FetchManifestCommand command;
+    command.fetchId = 4;
+    command.url = "https://cdn.test/a.mpd";
+    coordinator_->Handle(command);
+    EXPECT_TRUE(engine_.fetches.empty());
+    ASSERT_EQ(proxy_.lookups.size(), 1u);
+    EXPECT_LT(proxy_.lookups[0].first.value, 0) << "fetches use keys no download has";
+
+    Send(proxy_.lookups[0].first, 0, ldm::core::ProxyResolved{"http://proxy.test:3128"});
+    ASSERT_EQ(engine_.fetches.size(), 1u);
+    EXPECT_EQ(engine_.fetches[0].proxy, "http://proxy.test:3128");
+    Send(proxy_.lookups[0].first, 0, ldm::core::ProxyResolved{"http://again.test:1"});
+    EXPECT_EQ(engine_.fetches.size(), 1u) << "a second answer starts nothing";
+}
+
+TEST_F(CoordinatorTest, ManifestFetchesRefuseOtherSchemes)
+{
+    ldm::core::FetchManifestCommand command;
+    command.fetchId = 5;
+    command.url = "ftp://cdn.test/a.m3u8";
+    coordinator_->Handle(command);
+    EXPECT_TRUE(engine_.fetches.empty());
+    const auto answers = observer_.All<ldm::core::FetchFinished>();
+    ASSERT_EQ(answers.size(), 1u);
+    EXPECT_TRUE(answers[0].failure);
 }

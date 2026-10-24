@@ -92,7 +92,8 @@ struct QuotaReached {
     std::int64_t periodEndsAtUnixMs = 0;
 };
 
-using Notification = std::variant<AddResult, DownloadCompleted, DownloadFailed, CoreError, QuotaReached>;
+// FetchFinished answers a FetchManifestCommand.
+using Notification = std::variant<AddResult, DownloadCompleted, DownloadFailed, CoreError, QuotaReached, FetchFinished>;
 
 // Receives the coordinator's output. Called on the core thread; implementations must only post to
 // their own thread.

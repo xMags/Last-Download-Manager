@@ -8,6 +8,7 @@
 #include "model/Settings.h"
 
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <optional>
@@ -176,12 +177,23 @@ struct ReplaceAddressCommand {
     std::optional<PostData> post;
 };
 
+// Fetch a streaming manifest into memory for the media panel (M3 design section 6), with the
+// proxy downloads use. Answered by a FetchFinished notification with the same id.
+struct FetchManifestCommand {
+    std::int64_t fetchId = 0;  // chosen by the caller, at least 1
+    std::string url;  // http or https
+    std::optional<std::string> referer;
+    std::optional<std::string> userAgent;  // the browser's; Options' when absent
+    std::vector<model::Cookie> cookies;
+    std::size_t maxBytes = 0;
+};
+
 using Command = std::variant<AddDownloadCommand, ConfirmDownloadCommand, ResumeCommand, StopCommand, StopAllCommand,
                              DeleteCommand, DeleteCompletedCommand, RedownloadCommand, SetDownloadSpeedLimitCommand,
                              SetSpeedLimiterCommand, UpdateDownloadCommand, MoveDownloadCommand, SaveCategoryCommand,
                              DeleteCategoryCommand, ReassignCategoryCommand, UpdateSettingsCommand,
                              ModifySettingsCommand, ReplaceSiteLoginsCommand, ReplaceServerLimitsCommand,
-                             QuotaDecisionCommand, WaitForAddressCommand, ReplaceAddressCommand>;
+                             QuotaDecisionCommand, WaitForAddressCommand, ReplaceAddressCommand, FetchManifestCommand>;
 
 // Where front ends send commands. Thread-safe; returns at once.
 class CommandSink {
