@@ -121,6 +121,19 @@ std::chrono::milliseconds ReloadInterval(const model::Download& download, bool c
     return std::chrono::milliseconds((changed ? targetUs : targetUs / 2) / 1000);
 }
 
+// A video or audio file that ffprobe can describe for the list (checklist C-04): the media types
+// LDM knows, apart from subtitles, which have no picture or sound to describe.
+bool IsDescribedMediaFile(const std::string& fileName)
+{
+    static constexpr std::array<std::string_view, 24> kTypes{
+        "3gp", "aac", "asf", "avi", "f4v", "flac", "flv", "m4a", "m4v", "mkv",  "mov", "mp3",
+        "mp4", "mpeg", "mpg", "ogg", "ogv", "opus", "qt", "ts", "wav", "webm", "wma", "wmv"};
+    std::string extension = FileExtension(fileName);
+    std::transform(extension.begin(), extension.end(), extension.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return std::find(kTypes.begin(), kTypes.end(), extension) != kTypes.end();
+}
+
 bool HasRecordedPieces(const model::Download& download)
 {
     return std::any_of(download.tracks.begin(), download.tracks.end(), [](const model::MediaTrack& track) {
@@ -637,8 +650,8 @@ void Coordinator::Stop(const std::vector<model::DownloadId>& ids)
         }
         if (entry->running) {
             RequestStop(*entry);
-        } else if (entry->muxing) {
-            CancelMux(*entry);  // the pieces stay; Resume joins them again
+        } else if (entry->muxing || entry->describing) {
+            CancelMediaTools(*entry);  // the pieces or the file stay; Resume joins or describes them again
         }
     }
 }
@@ -691,8 +704,8 @@ void Coordinator::Delete(const std::vector<model::DownloadId>& ids, bool deleteF
             MarkChanged(*entry);
             if (entry->running) {
                 RequestStop(*entry);  // last: a run that never reached the engine is removed here
-            } else if (entry->muxing) {
-                CancelMux(*entry);
+            } else if (entry->muxing || entry->describing) {
+                CancelMediaTools(*entry);
             }
             continue;
         }
@@ -1139,6 +1152,8 @@ void Coordinator::OnEngineEvent(EngineEvent event)
                 OnMediaFinished(*entry, payload);
             } else if constexpr (std::is_same_v<T, MuxFinished>) {
                 OnMuxFinished(*entry, payload);
+            } else if constexpr (std::is_same_v<T, DescribeFinished>) {
+                OnDescribeFinished(*entry, payload);
             } else {
                 static_assert(sizeof(T) == 0, "unhandled engine event");
             }
@@ -1971,9 +1986,52 @@ void Coordinator::CompleteRun(Entry& entry)
 {
     if (entry.download.IsStream()) {
         BeginMux(entry);
+    } else if (ports_.media != nullptr && IsDescribedMediaFile(entry.download.fileName)) {
+        BeginDescribe(entry);
     } else {
         BeginFinalize(entry);
     }
+}
+
+void Coordinator::BeginDescribe(Entry& entry)
+{
+    model::Download& d = entry.download;
+    d.status = DownloadStatus::Finalizing;
+    entry.finalizing = true;
+    entry.describing = true;
+    entry.stopRequested = false;
+    Save(entry);
+    MarkChanged(entry);
+    UpdatePowerRequest();
+    ports_.media->Describe(DescribeRequest{d.id, d.epoch, PathFromUtf8(d.partialPath.value_or(std::string()))});
+}
+
+void Coordinator::OnDescribeFinished(Entry& entry, const DescribeFinished& finished)
+{
+    if (!entry.describing) {
+        return;
+    }
+    model::Download& d = entry.download;
+    const bool stopRequested = entry.stopRequested;
+    entry.describing = false;
+    entry.finalizing = false;
+    entry.stopRequested = false;
+    if (entry.deleteWhenStopped) {
+        RemoveEntry(d.id, false);
+        UpdatePowerRequest();
+        return;
+    }
+    if (finished.stopped || stopRequested) {
+        d.status = DownloadStatus::Paused;  // the file is complete; Resume describes and moves it
+        Save(entry);
+        MarkChanged(entry);
+        UpdatePowerRequest();
+        return;
+    }
+    if (!finished.mediaInfo.empty()) {
+        d.description = d.description.empty() ? finished.mediaInfo : d.description + "; " + finished.mediaInfo;
+    }
+    BeginFinalize(entry);
 }
 
 void Coordinator::BeginMux(Entry& entry)
@@ -1993,9 +2051,9 @@ void Coordinator::BeginMux(Entry& entry)
     ports_.media->Mux(BuildMuxRequest(d, PartsFolder(d)));
 }
 
-void Coordinator::CancelMux(Entry& entry)
+void Coordinator::CancelMediaTools(Entry& entry)
 {
-    if (!entry.muxing || ports_.media == nullptr) {
+    if ((!entry.muxing && !entry.describing) || ports_.media == nullptr) {
         return;
     }
     entry.stopRequested = true;
@@ -2446,8 +2504,8 @@ void Coordinator::BeginShutdown()
     for (auto& [id, entry] : entries_) {
         if (entry.running) {
             RequestStop(entry);
-        } else if (entry.muxing) {
-            CancelMux(entry);  // the pieces stay; the next start joins them again
+        } else if (entry.muxing || entry.describing) {
+            CancelMediaTools(entry);  // the pieces or the file stay; the next start finishes them again
         }
     }
 }
