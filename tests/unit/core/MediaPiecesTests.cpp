@@ -192,6 +192,32 @@ TEST(MuxRequest, SkippedPiecesAreLeftOutAndTheGapMarked)
     EXPECT_TRUE(withoutInit.inputs.at(0).pieces.empty());
 }
 
+TEST(StreamSummary, AFinishedSmallTrackDoesNotMakeTheStreamLookHalfDone)
+{
+    ldm::model::Download download;
+    download.kind = ldm::model::DownloadKind::Hls;
+    MediaTrack video = Recording(1, 10);
+    video.live = false;
+    MediaTrack audio = Recording(1, 10);
+    audio.live = false;
+    audio.role = ldm::model::TrackRole::Audio;
+    for (auto& piece : audio.pieces) {
+        piece.done = true;
+        piece.bytes = 1'000;
+    }
+    download.tracks = {video, audio};
+    auto summary = ldm::core::SummarizeStream(download);
+    EXPECT_FALSE(summary.estimatedBytes) << "the video has nothing on disk to tell its size by";
+    EXPECT_DOUBLE_EQ(summary.fraction, 0.5) << "until then, each track alike";
+
+    download.tracks[0].pieces[0].done = true;
+    download.tracks[0].pieces[0].bytes = 100'000;  // a tenth of the video
+    summary = ldm::core::SummarizeStream(download);
+    ASSERT_TRUE(summary.estimatedBytes);
+    EXPECT_EQ(*summary.estimatedBytes, 1'000'000 + 10'000);
+    EXPECT_NEAR(summary.fraction, 110'000.0 / 1'010'000.0, 1e-9) << "by bytes once every track can be estimated";
+}
+
 TEST(MediaRequest, SkippedPiecesAreNotFetchedAndSummariesLeaveThemOut)
 {
     ldm::model::Download download;

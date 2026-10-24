@@ -79,8 +79,14 @@ std::vector<std::uint32_t> VerifyMediaProgress(model::Download& download, const 
 struct StreamSummary {
     int piecesDone = 0;
     int piecesTotal = 0;  // 0 while a track's list is unknown
-    double fraction = 0;  // 0..1, by duration where pieces have one
+    // 0..1: by the estimated bytes of each track once every track has some on disk, so a small
+    // audio track that finished first does not count as half the stream; until then by duration,
+    // each track alike.
+    double fraction = 0;
     std::int64_t bytesDone = 0;
+    // The stream's size before joining, from each track's bytes and progress; nothing until every
+    // track has enough on disk to tell.
+    std::optional<std::int64_t> estimatedBytes;
     bool live = false;  // a live recording, whose total is not known
     // The length on disk: the done media pieces of the first video track, or of the first track.
     std::int64_t recordedUs = 0;
