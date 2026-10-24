@@ -12,6 +12,10 @@ using ldm::model::CategoryId;
 using ldm::model::Download;
 using ldm::model::DownloadId;
 using ldm::model::DownloadStatus;
+using ldm::model::Queue;
+using ldm::model::QueueId;
+using ldm::model::QueueKind;
+using ldm::model::ScheduleMode;
 using ldm::storage::SqliteStore;
 
 SqliteStore OpenMemoryStore()
@@ -155,6 +159,195 @@ TEST(SqliteStore, CategoryNamesAreUniqueIgnoringCase)
     SqliteStore store = OpenMemoryStore();
     ASSERT_TRUE(store.InsertCategory({CategoryId{}, "Music", "mp3", "", "C:\\M", false, true, 1}).Ok());
     EXPECT_FALSE(store.InsertCategory({CategoryId{}, "music", "", "", "C:\\M2", false, false, 2}).Ok());
+}
+
+Queue SampleQueue(std::string name)
+{
+    Queue queue;
+    queue.name = std::move(name);
+    queue.concurrent = 4;
+    queue.retriesPerFile = 7;
+    queue.completionAction = ldm::model::CompletionAction::Hibernate;
+    queue.forceTerminate = true;
+    queue.openFileWhenDone = "C:\\Tools\\done.cmd";
+    queue.sortOrder = 5;
+    queue.schedule.enabled = true;
+    queue.schedule.mode = ScheduleMode::Once;
+    queue.schedule.startMinutes = 23 * 60 + 30;
+    queue.schedule.startDay = 20'000;
+    queue.schedule.weekdays = 0b0010101;
+    queue.schedule.repeatMinutes = 90;
+    queue.schedule.stopEnabled = true;
+    queue.schedule.stopMinutes = 6 * 60;
+    queue.schedule.startOnAppStart = true;
+    queue.schedule.lastStartedAtMs = 1'700'000'000'000;
+    return queue;
+}
+
+TEST(SqliteStore, TheBuiltInQueuesExistFromTheStart)
+{
+    SqliteStore store = OpenMemoryStore();
+    const auto queues = store.LoadQueues();
+    ASSERT_TRUE(queues.Ok()) << queues.GetError().message;
+    ASSERT_EQ(queues.Value().size(), 2u);
+    EXPECT_EQ(queues.Value()[0].kind, QueueKind::Main);
+    EXPECT_EQ(queues.Value()[0].name, "Main download queue");
+    EXPECT_EQ(queues.Value()[1].kind, QueueKind::Sync);
+    EXPECT_EQ(queues.Value()[1].name, "Synchronization queue");
+    for (const Queue& queue : queues.Value()) {
+        EXPECT_EQ(queue.concurrent, 1);
+        EXPECT_EQ(queue.retriesPerFile, 3);
+        EXPECT_EQ(queue.schedule, ldm::model::Schedule{});
+    }
+}
+
+TEST(SqliteStore, QueueRoundTripsWithItsSchedule)
+{
+    SqliteStore store = OpenMemoryStore();
+    const Queue original = SampleQueue("Nightly");
+    const auto id = store.InsertQueue(original);
+    ASSERT_TRUE(id.Ok()) << id.GetError().message;
+
+    const auto queues = store.LoadQueues().Value();
+    ASSERT_EQ(queues.size(), 3u);
+    const Queue& loaded = queues.back();
+    EXPECT_EQ(loaded.id, id.Value());
+    EXPECT_EQ(loaded.name, "Nightly");
+    EXPECT_EQ(loaded.kind, QueueKind::Custom);
+    EXPECT_EQ(loaded.concurrent, 4);
+    EXPECT_EQ(loaded.retriesPerFile, 7);
+    EXPECT_EQ(loaded.completionAction, ldm::model::CompletionAction::Hibernate);
+    EXPECT_TRUE(loaded.forceTerminate);
+    EXPECT_EQ(loaded.openFileWhenDone, original.openFileWhenDone);
+    EXPECT_EQ(loaded.sortOrder, 5);
+    EXPECT_EQ(loaded.schedule, original.schedule);
+}
+
+TEST(SqliteStore, SavingAQueueChangesItAndItsSchedule)
+{
+    SqliteStore store = OpenMemoryStore();
+    Queue queue = SampleQueue("Nightly");
+    queue.id = store.InsertQueue(queue).Value();
+    queue.name = "Weekend";
+    queue.concurrent = 2;
+    queue.schedule.mode = ScheduleMode::Daily;
+    queue.schedule.startDay.reset();
+    queue.schedule.lastStartedAtMs.reset();
+    ASSERT_TRUE(store.SaveQueue(queue).Ok());
+
+    const Queue loaded = store.LoadQueues().Value().back();
+    EXPECT_EQ(loaded.name, "Weekend");
+    EXPECT_EQ(loaded.concurrent, 2);
+    EXPECT_EQ(loaded.schedule, queue.schedule);
+}
+
+TEST(SqliteStore, ABuiltInQueueGainsAScheduleWhenSaved)
+{
+    SqliteStore store = OpenMemoryStore();
+    Queue main = store.LoadQueues().Value().front();
+    main.schedule.enabled = true;
+    main.schedule.startMinutes = 120;
+    main.kind = QueueKind::Custom;  // ignored: a queue keeps its kind
+    ASSERT_TRUE(store.SaveQueue(main).Ok());
+    ASSERT_TRUE(store.SaveQueue(main).Ok());  // the second save updates the schedule it made
+
+    const Queue loaded = store.LoadQueues().Value().front();
+    EXPECT_EQ(loaded.kind, QueueKind::Main);
+    EXPECT_TRUE(loaded.schedule.enabled);
+    EXPECT_EQ(loaded.schedule.startMinutes, 120);
+}
+
+TEST(SqliteStore, SavingAQueueThatDoesNotExistFails)
+{
+    SqliteStore store = OpenMemoryStore();
+    Queue queue = SampleQueue("Ghost");
+    queue.id = QueueId{99};
+    const auto status = store.SaveQueue(queue);
+    ASSERT_FALSE(status.Ok());
+    EXPECT_EQ(status.GetError().code, ldm::base::ErrorCode::NotFound);
+}
+
+TEST(SqliteStore, QueueNamesAreUniqueIgnoringCase)
+{
+    SqliteStore store = OpenMemoryStore();
+    ASSERT_TRUE(store.InsertQueue(SampleQueue("Nightly")).Ok());
+    EXPECT_FALSE(store.InsertQueue(SampleQueue("NIGHTLY")).Ok());
+    EXPECT_FALSE(store.InsertQueue(SampleQueue("main download queue")).Ok());
+    EXPECT_EQ(store.LoadQueues().Value().size(), 3u);
+}
+
+TEST(SqliteStore, OnlyCustomQueuesCanBeAdded)
+{
+    SqliteStore store = OpenMemoryStore();
+    Queue queue = SampleQueue("Second main");
+    queue.kind = QueueKind::Main;
+    const auto id = store.InsertQueue(queue);
+    ASSERT_FALSE(id.Ok());
+    EXPECT_EQ(id.GetError().code, ldm::base::ErrorCode::InvalidArgument);
+}
+
+TEST(SqliteStore, AQueueOutOfRangeIsRefused)
+{
+    SqliteStore store = OpenMemoryStore();
+    Queue queue = SampleQueue("Wide");
+    queue.concurrent = ldm::model::kMaxQueueConcurrent + 1;
+    EXPECT_FALSE(store.InsertQueue(queue).Ok());
+    queue.concurrent = 1;
+    queue.schedule.startMinutes = ldm::model::kMinutesPerDay;
+    EXPECT_FALSE(store.InsertQueue(queue).Ok());
+    EXPECT_EQ(store.LoadQueues().Value().size(), 2u);
+}
+
+TEST(SqliteStore, DeletingAQueueKeepsItsMembersOutsideAnyQueue)
+{
+    SqliteStore store = OpenMemoryStore();
+    const QueueId queue = store.InsertQueue(SampleQueue("Nightly")).Value();
+    Download d = SampleDownload("a");
+    d.queueId = queue;
+    d.queuePosition = 4;
+    d.queueFailures = 2;
+    ASSERT_TRUE(store.InsertDownload(d).Ok());
+
+    ASSERT_TRUE(store.DeleteQueue(queue).Ok());
+    EXPECT_FALSE(store.LoadDownloads().Value().front().queueId.has_value());
+    EXPECT_EQ(store.LoadQueues().Value().size(), 2u);
+    const auto again = store.DeleteQueue(queue);
+    ASSERT_FALSE(again.Ok());
+    EXPECT_EQ(again.GetError().code, ldm::base::ErrorCode::NotFound);
+}
+
+TEST(SqliteStore, TheBuiltInQueuesCannotBeDeleted)
+{
+    SqliteStore store = OpenMemoryStore();
+    for (const Queue& queue : store.LoadQueues().Value()) {
+        const auto status = store.DeleteQueue(queue.id);
+        ASSERT_FALSE(status.Ok());
+        EXPECT_EQ(status.GetError().code, ldm::base::ErrorCode::InvalidArgument);
+    }
+    EXPECT_EQ(store.LoadQueues().Value().size(), 2u);
+}
+
+TEST(SqliteStore, QueueMembershipRoundTrips)
+{
+    SqliteStore store = OpenMemoryStore();
+    const QueueId main = store.LoadQueues().Value().front().id;
+    Download d = SampleDownload("a");
+    d.queueId = main;
+    d.queuePosition = 12;
+    d.queueFailures = 1;
+    ASSERT_TRUE(store.InsertDownload(d).Ok());
+    Download loaded = store.LoadDownloads().Value().front();
+    EXPECT_EQ(loaded.queueId, main);
+    EXPECT_EQ(loaded.queuePosition, 12);
+    EXPECT_EQ(loaded.queueFailures, 1);
+
+    loaded.queueId.reset();
+    loaded.queuePosition = 0;
+    loaded.queueFailures = 0;
+    ASSERT_TRUE(store.SaveDownload(loaded).Ok());
+    loaded = store.LoadDownloads().Value().front();
+    EXPECT_FALSE(loaded.queueId.has_value());
+    EXPECT_EQ(loaded.queueFailures, 0);
 }
 
 TEST(SqliteStore, SettingsReplaceWholeMap)
@@ -476,6 +669,29 @@ TEST(Migrations, SchemaSevenKeepsEarlierPiecesWanted)
     ASSERT_TRUE(query.Ok());
     ASSERT_TRUE(query.Value().Step().Value());
     EXPECT_EQ(query.Value().Int64(0), 0);
+}
+
+TEST(Migrations, SchemaEightLeavesEarlierDownloadsOutsideAnyQueue)
+{
+    auto connection = ldm::storage::Connection::Open(":memory:");
+    ASSERT_TRUE(connection.Ok());
+    ASSERT_TRUE(connection.Value().Execute("PRAGMA foreign_keys = ON").Ok());
+    ASSERT_TRUE(ldm::storage::MigrateTo(connection.Value(), 7).Ok());
+    ASSERT_TRUE(connection.Value()
+                    .Execute("INSERT INTO downloads (id, public_id, url, file_name, save_dir, status, created_at, "
+                             "sort_order) VALUES (7, 'p', 'https://x.test/f', 'f', 'C:\\\\D', 'paused', 1, 1);")
+                    .Ok());
+    const auto migrated = ldm::storage::Migrate(connection.Value());
+    ASSERT_TRUE(migrated.Ok()) << migrated.GetError().message;
+    auto query = connection.Value().Prepare("SELECT queue_id, queue_position, queue_failures FROM downloads");
+    ASSERT_TRUE(query.Ok());
+    ASSERT_TRUE(query.Value().Step().Value());
+    EXPECT_FALSE(query.Value().OptionalInt64(0).has_value());
+    EXPECT_EQ(query.Value().Int64(1), 0);
+    EXPECT_EQ(query.Value().Int64(2), 0);
+    // A second main queue is refused by the schema itself.
+    EXPECT_FALSE(
+        connection.Value().Execute("INSERT INTO queues (name, kind, sort_order) VALUES ('Another', 'main', 9)").Ok());
 }
 
 TEST(Migrations, RefusesNewerSchema)

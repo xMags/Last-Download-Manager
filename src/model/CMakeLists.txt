@@ -5,9 +5,13 @@ add_library(ldm_model STATIC
     ConnectionRules.h
     Download.cpp
     Download.h
+    EnumNames.h
     Ids.h
     Media.cpp
     Media.h
+    Queue.cpp
+    Queue.h
+    Schedule.h
     Segment.h
     Settings.cpp
     Settings.h)

@@ -26,7 +26,8 @@ SELECT id, public_id, url, final_url, referer, parent_page, user_agent, file_nam
        partial_path, category_id, description, status, epoch, total_size, resumable, etag,
        last_modified, content_type, max_connections, speed_limit_bps, login_user, login_secret,
        completion_action, created_at, last_try_at, completed_at, last_result, sort_order, cookie_secret,
-       post_secret, post_content_type, awaiting_confirmation, kind, media_private_source
+       post_secret, post_content_type, awaiting_confirmation, kind, media_private_source, queue_id,
+       queue_position, queue_failures
 FROM downloads ORDER BY sort_order, id
 )sql";
 
@@ -36,9 +37,10 @@ INSERT INTO downloads (
   partial_path, category_id, description, status, epoch, total_size, resumable, etag,
   last_modified, content_type, max_connections, speed_limit_bps, login_user, login_secret,
   completion_action, created_at, last_try_at, completed_at, last_result, sort_order, cookie_secret,
-  post_secret, post_content_type, awaiting_confirmation, kind, media_private_source)
+  post_secret, post_content_type, awaiting_confirmation, kind, media_private_source, queue_id,
+  queue_position, queue_failures)
 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20,
-        ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34)
+        ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37)
 )sql";
 
 constexpr std::string_view kUpdateDownload = R"sql(
@@ -49,8 +51,9 @@ UPDATE downloads SET
   content_type = ?18, max_connections = ?19, speed_limit_bps = ?20, login_user = ?21,
   login_secret = ?22, completion_action = ?23, created_at = ?24, last_try_at = ?25,
   completed_at = ?26, last_result = ?27, sort_order = ?28, cookie_secret = ?29, post_secret = ?30,
-  post_content_type = ?31, awaiting_confirmation = ?32, kind = ?33, media_private_source = ?34
-WHERE id = ?35
+  post_content_type = ?31, awaiting_confirmation = ?32, kind = ?33, media_private_source = ?34,
+  queue_id = ?35, queue_position = ?36, queue_failures = ?37
+WHERE id = ?38
 )sql";
 
 base::Error CorruptRow(std::string_view what)
@@ -59,6 +62,11 @@ base::Error CorruptRow(std::string_view what)
 }
 
 std::optional<std::int64_t> ToOptionalId(const std::optional<model::CategoryId>& id)
+{
+    return id.has_value() ? std::optional<std::int64_t>(id->value) : std::nullopt;
+}
+
+std::optional<std::int64_t> ToOptionalId(const std::optional<model::QueueId>& id)
 {
     return id.has_value() ? std::optional<std::int64_t>(id->value) : std::nullopt;
 }
@@ -155,7 +163,7 @@ bool TrackIsConsistent(const model::MediaTrack& track)
     return !track.wholeFile || track.pieces.size() <= 1;
 }
 
-// Binds parameters ?1..?34 in the column order of kInsertDownload / kUpdateDownload.
+// Binds parameters ?1..?37 in the column order of kInsertDownload / kUpdateDownload.
 void BindDownloadColumns(Statement& statement, const model::Download& d)
 {
     statement.Bind(1, d.publicId)
@@ -203,7 +211,10 @@ void BindDownloadColumns(Statement& statement, const model::Download& d)
     statement.Bind(31, d.postContentType)
         .Bind(32, std::int64_t{d.awaitingConfirmation ? 1 : 0})
         .Bind(33, model::ToString(d.kind))
-        .Bind(34, std::int64_t{d.mediaFromPrivateNetwork ? 1 : 0});
+        .Bind(34, std::int64_t{d.mediaFromPrivateNetwork ? 1 : 0})
+        .Bind(35, ToOptionalId(d.queueId))
+        .Bind(36, d.queuePosition)
+        .Bind(37, d.queueFailures);
 }
 
 base::Result<model::Download> ReadDownload(const Statement& row)
@@ -262,6 +273,15 @@ base::Result<model::Download> ReadDownload(const Statement& row)
     }
     d.kind = *kind;
     d.mediaFromPrivateNetwork = row.Int64(34) != 0;
+    if (const auto queue = row.OptionalInt64(35)) {
+        d.queueId = model::QueueId{*queue};
+    }
+    d.queuePosition = row.Int64(36);
+    const std::int64_t failures = row.Int64(37);
+    if (failures < 0 || failures > std::numeric_limits<int>::max()) {
+        return CorruptRow("downloads.queue_failures");
+    }
+    d.queueFailures = static_cast<int>(failures);
     return d;
 }
 
@@ -677,7 +697,7 @@ base::Status SqliteStore::SaveDownload(const model::Download& download)
         return update.GetError();
     }
     BindDownloadColumns(update.Value(), download);
-    update.Value().Bind(35, download.id.value);
+    update.Value().Bind(38, download.id.value);
     base::Status updated = update.Value().Run();
     if (!updated) {
         return updated;
@@ -863,6 +883,282 @@ base::Status SqliteStore::DeleteCategory(model::CategoryId id)
         return remove.GetError();
     }
     return remove.Value().Bind(1, id.value).Run();
+}
+
+// ---- queues ----
+
+namespace {
+
+// Column order shared by the SELECT and ReadQueue: the queue, then its schedule, if any.
+constexpr std::string_view kSelectQueues = R"sql(
+SELECT q.id, q.name, q.kind, q.concurrent, q.retries_per_file, q.completion_action, q.force_terminate,
+       q.open_file_when_done, q.sort_order, s.id, s.enabled, s.mode, s.start_minutes, s.start_day, s.weekdays,
+       s.repeat_minutes, s.stop_enabled, s.stop_minutes, s.start_on_app_start, s.last_started_at
+FROM queues q LEFT JOIN schedules s ON s.id = q.schedule_id
+ORDER BY q.sort_order, q.id
+)sql";
+
+base::Result<model::Schedule> ReadSchedule(const Statement& row, int first)
+{
+    model::Schedule schedule;
+    if (!row.OptionalInt64(first)) {
+        return schedule;  // a queue without a schedule row has the default, switched off
+    }
+    schedule.enabled = row.Int64(first + 1) != 0;
+    const auto mode = model::ParseScheduleMode(row.Text(first + 2));
+    if (!mode) {
+        return CorruptRow("schedules.mode");
+    }
+    schedule.mode = *mode;
+    // The schema's checks keep these within their ranges.
+    schedule.startMinutes = static_cast<int>(row.Int64(first + 3));
+    schedule.startDay = row.OptionalInt64(first + 4);
+    schedule.weekdays = static_cast<std::uint8_t>(row.Int64(first + 5));
+    const std::int64_t repeat = row.Int64(first + 6);
+    if (repeat > std::numeric_limits<int>::max()) {
+        return CorruptRow("schedules.repeat_minutes");
+    }
+    schedule.repeatMinutes = static_cast<int>(repeat);
+    schedule.stopEnabled = row.Int64(first + 7) != 0;
+    schedule.stopMinutes = static_cast<int>(row.Int64(first + 8));
+    schedule.startOnAppStart = row.Int64(first + 9) != 0;
+    schedule.lastStartedAtMs = row.OptionalInt64(first + 10);
+    return schedule;
+}
+
+base::Result<model::Queue> ReadQueue(const Statement& row)
+{
+    model::Queue queue;
+    queue.id = model::QueueId{row.Int64(0)};
+    queue.name = row.Text(1);
+    const auto kind = model::ParseQueueKind(row.Text(2));
+    if (!kind) {
+        return CorruptRow("queues.kind");
+    }
+    queue.kind = *kind;
+    queue.concurrent = static_cast<int>(row.Int64(3));
+    queue.retriesPerFile = static_cast<int>(row.Int64(4));
+    const auto action = model::ParseCompletionAction(row.Text(5));
+    if (!action) {
+        return CorruptRow("queues.completion_action");
+    }
+    queue.completionAction = *action;
+    queue.forceTerminate = row.Int64(6) != 0;
+    queue.openFileWhenDone = row.Text(7);
+    queue.sortOrder = row.Int64(8);
+    base::Result<model::Schedule> schedule = ReadSchedule(row, 9);
+    if (!schedule) {
+        return schedule.GetError();
+    }
+    queue.schedule = std::move(schedule).Value();
+    return queue;
+}
+
+// Binds ?2..?10 of the queue columns that can change; the caller binds ?1.
+void BindQueueColumns(Statement& statement, const model::Queue& queue, std::int64_t scheduleId)
+{
+    statement.Bind(2, queue.name)
+        .Bind(3, queue.concurrent)
+        .Bind(4, queue.retriesPerFile)
+        .Bind(5, model::ToString(queue.completionAction))
+        .Bind(6, queue.forceTerminate)
+        .Bind(7, queue.openFileWhenDone)
+        .Bind(8, scheduleId)
+        .Bind(9, queue.sortOrder);
+}
+
+struct StoredQueue {
+    model::QueueKind kind = model::QueueKind::Custom;
+    std::optional<std::int64_t> scheduleId;
+};
+
+base::Result<StoredQueue> FindQueue(Connection& connection, model::QueueId id)
+{
+    base::Result<Statement> query = connection.Prepare("SELECT kind, schedule_id FROM queues WHERE id = ?1");
+    if (!query) {
+        return query.GetError();
+    }
+    query.Value().Bind(1, id.value);
+    base::Result<bool> row = query.Value().Step();
+    if (!row) {
+        return row.GetError();
+    }
+    if (!row.Value()) {
+        return base::MakeError(base::ErrorCode::NotFound, "queue does not exist");
+    }
+    const auto kind = model::ParseQueueKind(query.Value().Text(0));
+    if (!kind) {
+        return CorruptRow("queues.kind");
+    }
+    return StoredQueue{*kind, query.Value().OptionalInt64(1)};
+}
+
+}  // namespace
+
+base::Result<std::int64_t> SqliteStore::WriteSchedule(std::optional<std::int64_t> id, const model::Schedule& schedule)
+{
+    const auto bind = [&schedule](Statement& statement) {
+        statement.Bind(1, schedule.enabled)
+            .Bind(2, model::ToString(schedule.mode))
+            .Bind(3, schedule.startMinutes)
+            .Bind(4, schedule.startDay)
+            .Bind(5, std::int64_t{schedule.weekdays})
+            .Bind(6, schedule.repeatMinutes)
+            .Bind(7, schedule.stopEnabled)
+            .Bind(8, schedule.stopMinutes)
+            .Bind(9, schedule.startOnAppStart)
+            .Bind(10, schedule.lastStartedAtMs);
+    };
+    if (id) {
+        base::Result<Statement> update = connection_.Prepare(
+            "UPDATE schedules SET enabled = ?1, mode = ?2, start_minutes = ?3, start_day = ?4, weekdays = ?5, "
+            "repeat_minutes = ?6, stop_enabled = ?7, stop_minutes = ?8, start_on_app_start = ?9, "
+            "last_started_at = ?10 WHERE id = ?11");
+        if (!update) {
+            return update.GetError();
+        }
+        bind(update.Value());
+        base::Status updated = update.Value().Bind(11, *id).Run();
+        if (!updated) {
+            return updated.GetError();
+        }
+        if (connection_.ChangedRows() == 1) {
+            return *id;
+        }
+    }
+    base::Result<Statement> insert = connection_.Prepare(
+        "INSERT INTO schedules (enabled, mode, start_minutes, start_day, weekdays, repeat_minutes, stop_enabled, "
+        "stop_minutes, start_on_app_start, last_started_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)");
+    if (!insert) {
+        return insert.GetError();
+    }
+    bind(insert.Value());
+    base::Status inserted = insert.Value().Run();
+    if (!inserted) {
+        return inserted.GetError();
+    }
+    return connection_.LastInsertRowId();
+}
+
+base::Result<std::vector<model::Queue>> SqliteStore::LoadQueues()
+{
+    base::Result<Statement> query = connection_.Prepare(kSelectQueues);
+    if (!query) {
+        return query.GetError();
+    }
+    std::vector<model::Queue> queues;
+    for (;;) {
+        base::Result<bool> row = query.Value().Step();
+        if (!row) {
+            return row.GetError();
+        }
+        if (!row.Value()) {
+            return queues;
+        }
+        base::Result<model::Queue> queue = ReadQueue(query.Value());
+        if (!queue) {
+            return queue.GetError();
+        }
+        queues.push_back(std::move(queue).Value());
+    }
+}
+
+base::Result<model::QueueId> SqliteStore::InsertQueue(const model::Queue& queue)
+{
+    if (queue.kind != model::QueueKind::Custom) {
+        return base::MakeError(base::ErrorCode::InvalidArgument, "only custom queues can be added");
+    }
+    base::Result<Transaction> transaction = Transaction::Begin(connection_);
+    if (!transaction) {
+        return transaction.GetError();
+    }
+    base::Result<std::int64_t> schedule = WriteSchedule(std::nullopt, queue.schedule);
+    if (!schedule) {
+        return schedule.GetError();
+    }
+    base::Result<Statement> insert = connection_.Prepare(
+        "INSERT INTO queues (kind, name, concurrent, retries_per_file, completion_action, force_terminate, "
+        "open_file_when_done, schedule_id, sort_order) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)");
+    if (!insert) {
+        return insert.GetError();
+    }
+    insert.Value().Bind(1, model::ToString(queue.kind));
+    BindQueueColumns(insert.Value(), queue, schedule.Value());
+    base::Status inserted = insert.Value().Run();
+    if (!inserted) {
+        return inserted.GetError();
+    }
+    const model::QueueId id{connection_.LastInsertRowId()};
+    base::Status committed = transaction.Value().Commit();
+    if (!committed) {
+        return committed.GetError();
+    }
+    return id;
+}
+
+base::Status SqliteStore::SaveQueue(const model::Queue& queue)
+{
+    base::Result<Transaction> transaction = Transaction::Begin(connection_);
+    if (!transaction) {
+        return transaction.GetError();
+    }
+    base::Result<StoredQueue> stored = FindQueue(connection_, queue.id);
+    if (!stored) {
+        return stored.GetError();
+    }
+    base::Result<std::int64_t> schedule = WriteSchedule(stored.Value().scheduleId, queue.schedule);
+    if (!schedule) {
+        return schedule.GetError();
+    }
+    // The kind never changes: a built-in queue stays one.
+    base::Result<Statement> update = connection_.Prepare(
+        "UPDATE queues SET name = ?2, concurrent = ?3, retries_per_file = ?4, completion_action = ?5, "
+        "force_terminate = ?6, open_file_when_done = ?7, schedule_id = ?8, sort_order = ?9 WHERE id = ?1");
+    if (!update) {
+        return update.GetError();
+    }
+    update.Value().Bind(1, queue.id.value);
+    BindQueueColumns(update.Value(), queue, schedule.Value());
+    base::Status updated = update.Value().Run();
+    if (!updated) {
+        return updated;
+    }
+    return transaction.Value().Commit();
+}
+
+base::Status SqliteStore::DeleteQueue(model::QueueId id)
+{
+    base::Result<Transaction> transaction = Transaction::Begin(connection_);
+    if (!transaction) {
+        return transaction.GetError();
+    }
+    base::Result<StoredQueue> stored = FindQueue(connection_, id);
+    if (!stored) {
+        return stored.GetError();
+    }
+    if (stored.Value().kind != model::QueueKind::Custom) {
+        return base::MakeError(base::ErrorCode::InvalidArgument, "a built-in queue cannot be deleted");
+    }
+    // The members' queue_id is cleared by the foreign key.
+    base::Result<Statement> remove = connection_.Prepare("DELETE FROM queues WHERE id = ?1");
+    if (!remove) {
+        return remove.GetError();
+    }
+    base::Status removed = remove.Value().Bind(1, id.value).Run();
+    if (!removed) {
+        return removed;
+    }
+    if (stored.Value().scheduleId) {
+        base::Result<Statement> schedule = connection_.Prepare("DELETE FROM schedules WHERE id = ?1");
+        if (!schedule) {
+            return schedule.GetError();
+        }
+        base::Status scheduleRemoved = schedule.Value().Bind(1, *stored.Value().scheduleId).Run();
+        if (!scheduleRemoved) {
+            return scheduleRemoved;
+        }
+    }
+    return transaction.Value().Commit();
 }
 
 // ---- settings ----

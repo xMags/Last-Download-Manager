@@ -99,6 +99,12 @@ struct Download {
     std::optional<std::string> lastResult;
     std::int64_t sortOrder = 0;
 
+    // Membership of a download queue (checklist Q-01): the queue, the place in it, and the failed
+    // attempts in the queue's current run, which decide when the queue gives up on it (Q-06).
+    std::optional<QueueId> queueId;
+    std::int64_t queuePosition = 0;
+    int queueFailures = 0;
+
     // A file's byte ranges. Empty for a stream, whose progress is in `tracks`.
     std::vector<Segment> segments;
 
