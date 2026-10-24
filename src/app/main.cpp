@@ -195,6 +195,7 @@ int WINAPI wWinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int sho
     ldm::platform::PowerRequest power;
     ldm::platform::WinTimeZone timeZone;
     ldm::platform::WaitableWakeTimer wakeTimer;
+    ldm::platform::WaitableWakeTimer grabberWakeTimer;  // the Site Grabber's schedules have their own
     ldm::platform::WinHttpProxyResolver proxy(secrets, core);  // answers slow lookups through the core thread
     ldm::platform::WinShellActions shell;
     ldm::platform::WinSystemActions system;
@@ -215,6 +216,7 @@ int WINAPI wWinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int sho
     grabberPorts.secrets = &secrets;
     grabberPorts.clock = &clock;
     grabberPorts.timeZone = &timeZone;
+    grabberPorts.wakeTimer = &grabberWakeTimer;
     grabberPorts.observer = &grabberBridge;
     ldm::grabber::GrabberExplorer explorer(grabberPorts, ldm::grabber::ExplorerConfig{});
     ldm::grabber::CoreOutputTee coreOutput(explorer, bridge);

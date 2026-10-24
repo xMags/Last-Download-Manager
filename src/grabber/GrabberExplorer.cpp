@@ -1280,8 +1280,9 @@ void GrabberExplorer::PlanSchedules()
     if (ports_.timeZone == nullptr) {
         return;
     }
+    std::optional<std::int64_t> nextStart;
     for (const auto& [id, project] : projects_) {
-        if (project.stored.isTemplate) {
+        if (project.stored.isTemplate || project.damaged) {
             continue;
         }
         const auto start = core::NextScheduledStart(project.stored.schedule, lastScheduleCheckUnixMs_, *ports_.timeZone);
@@ -1291,6 +1292,18 @@ void GrabberExplorer::PlanSchedules()
                 nextScheduleEventUnixMs_ = at;
             }
         }
+        if (start && (!nextStart || *start < *nextStart)) {
+            nextStart = start;
+        }
+    }
+    if (ports_.wakeTimer == nullptr || nextStart == armedWakeUnixMs_) {
+        return;
+    }
+    armedWakeUnixMs_ = nextStart;
+    if (nextStart) {
+        ports_.wakeTimer->Arm(*nextStart);
+    } else {
+        ports_.wakeTimer->Disarm();
     }
 }
 
