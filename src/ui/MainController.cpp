@@ -14,6 +14,7 @@
 #include "ui/dialogs/MessageDialog.h"
 #include "ui/dialogs/OptionsDialog.h"
 #include "ui/dialogs/PropertiesDialog.h"
+#include "ui/dialogs/SchedulerWindow.h"
 
 #include <commdlg.h>
 
@@ -60,7 +61,8 @@ MainController::MainController(Context context)
                                             adds_.AddPlaylistLinks(entries, url);
                                         }}),
       queues_(QueueCommands::Context{context_.owner, context_.commands, context_.theme, context_.snapshot,
-                                     [this] { return Selection(); }, {}})
+                                     [this] { return Selection(); },
+                                     [this](std::optional<model::QueueId> queue) { OpenScheduler(queue); }})
 {
 }
 
@@ -110,6 +112,9 @@ void MainController::Tell(const std::wstring& message) const
 
 bool MainController::PreTranslate(MSG& message)
 {
+    if (scheduler_ && scheduler_->Handle() != nullptr && ::IsDialogMessageW(scheduler_->Handle(), &message)) {
+        return true;
+    }
     if (find_ && find_->Handle() != nullptr && ::IsDialogMessageW(find_->Handle(), &message)) {
         return true;
     }
@@ -439,7 +444,6 @@ void MainController::OnMenuPopup(HMENU menu)
     enable(ID_DOWNLOADS_STOP_ALL, state.stopAll);
     enable(ID_DOWNLOADS_PAUSE_ALL, state.stopAll);
     enable(ID_DOWNLOADS_DELETE_COMPLETED, state.deleteCompleted);
-    enable(ID_DOWNLOADS_SCHEDULER, false);  // the Scheduler window comes with M4 step 5e
     enable(ID_DOWNLOADS_LIMITER_ON, !snapshot->speedLimiterOn);
     enable(ID_DOWNLOADS_LIMITER_OFF, snapshot->speedLimiterOn);
     check(ID_VIEW_HIDE_CATEGORIES, settings.hideCategories);
@@ -469,11 +473,13 @@ void MainController::OnSelectionChanged()
     toolbar.SetEnabled(ID_DOWNLOADS_STOP_ALL, state.stopAll);
     toolbar.SetEnabled(ID_FILE_REMOVE, state.remove);
     toolbar.SetEnabled(ID_DOWNLOADS_DELETE_COMPLETED, state.deleteCompleted);
-    toolbar.SetEnabled(ID_DOWNLOADS_SCHEDULER, false);  // the Scheduler window comes with M4 step 5e
 }
 
 void MainController::OnSnapshot(const core::Snapshot& snapshot)
 {
+    if (scheduler_) {
+        scheduler_->Update(Snapshot());
+    }
     transfers_.OnSnapshot(snapshot);
     adds_.OnSnapshot(snapshot);
     playlists_.OfferWaiting();
@@ -875,6 +881,23 @@ void MainController::ShowCategoryMenu(std::optional<model::CategoryId> category,
     AppendItem(menu.get(), ID_CATEGORY_EDIT, L"&Properties...", category.has_value());
     AppendItem(menu.get(), ID_CATEGORY_DELETE, L"&Delete category", deletable);
     ::TrackPopupMenuEx(menu.get(), TPM_RIGHTBUTTON, screen.x, screen.y, context_.owner, nullptr);
+}
+
+void MainController::OpenScheduler(std::optional<model::QueueId> select)
+{
+    if (scheduler_ && scheduler_->Handle() != nullptr) {
+        scheduler_->Activate(select);
+        return;
+    }
+    scheduler_ = std::make_unique<SchedulerWindow>(
+        *context_.theme,
+        SchedulerWindow::Callbacks{[this](core::Command command) { Post(std::move(command)); },
+                                   [this] { scheduler_.reset(); },  // from the window's WM_DESTROY, after which it touches nothing
+                                   [this] { return context_.system->WakeTimersAllowed(); }});
+    scheduler_->Open(context_.owner, Snapshot(), select);
+    if (scheduler_ && scheduler_->Handle() == nullptr) {
+        scheduler_.reset();
+    }
 }
 
 void MainController::ShowQueueMenu(std::optional<model::QueueId> queue, POINT screen)

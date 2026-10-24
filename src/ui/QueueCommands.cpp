@@ -165,7 +165,7 @@ void QueueCommands::ShowTreeMenu(std::optional<model::QueueId> queue, POINT scre
         AppendItem(menu.get(), ID_QUEUE_DELETE, L"&Delete queue", !view->queue.IsBuiltin());
     }
     AppendSeparator(menu.get());
-    AppendItem(menu.get(), ID_DOWNLOADS_SCHEDULER, L"Sc&heduler...", static_cast<bool>(context_.openScheduler));
+    AppendItem(menu.get(), ID_QUEUE_SCHEDULER, L"Sc&heduler...", static_cast<bool>(context_.openScheduler));
     ::TrackPopupMenuEx(menu.get(), TPM_RIGHTBUTTON, screen.x, screen.y, context_.owner, nullptr);
 }
 
@@ -233,7 +233,12 @@ bool QueueCommands::OnCommand(int id)
         return true;
     case ID_DOWNLOADS_SCHEDULER:
         if (context_.openScheduler) {
-            context_.openScheduler();
+            context_.openScheduler(std::nullopt);
+        }
+        return true;
+    case ID_QUEUE_SCHEDULER:
+        if (context_.openScheduler) {
+            context_.openScheduler(treeTarget_);
         }
         return true;
     default:

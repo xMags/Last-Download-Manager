@@ -147,7 +147,8 @@ int WINAPI wWinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int sho
 
     OleScope ole;
     INITCOMMONCONTROLSEX controls{sizeof(controls), ICC_WIN95_CLASSES | ICC_STANDARD_CLASSES | ICC_TAB_CLASSES |
-                                                        ICC_PROGRESS_CLASS | ICC_UPDOWN_CLASS | ICC_LINK_CLASS};
+                                                        ICC_PROGRESS_CLASS | ICC_UPDOWN_CLASS | ICC_LINK_CLASS |
+                                                        ICC_DATE_CLASSES};
     ::InitCommonControlsEx(&controls);
     ldm::ui::Theme::InitializeProcess();
 

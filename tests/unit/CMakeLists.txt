@@ -42,6 +42,7 @@ add_executable(ldm_unit_tests
     ui/PanelPlacementTests.cpp
     ui/PlaylistOfferTests.cpp
     ui/QueueChoiceTests.cpp
+    ui/ScheduleFieldsTests.cpp
     ui/StopChoiceTests.cpp
     ui/StreamChoiceTests.cpp
     # The app's own manifest: the UI code under test needs version 6 of the common controls
