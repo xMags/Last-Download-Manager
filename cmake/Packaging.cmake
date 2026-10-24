@@ -1,12 +1,22 @@
 # Release archives with fixed names, so the README's download buttons (which link to
 # releases/latest/download/<name>) always fetch the newest release:
 #   LastDownloadManager-windows-x64.zip       ldm.exe, ldm-host.exe, ffmpeg.exe, ffprobe.exe, LICENSE,
-#                                             THIRD-PARTY-NOTICES.txt
+#                                             THIRD-PARTY-NOTICES.txt (-arm64.zip from the
+#                                             windows-release-arm64 preset)
 #   LastDownloadManager-browser-extension.zip  chromium/ and firefox/, to load unpacked
 #   LastDownloadManager-chromium.zip,
 #   LastDownloadManager-firefox.zip            the extension packages for the browser stores
 # Build with: cmake --build --preset windows-release --target ldm_package
 # The archives are written to <build dir>/package/.
+
+# The processor the programs are built for names the archive and the installer.
+if(CMAKE_CXX_COMPILER_ARCHITECTURE_ID STREQUAL "ARM64")
+    set(LDM_PACKAGE_ARCH arm64)
+elseif(CMAKE_CXX_COMPILER_ARCHITECTURE_ID STREQUAL "x64")
+    set(LDM_PACKAGE_ARCH x64)
+else()
+    message(FATAL_ERROR "Unsupported target processor: ${CMAKE_CXX_COMPILER_ARCHITECTURE_ID}")
+endif()
 
 set(LDM_PACKAGE_DIR "${CMAKE_BINARY_DIR}/package")
 set(LDM_APP_STAGE "${LDM_PACKAGE_DIR}/LastDownloadManager")
@@ -25,7 +35,7 @@ set(LDM_PACKAGE_COMMANDS
             "$<TARGET_FILE_DIR:ldm>/ffmpeg.exe" "$<TARGET_FILE_DIR:ldm>/ffprobe.exe"
             "${PROJECT_SOURCE_DIR}/LICENSE" "${LDM_NOTICES}" "${LDM_APP_STAGE}"
     COMMAND ${CMAKE_COMMAND} -E chdir "${LDM_PACKAGE_DIR}"
-            ${CMAKE_COMMAND} -E tar cf LastDownloadManager-windows-x64.zip --format=zip LastDownloadManager)
+            ${CMAKE_COMMAND} -E tar cf LastDownloadManager-windows-${LDM_PACKAGE_ARCH}.zip --format=zip LastDownloadManager)
 set(LDM_PACKAGE_DEPENDS ldm ldm-host)
 
 if(TARGET ldm_extension)
