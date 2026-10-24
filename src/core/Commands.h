@@ -246,6 +246,9 @@ struct StartQueueCommand {
 struct StopQueueCommand {
     model::QueueId id;
 };
+// The computer woke up, or the clock or the time zone changed: schedules are looked at again at
+// once rather than at their next planned time.
+struct ClockChangedCommand {};
 
 // Fetch a streaming manifest into memory for the media panel (M3 design section 6), with the
 // proxy downloads use. Answered by a FetchFinished notification with the same id.
@@ -265,7 +268,7 @@ using Command = std::variant<AddDownloadCommand, ConfirmDownloadCommand, ResumeC
                              ModifySettingsCommand, ReplaceSiteLoginsCommand, ReplaceServerLimitsCommand,
                              QuotaDecisionCommand, WaitForAddressCommand, ReplaceAddressCommand, FetchManifestCommand,
                              SaveQueueCommand, DeleteQueueCommand, SetQueueCommand, ReorderQueueCommand,
-                             StartQueueCommand, StopQueueCommand>;
+                             StartQueueCommand, StopQueueCommand, ClockChangedCommand>;
 
 // Where front ends send commands. Thread-safe; returns at once.
 class CommandSink {

@@ -808,6 +808,15 @@ LRESULT MainWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         SaveViewState();
         ::DestroyWindow(window_);
         return 0;
+    case WM_POWERBROADCAST:
+        // Scheduled queues: the computer may have slept through, or woken for, a start.
+        if (wParam == PBT_APMRESUMEAUTOMATIC || wParam == PBT_APMRESUMESUSPEND) {
+            services_.commands->Post(core::ClockChangedCommand{});
+        }
+        return TRUE;
+    case WM_TIMECHANGE:
+        services_.commands->Post(core::ClockChangedCommand{});
+        return 0;
     case WM_QUERYENDSESSION:
         return TRUE;
     case WM_ENDSESSION:
