@@ -42,6 +42,7 @@ struct ExternalAdd {
     bool silent = false;     // no dialog at all (checklist A-10 silent mode)
     bool queueOnly = false;  // add without starting
     std::optional<BrowserRequest> browser;  // set for downloads captured from a browser
+    std::optional<core::MediaChoice> media;  // a stream from the media panel; `url` is its manifest
 };
 
 // An entry of an imported list (Tasks > Import).
@@ -114,12 +115,15 @@ private:
         std::optional<std::string> saveDir;
         std::optional<std::string> fileName;
         std::optional<BrowserRequest> browser;
+        std::optional<core::MediaChoice> media;
     };
 
     void AddWithInfoDialog(InfoDialogInput input);
     // Asks about an address already in the list when Options say so (checklist A-05). Returns false
     // when nothing more should happen: the user cancelled, or the existing download was resumed.
-    [[nodiscard]] bool ResolveDuplicate(const std::string& url, std::optional<model::DuplicatePolicy>& policy);
+    // A stream counts as a duplicate only with the same tracks.
+    [[nodiscard]] bool ResolveDuplicate(const std::string& url, std::optional<model::DuplicatePolicy>& policy,
+                                        const core::MediaChoice* media = nullptr);
     void AddMany(const std::vector<std::string>& urls, bool start, std::optional<std::string> user,
                  std::optional<std::string> password);
     void Post(core::Command command);

@@ -9,6 +9,7 @@
 #include "ui/MediaCatalog.h"
 #include "ui/MediaPanelMenu.h"
 #include "ui/MediaPanelWindow.h"
+#include "ui/StreamChoice.h"
 #include "ui/Theme.h"
 
 #include <cstdint>
@@ -32,6 +33,7 @@ public:
         std::function<void(BrowserConnectionId, int tabId, bool hasMedia)> sendMediaList;
         std::function<std::uint32_t(BrowserConnectionId)> hostProcessOf;
         std::function<void(browser::Capture)> downloadFile;  // the ordinary add flow
+        std::function<void(StreamCapture)> downloadStream;   // the add flow, for a stream
         std::function<void(const std::wstring&)> tell;       // a message to the user
         std::function<base::Result<media::XmlElement>(std::string_view)> readXml;
     };

@@ -60,14 +60,23 @@ void AddFlow::ShowError(const std::wstring& message) const
     (void)ShowMessage(context_.owner, *context_.theme, MessageRequest{message, MessageKind::Warning});
 }
 
-bool AddFlow::ResolveDuplicate(const std::string& url, std::optional<model::DuplicatePolicy>& policy)
+bool AddFlow::ResolveDuplicate(const std::string& url, std::optional<model::DuplicatePolicy>& policy,
+                               const core::MediaChoice* media)
 {
     const auto snapshot = context_.snapshot();
     if (!snapshot || snapshot->settings.duplicatePolicy != model::DuplicatePolicy::Ask) {
         return true;
     }
-    const auto existing = std::find_if(snapshot->downloads.begin(), snapshot->downloads.end(),
-                                       [&](const auto& view) { return view->download.url == url; });
+    const auto sameTracks = [media](const model::Download& download) {
+        if (media == nullptr || !download.IsStream()) {
+            return media == nullptr && !download.IsStream();
+        }
+        return std::equal(download.tracks.begin(), download.tracks.end(), media->tracks.begin(), media->tracks.end(),
+                          [](const model::MediaTrack& a, const core::MediaTrackChoice& b) { return a.sourceUrl == b.sourceUrl; });
+    };
+    const auto existing = std::find_if(snapshot->downloads.begin(), snapshot->downloads.end(), [&](const auto& view) {
+        return view->download.url == url && sameTracks(view->download);
+    });
     if (existing == snapshot->downloads.end()) {
         return true;
     }
@@ -87,6 +96,9 @@ bool AddFlow::ResolveDuplicate(const std::string& url, std::optional<model::Dupl
         command.token = nextToken_++;
         command.url = url;
         command.duplicatePolicy = answer->policy;
+        if (media != nullptr) {
+            command.media = *media;  // finds the same stream, not a file at its manifest's address
+        }
         Post(std::move(command));
         return false;
     }
@@ -102,7 +114,7 @@ void AddFlow::AddAddress(const ExternalAdd& add)
     std::optional<model::DuplicatePolicy> policy;
     if (add.silent) {
         policy = model::DuplicatePolicy::AddNumbered;  // nobody to ask; never replace silently
-    } else if (!ResolveDuplicate(add.url, policy)) {
+    } else if (!ResolveDuplicate(add.url, policy, add.media ? &*add.media : nullptr)) {
         return;
     }
     if (add.silent || !snapshot->settings.showStartDialog) {
@@ -113,6 +125,7 @@ void AddFlow::AddAddress(const ExternalAdd& add)
         command.fileName = add.fileName;
         command.duplicatePolicy = policy;
         ApplyBrowserRequest(add.browser, command);
+        command.media = add.media;
         command.mode = add.queueOnly || snapshot->settings.queueOnly ? core::AddMode::Later : core::AddMode::StartNow;
         if (!add.silent && command.mode == core::AddMode::StartNow) {
             progressOnAdd_.push_back(command.token);
@@ -120,7 +133,8 @@ void AddFlow::AddAddress(const ExternalAdd& add)
         Post(std::move(command));
         return;
     }
-    AddWithInfoDialog(InfoDialogInput{add.url, std::nullopt, std::nullopt, policy, add.saveDir, add.fileName, add.browser});
+    AddWithInfoDialog(
+        InfoDialogInput{add.url, std::nullopt, std::nullopt, policy, add.saveDir, add.fileName, add.browser, add.media});
 }
 
 void AddFlow::ApplyBrowserRequest(const std::optional<BrowserRequest>& browser, core::AddDownloadCommand& command)
@@ -244,6 +258,7 @@ void AddFlow::AddWithInfoDialog(InfoDialogInput input)
         command.saveDir = input.saveDir;  // a folder or name the dialog does not let the user change
         command.fileName = input.fileName;
         ApplyBrowserRequest(input.browser, command);
+        command.media = input.media;
         pendingAdds_[token] = PendingAdd{token};
         Post(std::move(command));
     }
@@ -299,6 +314,7 @@ void AddFlow::AddWithInfoDialog(InfoDialogInput input)
         command.mode = choice.action == DownloadInfoDialog::Action::Start ? core::AddMode::StartNow : core::AddMode::Later;
         command.duplicatePolicy = duplicatePolicy;
         ApplyBrowserRequest(input.browser, command);
+        command.media = input.media;
         if (command.mode == core::AddMode::StartNow) {
             progressOnAdd_.push_back(token);
         }

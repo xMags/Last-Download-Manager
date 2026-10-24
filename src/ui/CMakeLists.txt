@@ -65,6 +65,8 @@ add_library(ldm_ui STATIC
     ShellActions.h
     StartupRegistration.h
     StatusBar.cpp
+    StreamChoice.cpp
+    StreamChoice.h
     StatusBar.h
     SystemActions.cpp
     SystemActions.h

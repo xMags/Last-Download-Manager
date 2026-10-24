@@ -14,6 +14,7 @@
 #include "ui/ListModel.h"
 #include "ui/ShellActions.h"
 #include "ui/StartupRegistration.h"
+#include "ui/StreamChoice.h"
 #include "ui/SystemActions.h"
 #include "ui/Theme.h"
 #include "ui/Toolbar.h"
@@ -81,6 +82,8 @@ public:
     void OnLaunchRequest(const core::LaunchRequest& request);
     // A download the browser extension handed over (M3 design section 5).
     void OnBrowserCapture(browser::Capture capture);
+    // A stream picked in the media panel.
+    void OnStreamCapture(StreamCapture capture);
     // "Download all links" or "Download selected links" from the browser (checklist B-05).
     void OnBrowserLinks(BrowserSessions::LinksRequest request);
     // WM_CLIPBOARDUPDATE (checklist A-09).

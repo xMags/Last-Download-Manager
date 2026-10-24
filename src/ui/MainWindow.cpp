@@ -292,6 +292,7 @@ void MainWindow::CreateMediaPanel()
     };
     // Plain files from the panel go through the add flow like a browser capture.
     hooks.downloadFile = [this](browser::Capture capture) { QueueExternalInput(std::move(capture)); };
+    hooks.downloadStream = [this](StreamCapture capture) { QueueExternalInput(std::move(capture)); };
     hooks.tell = [this](const std::wstring& text) {
         (void)ShowMessage(window_, *theme_, MessageRequest{text, MessageKind::Information});
     };
@@ -425,6 +426,8 @@ void MainWindow::DrainExternalInput()
             controller_->OnBrowserLinks(std::move(*links));
         } else if (std::holds_alternative<ElevationNotice>(*next)) {
             controller_->WarnElevated();
+        } else if (auto* stream = std::get_if<StreamCapture>(&*next)) {
+            controller_->OnStreamCapture(std::move(*stream));
         } else {
             controller_->OnDroppedUrls(std::move(std::get<std::vector<std::string>>(*next)));
         }

@@ -177,7 +177,13 @@ void ProgressWindow::Update(const core::DownloadView& view, const model::Setting
         status = view.receivedBytes > 0 ? L"Receiving data..." : L"Connecting...";
     }
     SetText(IDC_PROG_STATUS, status);
-    SetText(IDC_PROG_SIZE, d.totalSize ? FormatSize(*d.totalSize) : L"Unknown");
+    if (d.totalSize) {
+        SetText(IDC_PROG_SIZE, FormatSize(*d.totalSize));
+    } else if (view.stream && view.stream->estimatedBytes) {
+        SetText(IDC_PROG_SIZE, L"about " + FormatSize(*view.stream->estimatedBytes));
+    } else {
+        SetText(IDC_PROG_SIZE, L"Unknown");
+    }
     std::wstring downloaded = FormatSize(view.receivedBytes);
     if (fraction) {
         wchar_t percent[32] = {};
