@@ -1,5 +1,7 @@
 #include "model/Download.h"
 
+#include "model/EnumNames.h"
+
 #include <array>
 #include <utility>
 
@@ -26,49 +28,26 @@ constexpr std::array<std::pair<CompletionAction, std::string_view>, 5> kActionNa
     {CompletionAction::Hibernate, "hibernate"},
 }};
 
-template <typename Enum, size_t N>
-std::string_view NameOf(const std::array<std::pair<Enum, std::string_view>, N>& table, Enum value) noexcept
-{
-    for (const auto& [candidate, name] : table) {
-        if (candidate == value) {
-            return name;
-        }
-    }
-    return {};
-}
-
-template <typename Enum, size_t N>
-std::optional<Enum> ValueOf(const std::array<std::pair<Enum, std::string_view>, N>& table,
-                            std::string_view text) noexcept
-{
-    for (const auto& [value, name] : table) {
-        if (name == text) {
-            return value;
-        }
-    }
-    return std::nullopt;
-}
-
 }  // namespace
 
 std::string_view ToString(DownloadStatus status) noexcept
 {
-    return NameOf(kStatusNames, status);
+    return detail::NameOf(kStatusNames, status);
 }
 
 std::optional<DownloadStatus> ParseDownloadStatus(std::string_view text) noexcept
 {
-    return ValueOf(kStatusNames, text);
+    return detail::ValueOf(kStatusNames, text);
 }
 
 std::string_view ToString(CompletionAction action) noexcept
 {
-    return NameOf(kActionNames, action);
+    return detail::NameOf(kActionNames, action);
 }
 
 std::optional<CompletionAction> ParseCompletionAction(std::string_view text) noexcept
 {
-    return ValueOf(kActionNames, text);
+    return detail::ValueOf(kActionNames, text);
 }
 
 std::int64_t Download::DownloadedBytes() const noexcept
