@@ -803,6 +803,151 @@ TEST_F(GrabberExplorerTest, DeletingAProjectRemovesItsHiddenDownloads)
     EXPECT_FALSE(store_.projects.contains(id.value));
 }
 
+TEST_F(GrabberExplorerTest, DropsAnswersOfAStoppedExploration)
+{
+    Start();
+    Page("https://example.com/", R"(<a href="a.html">a</a><a href="b.zip">b</a>)");
+    Page("https://example.com/a.html", R"(<a href="old.zip">old</a>)");
+    const GrabberProjectId id = Save(Definition("https://example.com/"));
+    explorer_->Handle(ldm::core::GrabberExploreCommand{id, false, {}});
+    // Read the start page only; a.html is being fetched when the user stops and explores again.
+    FetchRequest first = engine_.fetches.front();
+    engine_.fetches.erase(engine_.fetches.begin());
+    FetchFinished start;
+    start.fetchId = first.fetchId;
+    start.finalUrl = first.url;
+    start.contentType = "text/html";
+    start.body = site_.at(first.url).body;
+    explorer_->OnEngineEvent(ldm::core::EngineEvent{{}, 0, start});
+    ASSERT_EQ(engine_.fetches.size(), 1u);
+    const FetchRequest stale = engine_.fetches.front();
+    engine_.fetches.clear();
+    explorer_->Handle(ldm::core::GrabberStopCommand{id});
+    Page("https://example.com/", R"(<a href="new.zip">new</a>)");
+    explorer_->Handle(ldm::core::GrabberExploreCommand{id, false, {}});
+
+    // The old answer for a.html arrives now; in the new list its item id belongs to new.zip.
+    FetchFinished late;
+    late.fetchId = stale.fetchId;
+    late.finalUrl = stale.url;
+    late.contentType = "text/html";
+    late.body = site_.at(stale.url).body;
+    explorer_->OnEngineEvent(ldm::core::EngineEvent{{}, 0, late});
+    Serve();
+    const auto items = Items(id);
+    EXPECT_FALSE(ByUrl(items, "https://example.com/old.zip"));
+    ASSERT_TRUE(ByUrl(items, "https://example.com/new.zip"));
+    EXPECT_EQ(ByUrl(items, "https://example.com/new.zip")->state, GrabberItemState::Found);
+    EXPECT_FALSE(View(id)->exploring);
+}
+
+TEST_F(GrabberExplorerTest, DownloadingWhileExploringEndsWithTheExploration)
+{
+    Start();
+    Page("https://example.com/", R"(<a href="a.zip">a</a><a href="p.html">p</a>)");
+    Page("https://example.com/p.html", "<p>no files</p>");
+    auto definition = Definition("https://example.com/");
+    definition.files.downloadImmediately = true;
+    const GrabberProjectId id = Save(definition);
+    explorer_->Handle(ldm::core::GrabberExploreCommand{id, false, {}});
+    // The start page lists a.zip, which starts downloading while p.html is still to be read.
+    FetchRequest first = engine_.fetches.front();
+    engine_.fetches.erase(engine_.fetches.begin());
+    FetchFinished start;
+    start.fetchId = first.fetchId;
+    start.finalUrl = first.url;
+    start.contentType = "text/html";
+    start.body = site_.at(first.url).body;
+    explorer_->OnEngineEvent(ldm::core::EngineEvent{{}, 0, start});
+    const auto adds = sink_.All<ldm::core::AddDownloadCommand>();
+    ASSERT_EQ(adds.size(), 1u);
+    Complete(adds[0].token, 100);
+    ldm::core::DownloadCompleted done;
+    done.id = DownloadId{100};
+    done.inMainList = false;
+    EXPECT_TRUE(explorer_->TakeNotification(done));
+    EXPECT_TRUE(View(id)->downloading) << "more files may come while exploring";
+    Serve();
+    EXPECT_FALSE(View(id)->exploring);
+    EXPECT_FALSE(View(id)->downloading) << "nothing is left once exploring ended";
+}
+
+TEST_F(GrabberExplorerTest, ADownloadAddedBeforeAStopIsUsedOnceDownloadingStartsAgain)
+{
+    Start();
+    Page("https://example.com/", R"(<a href="a.zip">a</a>)");
+    const GrabberProjectId id = Save(Definition("https://example.com/"));
+    explorer_->Handle(ldm::core::GrabberExploreCommand{id, false, {}});
+    Serve();
+    explorer_->Handle(ldm::core::GrabberDownloadCommand{id});
+    ASSERT_EQ(sink_.All<ldm::core::AddDownloadCommand>().size(), 1u);
+    const std::uint64_t token = sink_.All<ldm::core::AddDownloadCommand>()[0].token;
+    explorer_->Handle(ldm::core::GrabberStopDownloadsCommand{id});
+    explorer_->Handle(ldm::core::GrabberDownloadCommand{id});
+    EXPECT_EQ(sink_.All<ldm::core::AddDownloadCommand>().size(), 1u) << "the add on its way serves the file";
+    Complete(token, 100);
+    EXPECT_TRUE(sink_.All<ldm::core::StopCommand>().empty());
+    EXPECT_EQ(ByUrl(Items(id), "https://example.com/a.zip")->downloadId, DownloadId{100});
+    EXPECT_EQ(ByUrl(Items(id), "https://example.com/a.zip")->state, GrabberItemState::Downloading);
+
+    // Stopped for good while an add is on its way: the answer stops the download it made.
+    explorer_->Handle(ldm::core::GrabberStopDownloadsCommand{id});
+    auto core = std::make_shared<ldm::core::Snapshot>(*core_);
+    explorer_->OnCoreSnapshot(core);
+    explorer_->Handle(ldm::core::GrabberOpenCommand{id, false});
+    Page("https://example.com/", R"(<a href="b.zip">b</a>)");
+    explorer_->Handle(ldm::core::GrabberExploreCommand{id, true, {}});
+    Serve();
+    explorer_->Handle(
+        ldm::core::GrabberCheckCommand{id, {ByUrl(Items(id), "https://example.com/a.zip")->id}, false, false});
+    explorer_->Handle(ldm::core::GrabberDownloadCommand{id});
+    const auto adds = sink_.All<ldm::core::AddDownloadCommand>();
+    ASSERT_EQ(adds.size(), 2u);
+    explorer_->Handle(ldm::core::GrabberStopDownloadsCommand{id});
+    Complete(adds[1].token, 101);
+    const auto stops = sink_.All<ldm::core::StopCommand>();
+    ASSERT_FALSE(stops.empty());
+    EXPECT_EQ(stops.back().ids, std::vector<DownloadId>{DownloadId{101}});
+    EXPECT_EQ(ByUrl(Items(id), "https://example.com/b.zip")->downloadId, DownloadId{101});
+}
+
+TEST_F(GrabberExplorerTest, AnAddAnsweredAfterItsProjectWasDeletedIsRemoved)
+{
+    Start();
+    Page("https://example.com/", R"(<a href="a.zip">a</a>)");
+    const GrabberProjectId id = Save(Definition("https://example.com/"));
+    explorer_->Handle(ldm::core::GrabberExploreCommand{id, false, {}});
+    Serve();
+    explorer_->Handle(ldm::core::GrabberDownloadCommand{id});
+    const auto adds = sink_.All<ldm::core::AddDownloadCommand>();
+    ASSERT_EQ(adds.size(), 1u);
+    explorer_->Handle(ldm::core::GrabberDeleteProjectCommand{id});
+    Complete(adds[0].token, 100);
+    const auto deletes = sink_.All<ldm::core::DeleteCommand>();
+    ASSERT_FALSE(deletes.empty());
+    EXPECT_EQ(deletes.back().ids, std::vector<DownloadId>{DownloadId{100}});
+    EXPECT_FALSE(deletes.back().deleteFiles);
+}
+
+TEST_F(GrabberExplorerTest, NothingStartsAfterShutdown)
+{
+    Start();
+    Page("https://example.com/", R"(<a href="a.html">a</a>)");
+    Page("https://example.com/a.html", "x");
+    const GrabberProjectId id = Save(Definition("https://example.com/"));
+    explorer_->Handle(ldm::core::GrabberExploreCommand{id, false, {}});
+    FetchRequest first = engine_.fetches.front();
+    engine_.fetches.clear();
+    explorer_->Shutdown();
+    FetchFinished start;
+    start.fetchId = first.fetchId;
+    start.finalUrl = first.url;
+    start.contentType = "text/html";
+    start.body = site_.at(first.url).body;
+    explorer_->OnEngineEvent(ldm::core::EngineEvent{{}, 0, start});
+    EXPECT_TRUE(engine_.fetches.empty());
+}
+
 TEST_F(GrabberExplorerTest, TeeKeepsTheGrabbersOutputFromTheFrontEnd)
 {
     Start();

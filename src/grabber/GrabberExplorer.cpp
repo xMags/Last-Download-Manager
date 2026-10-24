@@ -287,11 +287,26 @@ void GrabberExplorer::DeleteProject(model::GrabberProjectId id)
         ReportError("The project could not be deleted: " + status.GetError().message);
         return;
     }
+    AbandonPendingAdds(*project);
     RemoveHiddenDownloads(id);
     std::erase_if(fetches_, [id](const auto& entry) { return entry.second.project == id; });
     projects_.erase(id);
     PlanSchedules();
     snapshotDirty_ = true;
+}
+
+void GrabberExplorer::AbandonPendingAdds(Project& project)
+{
+    for (const auto& [token, itemId] : project.adding) {
+        abandonedAdds_.insert(token);
+    }
+    project.adding.clear();
+}
+
+bool GrabberExplorer::AddPending(const Project& project, std::int64_t itemId)
+{
+    return std::any_of(project.adding.begin(), project.adding.end(),
+                       [itemId](const auto& entry) { return entry.second == itemId; });
 }
 
 void GrabberExplorer::RemoveHiddenDownloads(model::GrabberProjectId id)
@@ -342,17 +357,18 @@ void GrabberExplorer::Explore(model::GrabberProjectId id, bool keepChecks, std::
         ReportError("The project \"" + project.stored.name + "\" cannot be explored: its settings are damaged.");
         return;
     }
+    if (!keepChecks && project.downloading) {
+        StopDownloads(project);  // before loading the list: stopping may unload it
+    }
     if (!LoadItems(project)) {
         return;
     }
     if (!keepChecks) {
-        if (project.downloading) {
-            StopDownloads(project);
-        }
         if (base::Status status = ports_.store->ClearGrabberItems(project.stored.id); !status) {
             ReportError("The project's list could not be cleared: " + status.GetError().message);
             return;
         }
+        AbandonPendingAdds(project);
         RemoveHiddenDownloads(project.stored.id);
         project.items.clear();
         project.byAddress.clear();
@@ -363,6 +379,8 @@ void GrabberExplorer::Explore(model::GrabberProjectId id, bool keepChecks, std::
         item.otherSitesDepth = 0;
     }
     project.exploring = true;
+    ++project.run;
+    project.fetching = 0;  // answers of an earlier run no longer count
     project.startPageFailure.reset();
     project.scheduledRun = scheduled;
     project.pagesExplored = 0;
@@ -399,13 +417,14 @@ void GrabberExplorer::StopProject(Project& project)
         project.downloadAfterExplore = false;
         project.pageQueue.clear();
         project.sizeQueue.clear();
-        // Answers of fetches still running are dropped when they come; lookups not answered yet
-        // are not fetched at all.
+        // Answers of fetches still running are dropped when they come (another run); lookups not
+        // answered yet are not fetched at all.
+        ++project.run;
+        project.fetching = 0;
         for (auto it = waitingForProxy_.begin(); it != waitingForProxy_.end();) {
             const auto fetch = fetches_.find(it->first);
             if (fetch != fetches_.end() && fetch->second.project == project.stored.id) {
                 fetches_.erase(fetch);
-                --project.fetching;
                 it = waitingForProxy_.erase(it);
             } else {
                 ++it;
@@ -485,7 +504,8 @@ void GrabberExplorer::StopDownloads(Project& project)
             Changed(project, *item);
         }
     }
-    // Adds not answered yet are stopped when their answer comes (OnAddResult sees no run).
+    // Adds not answered yet stay in `adding`: their answer stops the download, or adopts it when
+    // downloading started again meanwhile.
     for (const auto& [token, itemId] : project.adding) {
         if (Item* item = FindItem(project, itemId)) {
             item->data.state = model::GrabberItemState::Found;
@@ -536,7 +556,7 @@ void GrabberExplorer::AddToMainList(Project& project, const std::vector<std::int
 void GrabberExplorer::PumpFetches(Project& project)
 {
     const int limit = std::clamp(project.stored.definition.exploreConcurrency, 1, model::kMaxGrabberConcurrency);
-    while (project.exploring && project.fetching < limit) {
+    while (project.exploring && !shutDown_ && project.fetching < limit) {
         if (!project.pageQueue.empty()) {
             const std::int64_t id = project.pageQueue.front();
             project.pageQueue.pop_front();
@@ -584,7 +604,7 @@ void GrabberExplorer::StartFetch(Project& project, std::int64_t itemId, bool hea
     if (!head) {
         request.bodyTypes = {"text/html", "application/xhtml+xml"};
     }
-    fetches_.emplace(request.fetchId, Fetch{project.stored.id, itemId, head});
+    fetches_.emplace(request.fetchId, Fetch{project.stored.id, itemId, head, project.run});
     ++project.fetching;
     const core::ProxyLookup lookup = ports_.proxy->Resolve(model::DownloadId{request.fetchId}, 0, request.url);
     if (lookup.pending) {
@@ -598,6 +618,9 @@ void GrabberExplorer::StartFetch(Project& project, std::int64_t itemId, bool hea
 
 void GrabberExplorer::OnEngineEvent(core::EngineEvent event)
 {
+    if (shutDown_) {
+        return;  // LDM is ending: nothing new starts, and the list was saved
+    }
     if (auto* fetched = std::get_if<core::FetchFinished>(&event.payload)) {
         const auto it = fetches_.find(fetched->fetchId);
         if (it == fetches_.end()) {
@@ -623,8 +646,8 @@ void GrabberExplorer::OnEngineEvent(core::EngineEvent event)
 void GrabberExplorer::OnFetched(const Fetch& fetch, const core::FetchFinished& finished)
 {
     Project* project = Find(fetch.project);
-    if (project == nullptr) {
-        return;
+    if (project == nullptr || fetch.run != project->run) {
+        return;  // of a run that was stopped or replaced
     }
     --project->fetching;
     Item* item = FindItem(*project, fetch.item);
@@ -900,6 +923,8 @@ void GrabberExplorer::FinishExploreIfDone(Project& project)
     } else if (!project.downloading) {
         project.scheduledRun = false;
     }
+    // Downloads that ran while exploring ("download immediately") may all be done already.
+    FinishDownloadsIfDone(project);
     UnloadItemsIfIdle(project);
     snapshotDirty_ = true;
 }
@@ -915,8 +940,9 @@ void GrabberExplorer::PumpDownloads(Project& project)
         const std::int64_t id = project.downloadQueue.front();
         project.downloadQueue.pop_front();
         Item* item = FindItem(project, id);
+        // An item whose earlier add is still on its way is taken over by that add's answer.
         if (item == nullptr || !item->data.checked || item->data.state == model::GrabberItemState::Done ||
-            item->data.state == model::GrabberItemState::Downloading) {
+            item->data.state == model::GrabberItemState::Downloading || AddPending(project, id)) {
             continue;
         }
         StartDownload(project, *item);
@@ -1015,6 +1041,13 @@ bool GrabberExplorer::TakeNotification(const core::Notification& notification)
         if (added->token < kTokenBase) {
             return false;
         }
+        if (abandonedAdds_.erase(added->token) > 0) {
+            // Its item is gone: the download would stay hidden for good.
+            if (added->id) {
+                ports_.downloads->Post(core::DeleteCommand{{*added->id}, false});
+            }
+            return true;
+        }
         for (auto& [projectId, project] : projects_) {
             const auto it = project.adding.find(added->token);
             if (it == project.adding.end()) {
@@ -1022,22 +1055,7 @@ bool GrabberExplorer::TakeNotification(const core::Notification& notification)
             }
             const std::int64_t itemId = it->second;
             project.adding.erase(it);
-            Item* item = FindItem(project, itemId);
-            if (item == nullptr) {
-                break;
-            }
-            if (added->id) {
-                item->data.downloadId = added->id;
-                Changed(project, *item);
-                if (project.downloading && item->data.state == model::GrabberItemState::Downloading) {
-                    project.active.emplace(*added->id, itemId);
-                } else {
-                    // Stopped while the add was on its way.
-                    ports_.downloads->Post(core::StopCommand{{*added->id}});
-                }
-            } else {
-                OnDownloadEnded(project, itemId, false, {}, std::nullopt);
-            }
+            OnAddAnswered(project, itemId, added->id);
             break;
         }
         return true;
@@ -1069,6 +1087,42 @@ bool GrabberExplorer::TakeNotification(const core::Notification& notification)
         return !failed->inMainList;
     }
     return false;
+}
+
+void GrabberExplorer::OnAddAnswered(Project& project, std::int64_t itemId, std::optional<model::DownloadId> downloadId)
+{
+    Item* item = FindItem(project, itemId);
+    if (!downloadId) {
+        if (project.downloading && item != nullptr) {
+            OnDownloadEnded(project, itemId, false, {}, std::nullopt);
+        } else if (item != nullptr && item->data.state == model::GrabberItemState::Downloading) {
+            item->data.state = model::GrabberItemState::Found;
+            Changed(project, *item);
+        }
+        UnloadItemsIfIdle(project);
+        return;
+    }
+    if (item != nullptr) {
+        item->data.downloadId = downloadId;
+        // Downloading again since the add was sent (Stop, then Download): this download serves.
+        if (project.downloading && item->data.checked && item->data.state != model::GrabberItemState::Done) {
+            item->data.state = model::GrabberItemState::Downloading;
+            Changed(project, *item);
+            std::erase(project.downloadQueue, itemId);
+            project.active.emplace(*downloadId, itemId);
+            return;
+        }
+        if (item->data.state == model::GrabberItemState::Downloading) {
+            item->data.state = model::GrabberItemState::Found;
+        }
+        Changed(project, *item);
+    }
+    // Stopped while the add was on its way; a later Download resumes it through downloadId.
+    ports_.downloads->Post(core::StopCommand{{*downloadId}});
+    PumpDownloads(project);
+    FinishDownloadsIfDone(project);
+    UnloadItemsIfIdle(project);
+    snapshotDirty_ = true;
 }
 
 void GrabberExplorer::OnDownloadEnded(Project& project, std::int64_t itemId, bool completed,
@@ -1361,7 +1415,8 @@ bool GrabberExplorer::LoadItems(Project& project)
 
 void GrabberExplorer::UnloadItemsIfIdle(Project& project)
 {
-    if (project.open || project.exploring || project.downloading || !project.itemsLoaded) {
+    // Pending adds name items by id; their answers need the list.
+    if (project.open || project.exploring || project.downloading || !project.adding.empty() || !project.itemsLoaded) {
         return;
     }
     SaveItems(project);
