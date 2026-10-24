@@ -506,6 +506,7 @@ void SchedulerWindow::MarkEdited()
 
 bool SchedulerWindow::ReadSchedule(model::Schedule& schedule)
 {
+    const model::Schedule saved = schedule;  // the caller passes the saved one in
     const auto fail = [this](int control, const wchar_t* message) {
         ShowPage(kSchedulePage);
         Warn(message);
@@ -528,7 +529,11 @@ bool SchedulerWindow::ReadSchedule(model::Schedule& schedule)
     if (schedule.enabled && daily && weekdays == 0) {
         return fail(IDC_SCHED_DAY_FIRST, L"Choose at least one day of the week.");
     }
-    if (schedule.enabled && !daily) {
+    // A single start that already happened stays as it is when other settings change; only a new or
+    // changed one has to lie ahead.
+    const bool sameSingleStart = saved.enabled && saved.mode == model::ScheduleMode::Once &&
+                                 saved.startDay == schedule.startDay && saved.startMinutes == schedule.startMinutes;
+    if (schedule.enabled && !daily && !sameSingleStart) {
         const SYSTEMTIME now = LocalNow();
         const std::int64_t today = Today();
         const int minutes = now.wHour * 60 + now.wMinute;
@@ -662,7 +667,18 @@ bool SchedulerWindow::SettleChanges()
     if (answer == IDYES) {
         return Apply();
     }
+    // No: the fields go back to what is saved, so what was refused is neither shown nor saved
+    // later with another change. Looked up again: a newer snapshot came while the question was open.
     edited_ = false;
+    if (chosenProject_) {
+        if (const grabber::GrabberProjectView* current = ChosenProject()) {
+            LoadProject(*current);
+        }
+    } else if (const core::QueueView* current = Chosen()) {
+        LoadQueue(*current);
+    }
+    LoadQuota();
+    RefreshButtons();
     return true;
 }
 

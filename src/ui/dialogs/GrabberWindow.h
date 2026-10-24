@@ -11,6 +11,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <cstdint>
 #include <unordered_map>
 #include <vector>
 
@@ -73,7 +74,8 @@ private:
     GrabberNode node_;
     std::vector<GrabberNode> treeNodes_;  // tree item lParam -> node
     std::vector<std::wstring> typeNodes_;  // the "By type" children as last built
-    std::vector<std::size_t> rows_;  // list row -> index into the project's items
+    std::vector<std::size_t> rows_;     // list row -> index into the project's items
+    std::vector<std::int64_t> rowIds_;  // list row -> item id, as last shown
     std::wstring cellText_;          // kept alive for LVN_GETDISPINFO
     RECT buttonsBottom_{};           // the buttons' row, from the template
     bool refreshingTree_ = false;

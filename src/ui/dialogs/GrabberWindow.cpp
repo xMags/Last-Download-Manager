@@ -11,6 +11,9 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdint>
+#include <optional>
+#include <unordered_set>
 
 namespace ldm::ui {
 
@@ -251,19 +254,47 @@ void GrabberWindow::RefreshTree()
 
 void GrabberWindow::RefreshRows()
 {
+    const HWND list = Item(IDC_GG_LIST);
+    // The list view keeps its selection by row, and rows move with every snapshot and node change,
+    // so the selection follows the items: actions never land on the files that moved into its rows.
+    std::unordered_set<std::int64_t> selected;
+    for (int row = ListView_GetNextItem(list, -1, LVNI_SELECTED); row >= 0; row = ListView_GetNextItem(list, row, LVNI_SELECTED)) {
+        if (static_cast<std::size_t>(row) < rowIds_.size()) {
+            selected.insert(rowIds_[static_cast<std::size_t>(row)]);
+        }
+    }
+    const int focusedRow = ListView_GetNextItem(list, -1, LVNI_FOCUSED);
+    const std::optional<std::int64_t> focused =
+        focusedRow >= 0 && static_cast<std::size_t>(focusedRow) < rowIds_.size()
+            ? std::optional(rowIds_[static_cast<std::size_t>(focusedRow)])
+            : std::nullopt;
+
     const grabber::GrabberProjectView* view = View();
     rows_.clear();
+    rowIds_.clear();
     if (view != nullptr) {
         const auto start = core::ParseUrl(view->project.definition.startPage);
         const std::string host = start ? start->host : std::string();
         for (std::size_t i = 0; i < view->items.size(); ++i) {
             if (InGrabberNode(*view->items[i], node_, host)) {
                 rows_.push_back(i);
+                rowIds_.push_back(view->items[i]->id);
             }
         }
     }
-    const HWND list = Item(IDC_GG_LIST);
     ListView_SetItemCountEx(list, static_cast<int>(rows_.size()), LVSICF_NOINVALIDATEALL | LVSICF_NOSCROLL);
+    ListView_SetItemState(list, -1, 0, LVIS_SELECTED | LVIS_FOCUSED);
+    if (!selected.empty() || focused) {
+        for (std::size_t row = 0; row < rowIds_.size(); ++row) {
+            UINT state = selected.contains(rowIds_[row]) ? LVIS_SELECTED : 0;
+            if (focused && *focused == rowIds_[row]) {
+                state |= LVIS_FOCUSED;
+            }
+            if (state != 0) {
+                ListView_SetItemState(list, static_cast<int>(row), state, state);
+            }
+        }
+    }
     ::InvalidateRect(list, nullptr, FALSE);
 }
 
