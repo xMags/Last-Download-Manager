@@ -152,7 +152,29 @@ struct ProxyResolved {
     std::optional<std::string> proxy;  // nothing: connect directly
 };
 
-using EnginePayload = std::variant<ResponseInfo, ProgressInfo, TransferFinished, FinalizeFinished, ProxyResolved>;
+// A small download into memory: a streaming manifest LDM reads itself (M3 design section 6).
+// Not a download of the list, so it has no DownloadId; its answer carries `fetchId`.
+struct FetchRequest {
+    std::int64_t fetchId = 0;
+    std::string url;  // http or https; redirects are followed, to http or https only
+    std::optional<std::string> referer;
+    std::string userAgent;
+    std::vector<std::string> cookieLines;  // Netscape format, as in TransferRequest
+    std::optional<std::string> proxy;
+    std::size_t maxBytes = 0;  // a longer body fails the fetch
+};
+
+// The answer to a FetchRequest: exactly one per request.
+struct FetchFinished {
+    std::int64_t fetchId = 0;
+    std::optional<TransferFailure> failure;  // nothing: `body` is the whole 2xx response
+    std::string finalUrl;  // after redirects; relative addresses in the body resolve against it
+    std::optional<std::string> contentType;
+    std::string body;
+};
+
+using EnginePayload =
+    std::variant<ResponseInfo, ProgressInfo, TransferFinished, FinalizeFinished, ProxyResolved, FetchFinished>;
 
 struct EngineEvent {
     model::DownloadId id;
@@ -183,6 +205,8 @@ public:
     virtual void SetGlobalSpeedLimit(std::optional<std::int64_t> bytesPerSecond) = 0;
     // Moves a completed partial file to its final name, off the caller's thread.
     virtual void Finalize(FinalizeRequest request) = 0;
+    // Fetches into memory. Answered by one FetchFinished event (its EngineEvent id is empty).
+    virtual void Fetch(FetchRequest request) = 0;
 };
 
 }  // namespace ldm::core

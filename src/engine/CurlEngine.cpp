@@ -3,6 +3,7 @@
 #include "engine/BufferPool.h"
 #include "engine/CurlHandles.h"
 #include "engine/DiskWriter.h"
+#include "engine/MemoryFetch.h"
 #include "engine/TokenBucket.h"
 
 #include <curl/curl.h>
@@ -53,8 +54,12 @@ struct GlobalSpeedCommand {
     std::optional<std::int64_t> bytesPerSecond;
 };
 struct ShutdownCommand {};
+struct FetchCommand {
+    core::FetchRequest request;
+};
 
-using Command = std::variant<StartCommand, StopCommand, SpeedCommand, GlobalSpeedCommand, ShutdownCommand, DiskReport>;
+using Command =
+    std::variant<StartCommand, StopCommand, SpeedCommand, GlobalSpeedCommand, ShutdownCommand, DiskReport, FetchCommand>;
 
 }  // namespace
 
@@ -94,6 +99,7 @@ public:
         // Transfers that missed the shutdown deadline give up their handles and buffers; their last
         // durable checkpoints are already with the core. The disk writer then closes their files.
         transfers_.clear();
+        fetches_.clear();
         disk_.reset();
     }
 
@@ -129,6 +135,10 @@ private:
             }
             batch.clear();
             if (shutdownDeadline && (transfers_.empty() || now >= *shutdownDeadline)) {
+                // Fetches still running are answered, so each request gets its one answer.
+                while (!fetches_.empty()) {
+                    FinishFetch(fetches_.begin(), CURLE_ABORTED_BY_CALLBACK);
+                }
                 return;
             }
 
@@ -141,6 +151,10 @@ private:
                 }
                 CURL* easy = message->easy_handle;
                 const CURLcode result = message->data.result;
+                if (const auto fetch = fetches_.find(easy); fetch != fetches_.end()) {
+                    FinishFetch(fetch, result);
+                    continue;
+                }
                 if (Transfer* owner = Transfer::OwnerOf(easy)) {
                     owner->OnConnectionDone(easy, result, Clock::now());
                 }
@@ -179,6 +193,35 @@ private:
             wait = std::clamp(wait, std::chrono::milliseconds(0), std::chrono::milliseconds(1000));
             curl_multi_poll(multi_.get(), nullptr, 0, static_cast<int>(wait.count()), nullptr);
         }
+    }
+
+    using Fetches = std::map<CURL*, std::unique_ptr<MemoryFetch>>;
+
+    void FinishFetch(Fetches::iterator fetch, CURLcode result)
+    {
+        core::FetchFinished finished = fetch->second->Finish(result);
+        fetches_.erase(fetch);  // removes the handle from the multi handle
+        listener_.OnEngineEvent(core::EngineEvent{model::DownloadId{}, 0, std::move(finished)});
+    }
+
+    void StartFetch(core::FetchRequest request, bool shuttingDown)
+    {
+        if (shuttingDown) {
+            core::FetchFinished refused;
+            refused.fetchId = request.fetchId;
+            refused.failure = core::TransferFailure{core::FailureReason::Internal, core::FailureClass::Fatal, 0,
+                                                    "the engine is shutting down"};
+            listener_.OnEngineEvent(core::EngineEvent{model::DownloadId{}, 0, std::move(refused)});
+            return;
+        }
+        auto fetch = std::make_unique<MemoryFetch>(multi_.get(), std::move(request), options_.tuning.connectTimeoutSeconds,
+                                                   options_.tuning.stallTimeoutSeconds);
+        if (!fetch->Started()) {
+            listener_.OnEngineEvent(core::EngineEvent{model::DownloadId{}, 0, fetch->Finish(CURLE_FAILED_INIT)});
+            return;
+        }
+        CURL* handle = fetch->Handle();
+        fetches_.emplace(handle, std::move(fetch));
     }
 
     Transfer* FindRun(model::DownloadId id, std::int64_t epoch)
@@ -229,6 +272,10 @@ private:
             globalBucket_.SetRate(global->bytesPerSecond, now);
             return;
         }
+        if (auto* fetch = std::get_if<FetchCommand>(&command)) {
+            StartFetch(std::move(fetch->request), shutdownDeadline.has_value());
+            return;
+        }
         if (std::holds_alternative<ShutdownCommand>(command)) {
             if (!shutdownDeadline) {
                 shutdownDeadline = now + options_.shutdownTimeout;
@@ -260,6 +307,7 @@ private:
 
     // Network thread only.
     std::map<model::DownloadId, std::unique_ptr<Transfer>> transfers_;
+    Fetches fetches_;
     size_t serviceRotation_ = 0;  // see the service loop
 
     std::jthread thread_;
@@ -295,6 +343,11 @@ void CurlEngine::SetGlobalSpeedLimit(std::optional<std::int64_t> bytesPerSecond)
 void CurlEngine::Finalize(core::FinalizeRequest request)
 {
     loop_->Finalize(std::move(request));
+}
+
+void CurlEngine::Fetch(core::FetchRequest request)
+{
+    loop_->Post(FetchCommand{std::move(request)});
 }
 
 }  // namespace ldm::engine

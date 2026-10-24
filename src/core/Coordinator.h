@@ -2,6 +2,7 @@
 
 #include "base/Result.h"
 #include "core/Commands.h"
+#include "core/ManifestFetches.h"
 #include "core/Ports.h"
 #include "core/Quota.h"
 #include "core/Snapshot.h"
@@ -193,6 +194,10 @@ private:
     QuotaPeriod quota_;
     bool quotaQuestionOpen_ = false;  // QuotaReached was sent and not answered yet
     std::optional<std::chrono::steady_clock::time_point> quotaIgnoredUntil_;
+
+    // Manifest fetches for the media panel; set when the ports have an engine, a proxy resolver
+    // and an observer.
+    std::unique_ptr<ManifestFetches> manifests_;
 
     // Refresh download address: the one download waiting for a new address, and since when.
     std::optional<model::DownloadId> waitingForAddress_;

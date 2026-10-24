@@ -10,6 +10,8 @@ add_library(ldm_core STATIC
     FileNames.h
     LaunchRequest.cpp
     LaunchRequest.h
+    ManifestFetches.cpp
+    ManifestFetches.h
     Matching.cpp
     Matching.h
     Quota.cpp
