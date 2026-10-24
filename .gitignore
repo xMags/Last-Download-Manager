@@ -42,8 +42,6 @@ Release/
 *.7z
 
 # Temporary/scratch files
-tmp/
-temp/
 *.tmp
 *.temp
 *.bak

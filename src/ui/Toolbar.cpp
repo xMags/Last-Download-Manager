@@ -28,7 +28,7 @@ constexpr wchar_t kCheck = 0xE73E;
 constexpr wchar_t kGear = 0xE713;
 
 // LDM's buttons in their default order (gap G-1), as thin gradient outlines. Five download
-// actions use embedded icons (resources/toolbar); other icons use local drawings. Scheduler and
+// actions use embedded icons (src/resources/toolbar); other icons use local drawings. Scheduler and
 // queue buttons join in M4, when those features exist; "Tell a Friend" is excluded by the checklist.
 constexpr std::array<ButtonInfo, 7> kButtons{{
     {ID_TASKS_ADD_URL, {{}, RGB(0x4C, 0xB8, 0x6E), RGB(0x2F, 0x8C, 0xC4), IconShape::OutlinePlus}, L"Add URL"},

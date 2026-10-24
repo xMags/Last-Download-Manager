@@ -20,7 +20,7 @@ target_link_libraries(ldm_integration_tests PRIVATE
     GTest::gtest
     GTest::gtest_main)
 target_compile_definitions(ldm_integration_tests PRIVATE
-    LDM_FIXTURE_SCRIPT="${PROJECT_SOURCE_DIR}/tools/research/http-reference-fixture.mjs"
+    LDM_FIXTURE_SCRIPT="${PROJECT_SOURCE_DIR}/tests/fixture-server/http-reference-fixture.mjs"
     LDM_HOST_EXE=L"$<TARGET_FILE:ldm-host>"
     # The copies next to ldm.exe, so the tests check exactly what ships (src/app/CMakeLists.txt).
     LDM_FFMPEG_EXE=L"$<TARGET_FILE_DIR:ldm>/ffmpeg.exe"

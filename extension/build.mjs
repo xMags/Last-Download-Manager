@@ -2,7 +2,7 @@
 // sources and that family's manifest into <out>/<family>/, with the version taken from the
 // project version in CMakeLists.txt so LDM and its extension always match.
 //
-// Usage: node tools/build-extension.mjs [--out DIR]   (default: build/extension)
+// Usage: node extension/build.mjs [--out DIR]   (default: build/extension)
 // Uses only Node's standard library.
 
 import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';

@@ -18,7 +18,7 @@ struct FixtureOptions {
     std::filesystem::path mediaRoot;
 };
 
-// Runs tools/research/http-reference-fixture.mjs in a Node.js child process for the lifetime of
+// Runs tests/fixture-server/http-reference-fixture.mjs in a Node.js child process for the lifetime of
 // the object. The child is in a kill-on-close job, so it never outlives the test process.
 class FixtureServer {
 public:

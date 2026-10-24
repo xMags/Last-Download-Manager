@@ -1,5 +1,5 @@
 # The browser extension is plain JavaScript; building it means copying files, which
-# tools/build-extension.mjs does with Node's standard library. Without Node the C++ build still
+# extension/build.mjs does with Node's standard library. Without Node the C++ build still
 # works and the extension is simply not built.
 find_program(LDM_NODE node)
 if(NOT LDM_NODE)
@@ -10,7 +10,7 @@ endif()
 # One fixed folder for every preset (build/extension), so the folder a browser loaded unpacked is
 # always the one the latest build updated.
 add_custom_target(ldm_extension ALL
-    COMMAND ${LDM_NODE} ${PROJECT_SOURCE_DIR}/tools/build-extension.mjs
+    COMMAND ${LDM_NODE} ${PROJECT_SOURCE_DIR}/extension/build.mjs
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
     COMMENT "Building the browser extension into build/extension"
     VERBATIM)
