@@ -92,12 +92,15 @@ struct DownloadCompleted {
     std::string url;
     std::optional<std::int64_t> size;
     model::CompletionAction completionAction = model::CompletionAction::None;
+    // False for a Site Grabber download not added to the main list: the Grabber's own to report.
+    bool inMainList = true;
 };
 
 struct DownloadFailed {
     model::DownloadId id;
     std::string fileName;
     TransferFailure failure;
+    bool inMainList = true;  // as in DownloadCompleted
 };
 
 // Something the user should know that is not tied to a download (database or settings errors).

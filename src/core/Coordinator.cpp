@@ -1476,6 +1476,7 @@ void Coordinator::OnFinalized(Entry& entry, const FinalizeFinished& finalized)
     completed.url = d.url;
     completed.size = d.totalSize;
     completed.completionAction = d.completionAction;
+    completed.inMainList = d.InMainList();
     Notify(std::move(completed));
 }
 
@@ -1769,7 +1770,7 @@ void Coordinator::Fail(Entry& entry, const TransferFailure& failure)
     CountQueueFailure(entry);
     Save(entry);
     MarkChanged(entry);
-    Notify(DownloadFailed{d.id, d.fileName, failure});
+    Notify(DownloadFailed{d.id, d.fileName, failure, d.InMainList()});
 }
 
 // ---------------------------------------------------------------------------------------------
