@@ -17,7 +17,11 @@ std::string NativeHostManifest(BrowserFamily family, const std::filesystem::path
     if (family == BrowserFamily::Firefox) {
         manifest["allowed_extensions"] = {std::string(kFirefoxExtensionId)};
     } else {
-        manifest["allowed_origins"] = {"chrome-extension://" + std::string(kChromiumExtensionId) + "/"};
+        nlohmann::json origins = nlohmann::json::array();
+        for (const std::string_view id : kChromiumExtensionIds) {
+            origins.push_back("chrome-extension://" + std::string(id) + "/");
+        }
+        manifest["allowed_origins"] = std::move(origins);
     }
     return manifest.dump(2, ' ', false, nlohmann::json::error_handler_t::replace);
 }
