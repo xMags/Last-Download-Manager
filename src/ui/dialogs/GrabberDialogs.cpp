@@ -73,7 +73,7 @@ bool GrabberProjectsDialog::OnInit()
     const struct {
         const wchar_t* title;
         int width;
-    } columns[] = {{L"Name", 110}, {L"Kind", 55}, {L"Start page", 140}, {L"Last run", 95}};
+    } columns[] = {{L"Name", 110}, {L"Kind", 70}, {L"Start page", 125}, {L"Last run", 95}};
     const int dpi = static_cast<int>(::GetDpiForWindow(Handle()));
     for (int i = 0; i < 4; ++i) {
         LVCOLUMNW column{};

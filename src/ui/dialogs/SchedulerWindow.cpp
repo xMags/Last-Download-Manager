@@ -226,6 +226,17 @@ void SchedulerWindow::ShowPage(int page)
     showRange(IDC_SCHED_PAGE_FIRST, IDC_SCHED_PAGE_LAST, page == kSchedulePage);
     showRange(IDC_SCHED_FILES_FIRST, IDC_SCHED_FILES_LAST, page == kFilesPage);
     showRange(IDC_SCHED_LIMITS_FIRST, IDC_SCHED_LIMITS_LAST, page == kLimitsPage);
+    // A project has its schedule only: no start with LDM and no completion action, but what it
+    // does when its time comes.
+    const bool project = chosenProject_.has_value();
+    if (project && page == kSchedulePage) {
+        for (const int id : {IDC_SCHED_ON_STARTUP, IDC_SCHED_ACTION_LABEL, IDC_SCHED_ACTION, IDC_SCHED_FORCE,
+                             IDC_SCHED_OPEN_ON, IDC_SCHED_OPEN_FILE, IDC_SCHED_OPEN_BROWSE}) {
+            Show(id, false);
+        }
+    }
+    Show(IDC_SCHED_PROJECT_MODE_LABEL, project && page == kSchedulePage);
+    Show(IDC_SCHED_PROJECT_MODE, project && page == kSchedulePage);
     TabCtrl_SetCurSel(Item(IDC_SCHED_TAB), page);
 }
 
@@ -368,18 +379,10 @@ void SchedulerWindow::RefreshButtons()
 
 void SchedulerWindow::ShowKind(bool project)
 {
-    // A project has its schedule only: no files, no limits, no completion action.
-    for (const int id : {IDC_SCHED_ON_STARTUP, IDC_SCHED_ACTION_LABEL, IDC_SCHED_ACTION, IDC_SCHED_FORCE,
-                         IDC_SCHED_OPEN_ON, IDC_SCHED_OPEN_FILE, IDC_SCHED_OPEN_BROWSE}) {
-        Show(id, !project);
-    }
-    Show(IDC_SCHED_PROJECT_MODE_LABEL, project);
-    Show(IDC_SCHED_PROJECT_MODE, project);
     SetText(IDC_SCHED_START_AT, project ? L"Start the project &at" : L"Start the queue &at");
     SetText(IDC_SCHED_STOP_AT, project ? L"&Stop the project at" : L"&Stop the queue at");
-    if (project) {
-        ShowPage(kSchedulePage);
-    }
+    // A project has only the schedule page; a queue keeps the page it was on.
+    ShowPage(project ? kSchedulePage : TabCtrl_GetCurSel(Item(IDC_SCHED_TAB)));
 }
 
 void SchedulerWindow::LoadSchedule(const model::Schedule& schedule)
