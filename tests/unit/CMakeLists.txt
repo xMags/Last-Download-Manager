@@ -14,11 +14,13 @@ add_executable(ldm_unit_tests
     engine/FailurePolicyTests.cpp
     engine/HttpHeadersTests.cpp
     engine/TokenBucketTests.cpp
+    media/DashManifestTests.cpp
     media/HlsPlaylistTests.cpp
     media/NumberTextTests.cpp
     media/UrlReferenceTests.cpp
     model/DownloadTests.cpp
     model/SettingsTests.cpp
+    platform/XmlLiteReaderTests.cpp
     storage/SqliteStoreTests.cpp
     ui/BatchAndHistoryTests.cpp
     ui/BrowserSessionsTests.cpp

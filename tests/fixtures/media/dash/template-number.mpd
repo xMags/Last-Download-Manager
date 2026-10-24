@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static" mediaPresentationDuration="PT9.5S" minBufferTime="PT2S"
+     profiles="urn:mpeg:dash:profile:isoff-live:2011">
+  <BaseURL>media/</BaseURL>
+  <Period id="p0">
+    <AdaptationSet id="1" contentType="video" mimeType="video/mp4" segmentAlignment="true">
+      <SegmentTemplate timescale="1000" duration="2000" startNumber="1"
+                       initialization="$RepresentationID$/init.mp4" media="$RepresentationID$/seg-$Number%05d$.m4s"/>
+      <Representation id="720p" bandwidth="3000000" width="1280" height="720" frameRate="30000/1001" codecs="avc1.64001f"/>
+      <Representation id="360p" bandwidth="800000" width="640" height="360" frameRate="25" codecs="avc1.4d401e">
+        <BaseURL>https://cdn2.example.test/low/</BaseURL>
+      </Representation>
+    </AdaptationSet>
+    <AdaptationSet id="2" contentType="audio" mimeType="audio/mp4" lang="en" codecs="mp4a.40.2">
+      <Role schemeIdUri="urn:mpeg:dash:role:2011" value="main"/>
+      <Label>English stereo</Label>
+      <AudioChannelConfiguration schemeIdUri="urn:mpeg:dash:23003:3:audio_channel_configuration:2011" value="2"/>
+      <SegmentTemplate timescale="48000" duration="96000"
+                       initialization="audio/$RepresentationID$/init.mp4" media="audio/$RepresentationID$/$Number$.m4s"/>
+      <Representation id="aac" bandwidth="128000" audioSamplingRate="48000"/>
+    </AdaptationSet>
+    <AdaptationSet id="3" contentType="text" mimeType="text/vtt" lang="de">
+      <Role schemeIdUri="urn:mpeg:dash:role:2011" value="forced-subtitle"/>
+      <Representation id="subs-de" bandwidth="256">
+        <BaseURL>subs/de.vtt</BaseURL>
+      </Representation>
+    </AdaptationSet>
+    <AdaptationSet id="4" contentType="image" mimeType="image/jpeg">
+      <Representation id="thumbs" bandwidth="1000"/>
+    </AdaptationSet>
+    <AdaptationSet id="5" contentType="video" mimeType="video/mp4">
+      <EssentialProperty schemeIdUri="http://dashif.org/guidelines/trickmode" value="1"/>
+      <Representation id="trick" bandwidth="100000"/>
+    </AdaptationSet>
+  </Period>
+</MPD>

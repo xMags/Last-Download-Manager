@@ -24,7 +24,9 @@ add_library(ldm_platform STATIC
     win/WinShellActions.cpp
     win/WinShellActions.h
     win/WinSystemActions.cpp
-    win/WinSystemActions.h)
+    win/WinSystemActions.h
+    win/XmlLiteReader.cpp
+    win/XmlLiteReader.h)
 target_link_libraries(ldm_platform
-    PUBLIC ldm_browser ldm_core ldm_pipe ldm_ui
-    PRIVATE nlohmann_json::nlohmann_json winhttp bcrypt shell32 ole32 winmm powrprof advapi32)
+    PUBLIC ldm_browser ldm_core ldm_media ldm_pipe ldm_ui
+    PRIVATE nlohmann_json::nlohmann_json winhttp bcrypt shell32 shlwapi xmllite ole32 winmm powrprof advapi32)
