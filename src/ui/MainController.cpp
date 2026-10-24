@@ -10,6 +10,7 @@
 #include "ui/dialogs/ConfirmDialogs.h"
 #include "core/Url.h"
 #include "ui/dialogs/ListDialogs.h"
+#include "ui/dialogs/UpdateDialog.h"
 #include "ui/dialogs/LoginDialog.h"
 #include "ui/dialogs/MessageDialog.h"
 #include "ui/dialogs/OptionsDialog.h"
@@ -265,6 +266,18 @@ bool MainController::OnCommand(int id)
             ShowError(L"The help page could not be opened.");
         }
         return true;
+    case ID_HELP_CHECK_UPDATES:
+        Post(core::CheckForUpdatesCommand{});
+        return true;
+    case ID_HELP_AUTO_UPDATES: {
+        const auto snapshot = Snapshot();
+        const bool enable = snapshot && !snapshot->settings.updatesCheckEnabled;
+        ModifySettings([enable](model::Settings& s) {
+            s.updatesCheckEnabled = enable;
+            s.updatesAsked = true;
+        });
+        return true;
+    }
     case ID_HELP_ABOUT: {
         AboutDialog about(*context_.theme);
         about.RunModal(context_.owner);
@@ -454,6 +467,7 @@ void MainController::OnMenuPopup(HMENU menu)
     check(ID_VIEW_HIDE_CATEGORIES, settings.hideCategories);
     check(ID_VIEW_DARK_MODE, settings.darkModeSupport);
     check(ID_TASKS_DROP_TARGET, settings.showDropTarget);
+    check(ID_HELP_AUTO_UPDATES, settings.updatesCheckEnabled);
     ::CheckMenuRadioItem(menu, ID_VIEW_TOOLBAR_LARGE, ID_VIEW_TOOLBAR_SMALL,
                          settings.largeToolbarButtons ? ID_VIEW_TOOLBAR_LARGE : ID_VIEW_TOOLBAR_SMALL, MF_BYCOMMAND);
     const UINT tray = settings.trayIconStyle == model::TrayIconStyle::Color     ? ID_VIEW_TRAY_COLOR
@@ -521,8 +535,58 @@ void MainController::OnNotifications(std::vector<core::Notification> notificatio
             transfers_.OnQueueFinished(*finished);
         } else if (const auto* stopped = std::get_if<core::QueueStopped>(&notification)) {
             transfers_.OnQueueStopped(*stopped);
+        } else if (const auto* update = std::get_if<core::UpdateCheckFinished>(&notification)) {
+            OnUpdateChecked(*update);
         }
     }
+}
+
+void MainController::OnUpdateChecked(const core::UpdateCheckFinished& finished)
+{
+    if (finished.error) {
+        if (finished.manual) {
+            ShowError(L"Last Download Manager could not ask GitHub for new versions: " + base::ToUtf16(*finished.error) +
+                      L".");
+        }
+        return;
+    }
+    if (!finished.newerVersion) {
+        if (finished.manual) {
+            Tell(L"You have the newest version of Last Download Manager.");
+        }
+        return;
+    }
+    UpdateDialog dialog(*context_.theme, base::ToUtf16(*finished.newerVersion));
+    switch (dialog.Run(context_.owner)) {
+    case UpdateDialog::Choice::OpenPage:
+        if (!context_.shell->OpenUrl(context_.owner, base::ToUtf16(finished.pageUrl))) {
+            ShowError(L"The release page could not be opened.");
+        }
+        break;
+    case UpdateDialog::Choice::Skip: {
+        const std::string version = *finished.newerVersion;
+        ModifySettings([version](model::Settings& s) { s.updatesSkippedVersion = version; });
+        break;
+    }
+    case UpdateDialog::Choice::Later:
+        break;
+    }
+}
+
+void MainController::AskAboutUpdatesOnce()
+{
+    const auto snapshot = Snapshot();
+    if (!snapshot || snapshot->settings.updatesAsked || askedAboutUpdates_) {
+        return;
+    }
+    askedAboutUpdates_ = true;
+    const bool enable = Ask(L"Check GitHub for new versions of Last Download Manager every two weeks?\n\n"
+                            L"LDM only asks GitHub for the latest release and shows a notice; it never downloads or "
+                            L"installs anything by itself. You can change this in the Help menu.");
+    ModifySettings([enable](model::Settings& s) {
+        s.updatesCheckEnabled = enable;
+        s.updatesAsked = true;
+    });
 }
 
 void MainController::AskAboutQuota(const core::QuotaReached& reached)

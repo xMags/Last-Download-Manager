@@ -234,6 +234,10 @@ int WINAPI wWinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int sho
     ports.wakeTimer = &wakeTimer;
     ldm::core::CoordinatorConfig config;
     config.downloadsFolder = *downloads;
+    // The update check (checklist X-05) asks the repository the README links, only when the user
+    // turned it on.
+    config.updateFeedUrl = "https://api.github.com/repos/xMags/Last-Download-Manager/releases/latest";
+    config.appVersion = LDM_VERSION;
     ldm::core::Coordinator coordinator(ports, config);
     if (const auto started = core.Start(coordinator, &explorer); !started) {
         Fatal(L"Last Download Manager could not start:\n" + ldm::base::ToUtf16(started.GetError().message));

@@ -66,6 +66,8 @@
 // Help menu
 #define ID_HELP_CONTENTS 40080
 #define ID_HELP_ABOUT 40081
+#define ID_HELP_CHECK_UPDATES 40082
+#define ID_HELP_AUTO_UPDATES 40083
 
 // Download list row menu (checklist L-05, gap G-1)
 #define ID_ROW_OPEN 40100
@@ -634,6 +636,11 @@
 
 #define IDC_GN_LABEL 1830
 #define IDC_GN_NAME 1831
+
+// Update notice (checklist X-05)
+#define IDD_UPDATE 345
+#define IDC_UPDATE_TEXT 1840
+#define IDC_UPDATE_SKIP 1841
 
 // The Grabber window's list menu
 #define ID_GRABBER_CHECK 40200

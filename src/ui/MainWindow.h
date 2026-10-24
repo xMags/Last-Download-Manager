@@ -120,8 +120,10 @@ private:
     // Input that arrives from outside the window and may open dialogs.
     // The warning that browsers cannot reach an elevated LDM, shown once the window is up.
     struct ElevationNotice {};
+    // The once-asked question about the update check, when the window is first seen.
+    struct UpdatesQuestion {};
     using ExternalInput = std::variant<core::LaunchRequest, std::vector<std::string>, browser::Capture,
-                                       BrowserSessions::LinksRequest, ElevationNotice, StreamCapture>;
+                                       BrowserSessions::LinksRequest, ElevationNotice, StreamCapture, UpdatesQuestion>;
     void QueueExternalInput(ExternalInput input);
 
     Services services_;
@@ -152,6 +154,8 @@ private:
     bool exiting_ = false;
     int initialShowCommand_ = SW_SHOWNORMAL;
     bool draining_ = false;
+    bool updatesQuestionQueued_ = false;
+    void QueueUpdatesQuestion();
 
     std::mutex externalMutex_;  // guards externalInput_; launch requests arrive on the pipe thread
     std::deque<ExternalInput> externalInput_;

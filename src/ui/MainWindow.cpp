@@ -463,6 +463,8 @@ void MainWindow::DrainExternalInput()
             controller_->OnBrowserLinks(std::move(*links));
         } else if (std::holds_alternative<ElevationNotice>(*next)) {
             controller_->WarnElevated();
+        } else if (std::holds_alternative<UpdatesQuestion>(*next)) {
+            controller_->AskAboutUpdatesOnce();
         } else if (auto* stream = std::get_if<StreamCapture>(&*next)) {
             controller_->OnStreamCapture(std::move(*stream));
         } else {
@@ -648,6 +650,17 @@ void MainWindow::Restore()
         ::ShowWindow(window_, SW_SHOW);
     }
     ::SetForegroundWindow(window_);
+    QueueUpdatesQuestion();
+}
+
+void MainWindow::QueueUpdatesQuestion()
+{
+    // Asked when the user first sees the window, not from the tray at sign-in.
+    if (updatesQuestionQueued_ || !snapshot_ || snapshot_->settings.updatesAsked || !::IsWindowVisible(window_)) {
+        return;
+    }
+    updatesQuestionQueued_ = true;
+    QueueExternalInput(UpdatesQuestion{});
 }
 
 void MainWindow::Exit()
@@ -688,6 +701,7 @@ LRESULT MainWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
     case WM_CREATE:
         OnCreate();
         ::ShowWindow(window_, initialShowCommand_);
+        QueueUpdatesQuestion();
         return 0;
     case WM_SIZE:
         Layout();
