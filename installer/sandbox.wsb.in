@@ -1,0 +1,12 @@
+<!-- Windows Sandbox for trying the installer on a clean Windows (M5 design section 6). Configured
+     by cmake/Installer.cmake into the build folder; open the copy there. The package folder is
+     on the sandbox's desktop, read-only. -->
+<Configuration>
+  <MappedFolders>
+    <MappedFolder>
+      <HostFolder>@LDM_INSTALLER_OUTPUT@</HostFolder>
+      <SandboxFolder>C:\Users\WDAGUtilityAccount\Desktop\package</SandboxFolder>
+      <ReadOnly>true</ReadOnly>
+    </MappedFolder>
+  </MappedFolders>
+</Configuration>
