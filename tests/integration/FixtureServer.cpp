@@ -10,7 +10,7 @@
 #include <vector>
 
 #ifndef LDM_FIXTURE_SCRIPT
-#error LDM_FIXTURE_SCRIPT must name tools/research/http-reference-fixture.mjs
+#error LDM_FIXTURE_SCRIPT must name tests/fixture-server/http-reference-fixture.mjs
 #endif
 
 namespace ldm::test {

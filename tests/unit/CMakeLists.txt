@@ -38,7 +38,7 @@ add_executable(ldm_unit_tests
     ui/StreamChoiceTests.cpp
     # The app's own manifest: the UI code under test needs version 6 of the common controls
     # (SetWindowSubclass and LoadIconMetric exist only there), as ldm.exe gets it.
-    ${PROJECT_SOURCE_DIR}/resources/ldm.manifest)
+    ${PROJECT_SOURCE_DIR}/src/resources/ldm.manifest)
 target_link_libraries(ldm_unit_tests PRIVATE
     ldm_browser
     ldm_engine
