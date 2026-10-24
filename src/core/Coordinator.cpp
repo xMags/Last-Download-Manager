@@ -445,7 +445,11 @@ void Coordinator::Add(const AddDownloadCommand& command)
     std::string fileName = SanitizeFileName(command.fileName ? *command.fileName
                                             : overwriteName ? *overwriteName
                                                             : FileNameFromUrlPath(url->path));
-    model::CategoryId categoryId = CategoryFor(fileName, *url);
+    // Subtitles of a stream go where its video goes, so a player finds them next to it.
+    const bool onlySubtitles = command.media && !command.media->tracks.empty() &&
+                               std::all_of(command.media->tracks.begin(), command.media->tracks.end(),
+                                           [](const MediaTrackChoice& t) { return t.role == model::TrackRole::Subtitles; });
+    model::CategoryId categoryId = CategoryFor(onlySubtitles ? WithExtension(fileName, "mp4") : fileName, *url);
     if (command.categoryId) {
         if (FindCategory(*command.categoryId) == nullptr) {
             fail("The selected category no longer exists.");

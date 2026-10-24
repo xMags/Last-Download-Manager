@@ -1483,6 +1483,23 @@ TEST_F(CoordinatorTest, DeletingAStreamRemovesItsPartsFolder)
     EXPECT_EQ(files_.removedFolders[0], kRoot / L"Video" / L"Clip.mp4.ldmparts");
 }
 
+TEST_F(CoordinatorTest, AStreamsSubtitlesGoWhereItsVideoGoes)
+{
+    const AddResult result = Add("https://cdn.test/master.m3u8", AddMode::Later, [](AddDownloadCommand& c) {
+        c.fileName = "Show.en.vtt";
+        ldm::core::MediaChoice media;
+        ldm::core::MediaTrackChoice subtitles;
+        subtitles.role = ldm::model::TrackRole::Subtitles;
+        subtitles.sourceUrl = "https://cdn.test/subs.m3u8";
+        media.tracks = {subtitles};
+        c.media = media;
+    });
+    ASSERT_TRUE(result.id) << result.error.value_or("");
+    const auto& view = View(*result.id);
+    EXPECT_EQ(view.download.fileName, "Show.en.vtt");
+    EXPECT_EQ(ldm::base::ToUtf16(view.download.saveDir), (kRoot / L"Video").wstring());
+}
+
 TEST_F(CoordinatorTest, ASecondQualityOfTheSameStreamIsNotADuplicate)
 {
     ASSERT_TRUE(Add("https://cdn.test/v.mpd", AddMode::Later, [](AddDownloadCommand& c) { c.media = DashChoice(); }).id);
