@@ -71,6 +71,9 @@ struct MediaTrack {
     // A DASH track that is one file (SegmentBase): downloaded like a file, in byte ranges kept in
     // `ranges`, from the address of its only piece.
     bool wholeFile = false;
+    // An HLS live stream still being recorded: its playlist is read again while the download runs
+    // and new pieces are added at the end. Off once the stream ended or the user finished it.
+    bool live = false;
     std::vector<MediaKey> keys;
     // Empty until the track's list is known (an HLS media playlist not read yet).
     std::vector<MediaPiece> pieces;

@@ -320,6 +320,60 @@ TEST(SqliteStore, ReplacingATrackRewritesItsPiecesAndKeys)
     EXPECT_TRUE(loaded.tracks[1].ranges.empty());
 }
 
+TEST(SqliteStore, ALiveTrackGrowsByAppendingKeysAndPieces)
+{
+    SqliteStore store = OpenMemoryStore();
+    Download d = SampleStream("s");
+    d.tracks[0].live = true;
+    d.id = store.InsertDownload(d).Value();
+    EXPECT_TRUE(store.LoadDownloads().Value().front().tracks[0].live);
+
+    ldm::model::MediaTrack grown = d.tracks[0];
+    grown.keys.push_back({"https://cdn.example.test/key2", std::nullopt});
+    ldm::model::MediaPiece next;
+    next.url = "https://cdn.example.test/v/3.m4s";
+    next.durationUs = 2'000'000;
+    next.sequence = 77;
+    next.init = 0;
+    next.key = 2;
+    grown.pieces.push_back(next);
+    grown.live = false;
+    ASSERT_TRUE(store.AppendMediaTrack(d.id, 0, grown, 2, 4).Ok());
+
+    const Download loaded = store.LoadDownloads().Value().front();
+    const auto& track = loaded.tracks[0];
+    EXPECT_FALSE(track.live);
+    ASSERT_EQ(track.keys.size(), 3u);
+    EXPECT_EQ(track.keys[2].url, "https://cdn.example.test/key2");
+    ASSERT_EQ(track.pieces.size(), 5u);
+    EXPECT_EQ(track.pieces[4].sequence, 77u);
+    EXPECT_EQ(track.pieces[4].key, 2u);
+    EXPECT_TRUE(track.pieces[1].done) << "earlier pieces keep their progress";
+    EXPECT_EQ(track.pieces[1].bytes, 1234);
+
+    // Nothing new only changes the flag.
+    grown.live = true;
+    ASSERT_TRUE(store.AppendMediaTrack(d.id, 0, grown, 3, 5).Ok());
+    EXPECT_TRUE(store.LoadDownloads().Value().front().tracks[0].live);
+    EXPECT_EQ(store.LoadDownloads().Value().front().tracks[0].pieces.size(), 5u);
+}
+
+TEST(SqliteStore, AppendingToATrackThatDoesNotExistChangesNothing)
+{
+    SqliteStore store = OpenMemoryStore();
+    Download d = SampleStream("s");
+    d.id = store.InsertDownload(d).Value();
+    EXPECT_FALSE(store.AppendMediaTrack(d.id, 7, d.tracks[0], 2, 4).Ok());
+    EXPECT_FALSE(store.AppendMediaTrack(d.id, 0, d.tracks[0], 3, 4).Ok()) << "starts past the end";
+    // A piece index that is already stored fails the whole append.
+    ldm::model::MediaTrack grown = d.tracks[0];
+    grown.live = true;
+    EXPECT_FALSE(store.AppendMediaTrack(d.id, 0, grown, 2, 3).Ok());
+    const Download loaded = store.LoadDownloads().Value().front();
+    EXPECT_FALSE(loaded.tracks[0].live) << "rolled back";
+    EXPECT_EQ(loaded.tracks[0].pieces.size(), 4u);
+}
+
 TEST(SqliteStore, DeletingAStreamRemovesEverythingOfIt)
 {
     SqliteStore store = OpenMemoryStore();
@@ -363,6 +417,28 @@ TEST(Migrations, SchemaFiveKeepsTheSegmentsOfEarlierDownloads)
     auto count = connection.Value().Prepare("SELECT count(*) FROM segments");
     ASSERT_TRUE(count.Value().Step().Value());
     EXPECT_EQ(count.Value().Int64(0), 0);
+}
+
+TEST(Migrations, SchemaSixMarksEarlierTracksAsNotLive)
+{
+    auto connection = ldm::storage::Connection::Open(":memory:");
+    ASSERT_TRUE(connection.Ok());
+    ASSERT_TRUE(connection.Value().Execute("PRAGMA foreign_keys = ON").Ok());
+    ASSERT_TRUE(ldm::storage::MigrateTo(connection.Value(), 5).Ok());
+    ASSERT_TRUE(connection.Value()
+                    .Execute("INSERT INTO downloads (id, public_id, url, file_name, save_dir, status, created_at, "
+                             "sort_order, kind) VALUES (7, 'p', 'https://x.test/m.m3u8', 'f', 'C:\\\\D', 'paused', 1, "
+                             "1, 'hls');"
+                             "INSERT INTO media_tracks (download_id, track, role, source_url) "
+                             "VALUES (7, 0, 'video', 'https://x.test/v.m3u8');")
+                    .Ok());
+    const auto migrated = ldm::storage::Migrate(connection.Value());
+    ASSERT_TRUE(migrated.Ok()) << migrated.GetError().message;
+    auto query = connection.Value().Prepare("SELECT live FROM media_tracks");
+    ASSERT_TRUE(query.Ok());
+    ASSERT_TRUE(query.Value().Step().Value());
+    EXPECT_EQ(query.Value().Int64(0), 0);
+    EXPECT_FALSE(connection.Value().Execute("UPDATE media_tracks SET live = 2").Ok()) << "only 0 or 1";
 }
 
 TEST(Migrations, RefusesNewerSchema)

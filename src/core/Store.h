@@ -34,6 +34,12 @@ public:
     // progress reset.
     [[nodiscard]] virtual base::Status ReplaceMediaTrack(model::DownloadId id, std::uint32_t track,
                                                          const model::MediaTrack& replacement) = 0;
+    // A live recording grew (M3 design section 6): stores the keys of `grown` from `firstKey` on
+    // and its pieces from `firstPiece` on, which the stored track does not have yet, and its
+    // `live` flag. A recording gains a piece every few seconds for hours, so it is not rewritten.
+    [[nodiscard]] virtual base::Status AppendMediaTrack(model::DownloadId id, std::uint32_t track,
+                                                        const model::MediaTrack& grown, std::uint32_t firstKey,
+                                                        std::uint32_t firstPiece) = 0;
     [[nodiscard]] virtual base::Status DeleteDownload(model::DownloadId id) = 0;
 
     [[nodiscard]] virtual base::Result<std::vector<model::Category>> LoadCategories() = 0;
