@@ -55,7 +55,12 @@ MainController::MainController(Context context)
                              [this](model::DownloadId id) { context_.list->SelectOnly(id); }, context_.linksDone,
                              [this](model::DownloadId id) { captures_.OnCapturedAdded(id); },
                              [this](const std::string& url) { captures_.OnCaptureCancelled(url); }}),
-      importExport_(ImportExportFlow::Context{context_.owner, context_.theme, &adds_, context_.snapshot, [this] { return Selection(); }}),
+      importExport_(ImportExportFlow::Context{context_.owner, context_.theme, &adds_, context_.snapshot,
+                                              [this] { return Selection(); },
+                                              [this]() -> std::optional<model::QueueId> {
+                                                  const ListFilter filter = context_.currentFilter();
+                                                  return filter.status == StatusFilter::Queued ? filter.queue : std::nullopt;
+                                              }}),
       playlists_(PlaylistOffer::Context{context_.owner, context_.theme,
                                         [this](const std::vector<media::M3uEntry>& entries, const std::string& url) {
                                             adds_.AddPlaylistLinks(entries, url);
