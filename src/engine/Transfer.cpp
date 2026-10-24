@@ -170,6 +170,12 @@ void Transfer::SetSpeedLimit(std::optional<std::int64_t> bytesPerSecond, Clock::
     bucket_.SetRate(bytesPerSecond, now);
 }
 
+void Transfer::ExtendMedia(core::MediaExtension extension, Clock::time_point now)
+{
+    (void)extension;
+    (void)now;
+}
+
 Transfer::Segment* Transfer::FindSegment(std::uint32_t key)
 {
     const auto it = std::find_if(segments_.begin(), segments_.end(), [key](const Segment& s) { return s.key == key; });

@@ -182,6 +182,42 @@ void MediaRun::SetSpeedLimit(std::optional<std::int64_t> bytesPerSecond, Clock::
     bucket_.SetRate(bytesPerSecond, now);
 }
 
+void MediaRun::ExtendMedia(core::MediaExtension extension, Clock::time_point now)
+{
+    if (phase_ != Phase::Running || closeRequested_) {
+        return;
+    }
+    for (core::MediaTrackExtension& added : extension.tracks) {
+        const auto found = std::find_if(request_.tracks.begin(), request_.tracks.end(), [&added](const auto& track) {
+            return track.track == added.track && !track.wholeFile;
+        });
+        if (found == request_.tracks.end()) {
+            continue;
+        }
+        const auto t = static_cast<size_t>(found - request_.tracks.begin());
+        core::MediaTrackRequest& track = *found;
+        for (model::MediaKey& key : added.keys) {
+            KeyState state;
+            state.value = key.value;
+            keys_.emplace(KeySlot{t, static_cast<std::uint32_t>(track.keys.size())}, state);
+            track.keys.push_back(std::move(key));
+        }
+        for (core::MediaPieceRequest& piece : added.pieces) {
+            if (piece.key && *piece.key >= track.keys.size()) {
+                Fail(MakeFailure(FailureReason::Internal, FailureClass::Fatal, "a new segment names a key the stream lacks"));
+                return;
+            }
+            track.pieces.push_back(std::move(piece));
+            Piece entry;
+            entry.track = t;
+            entry.index = track.pieces.size() - 1;
+            pieces_.push_back(entry);
+        }
+        track.live = added.live;
+    }
+    FillSlots(now);
+}
+
 void MediaRun::Fail(TransferFailure failure)
 {
     if (phase_ == Phase::Done) {
@@ -640,7 +676,9 @@ void MediaRun::UnpauseConnections(Clock::time_point now)
 
 bool MediaRun::AllDone() const
 {
-    if (durablePieces_ != pieces_.size()) {
+    const bool recording = std::any_of(request_.tracks.begin(), request_.tracks.end(),
+                                       [](const core::MediaTrackRequest& track) { return track.live; });
+    if (recording || durablePieces_ != pieces_.size()) {
         return false;
     }
     return std::all_of(wholeFiles_.begin(), wholeFiles_.end(), [](const auto& wholeFile) {

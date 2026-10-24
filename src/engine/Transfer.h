@@ -72,6 +72,8 @@ public:
     void Begin(Clock::time_point now);
     void RequestStop() override;
     void SetSpeedLimit(std::optional<std::int64_t> bytesPerSecond, Clock::time_point now) override;
+    // A file has no playlist to grow: the engine only extends stream runs, so this does nothing.
+    void ExtendMedia(core::MediaExtension extension, Clock::time_point now) override;
 
     // A connection's easy handle reported CURLMSG_DONE. `easy` belongs to this transfer.
     void OnConnectionDone(CURL* easy, CURLcode result, Clock::time_point now) override;
