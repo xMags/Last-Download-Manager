@@ -497,6 +497,12 @@ void MainController::OnNotifications(std::vector<core::Notification> notificatio
             ShowError(base::ToUtf16(error->message));
         } else if (const auto* quota = std::get_if<core::QuotaReached>(&notification)) {
             AskAboutQuota(*quota);
+        } else if (const auto* started = std::get_if<core::QueueStarted>(&notification)) {
+            transfers_.OnQueueStarted(*started);
+        } else if (const auto* finished = std::get_if<core::QueueFinished>(&notification)) {
+            transfers_.OnQueueFinished(*finished);
+        } else if (const auto* stopped = std::get_if<core::QueueStopped>(&notification)) {
+            transfers_.OnQueueStopped(*stopped);
         }
     }
 }

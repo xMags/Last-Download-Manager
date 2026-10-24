@@ -149,7 +149,45 @@ void TransferWindows::OnFailed(const core::DownloadFailed& failed)
     }
 }
 
-void TransferWindows::RunCompletionAction(model::CompletionAction action)
+void TransferWindows::PlaySound(const model::SoundEvent& sound)
+{
+    if (sound.enabled && !sound.file.empty()) {
+        context_.system->PlaySoundFile(std::filesystem::path(base::ToUtf16(sound.file)));
+    }
+}
+
+void TransferWindows::OnQueueStarted(const core::QueueStarted& started)
+{
+    (void)started;
+    if (const auto snapshot = context_.snapshot()) {
+        PlaySound(snapshot->settings.soundQueueStarted);
+    }
+}
+
+void TransferWindows::OnQueueStopped(const core::QueueStopped& stopped)
+{
+    (void)stopped;
+    if (const auto snapshot = context_.snapshot()) {
+        PlaySound(snapshot->settings.soundQueueStopped);
+    }
+}
+
+void TransferWindows::OnQueueFinished(const core::QueueFinished& finished)
+{
+    if (const auto snapshot = context_.snapshot()) {
+        PlaySound(snapshot->settings.soundQueueStopped);
+    }
+    if (!finished.openFileWhenDone.empty()) {
+        const std::filesystem::path file(base::ToUtf16(finished.openFileWhenDone));
+        if (!context_.shell->Open(context_.owner, file)) {
+            ShowError(L"The queue \"" + base::ToUtf16(finished.name) + L"\" is done, but " + file.wstring() +
+                      L" could not be opened.");
+        }
+    }
+    RunCompletionAction(finished.completionAction, finished.forceTerminate);
+}
+
+void TransferWindows::RunCompletionAction(model::CompletionAction action, bool forceTerminate)
 {
     if (action == model::CompletionAction::None) {
         return;
@@ -168,7 +206,7 @@ void TransferWindows::RunCompletionAction(model::CompletionAction action)
         context_.exit();
         return;
     case model::CompletionAction::Shutdown:
-        ok = context_.system->ShutDown();
+        ok = context_.system->ShutDown(forceTerminate);
         break;
     case model::CompletionAction::Sleep:
         ok = context_.system->Sleep();

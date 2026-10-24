@@ -14,7 +14,9 @@ public:
     virtual void PlaySoundFile(const std::filesystem::path& file) = 0;
     // Starts the virus scanner without waiting for it. Returns false when it could not start.
     virtual bool StartProgram(const std::filesystem::path& program, const std::wstring& arguments) = 0;
-    virtual bool ShutDown() = 0;
+    // With `forceTerminate`, programs that do not close by themselves are ended (a queue's option,
+    // checklist Q-08); otherwise they may hold the shutdown up.
+    virtual bool ShutDown(bool forceTerminate) = 0;
     virtual bool Sleep() = 0;
     virtual bool Hibernate() = 0;
 };

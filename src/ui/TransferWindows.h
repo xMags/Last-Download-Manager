@@ -19,7 +19,8 @@ class CompleteDialog;
 class ProgressWindow;
 
 // The windows that follow individual transfers (checklist P-01 to P-06, C-01) and what happens when
-// one completes: sounds, the virus scanner and the power action (O-09, ENG-18, P-05).
+// one completes: sounds, the virus scanner and the power action (O-09, ENG-18, P-05). Also what
+// happens when a download queue starts, finishes or is stopped (Q-08, O-09).
 class TransferWindows {
 public:
     struct Context {
@@ -42,13 +43,18 @@ public:
     void OnSnapshot(const core::Snapshot& snapshot);
     void OnCompleted(const core::DownloadCompleted& completed);
     void OnFailed(const core::DownloadFailed& failed);
+    void OnQueueStarted(const core::QueueStarted& started);
+    // The queue's sound, the file it opens when done, then its power action after the countdown.
+    void OnQueueFinished(const core::QueueFinished& finished);
+    void OnQueueStopped(const core::QueueStopped& stopped);
     bool PreTranslate(MSG& message);
 
     // Open progress windows, for the tray menu (checklist V-01).
     [[nodiscard]] std::vector<std::pair<HWND, std::wstring>> Windows() const;
 
 private:
-    void RunCompletionAction(model::CompletionAction action);
+    void RunCompletionAction(model::CompletionAction action, bool forceTerminate = false);
+    void PlaySound(const model::SoundEvent& sound);
     void ShowError(const std::wstring& message) const;
 
     Context context_;
