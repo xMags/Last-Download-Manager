@@ -10,7 +10,9 @@
 #include <wrl/client.h>
 
 #include <array>
+#include <cstdint>
 #include <cstdio>
+#include <optional>
 #include <system_error>
 
 namespace ldm::platform {
@@ -184,6 +186,96 @@ void PowerRequest::SetTransfersActive(bool active)
                                 : ::PowerClearRequest(request_, PowerRequestSystemRequired);
     if (changed) {
         active_ = active;
+    }
+}
+
+namespace {
+
+// 100-nanosecond intervals between 1601-01-01, where FILETIME counts from, and 1970-01-01.
+constexpr std::int64_t kFileTimeEpochMs = 11'644'473'600'000;
+constexpr std::int64_t kFileTimeTicksPerMs = 10'000;
+
+std::optional<SYSTEMTIME> ToSystemTime(std::int64_t ms)
+{
+    if (ms < -kFileTimeEpochMs) {
+        return std::nullopt;
+    }
+    const std::uint64_t ticks = static_cast<std::uint64_t>(ms + kFileTimeEpochMs) * kFileTimeTicksPerMs;
+    FILETIME file{static_cast<DWORD>(ticks & 0xFFFFFFFFu), static_cast<DWORD>(ticks >> 32)};
+    SYSTEMTIME time{};
+    if (!::FileTimeToSystemTime(&file, &time)) {
+        return std::nullopt;
+    }
+    return time;
+}
+
+std::optional<std::int64_t> FromSystemTime(const SYSTEMTIME& time)
+{
+    FILETIME file{};
+    if (!::SystemTimeToFileTime(&time, &file)) {
+        return std::nullopt;
+    }
+    const std::uint64_t ticks = (std::uint64_t{file.dwHighDateTime} << 32) | file.dwLowDateTime;
+    return static_cast<std::int64_t>(ticks / kFileTimeTicksPerMs) - kFileTimeEpochMs;
+}
+
+}  // namespace
+
+std::int64_t WinTimeZone::LocalToUnixMs(std::int64_t localMs) const
+{
+    DYNAMIC_TIME_ZONE_INFORMATION zone{};
+    const DWORD found = ::GetDynamicTimeZoneInformation(&zone);
+    const auto local = ToSystemTime(localMs);
+    SYSTEMTIME utc{};
+    if (found != TIME_ZONE_ID_INVALID && local && ::TzSpecificLocalTimeToSystemTimeEx(&zone, &*local, &utc)) {
+        if (const auto unix = FromSystemTime(utc)) {
+            return *unix;
+        }
+    }
+    // Without the zone's rules, its standard offset: UTC = local + bias (minutes).
+    return localMs + std::int64_t{zone.Bias} * 60'000;
+}
+
+std::int64_t WinTimeZone::UnixToLocalMs(std::int64_t unixMs) const
+{
+    DYNAMIC_TIME_ZONE_INFORMATION zone{};
+    const DWORD found = ::GetDynamicTimeZoneInformation(&zone);
+    const auto utc = ToSystemTime(unixMs);
+    SYSTEMTIME local{};
+    if (found != TIME_ZONE_ID_INVALID && utc && ::SystemTimeToTzSpecificLocalTimeEx(&zone, &*utc, &local)) {
+        if (const auto localMs = FromSystemTime(local)) {
+            return *localMs;
+        }
+    }
+    return unixMs - std::int64_t{zone.Bias} * 60'000;
+}
+
+WaitableWakeTimer::WaitableWakeTimer() : timer_(::CreateWaitableTimerExW(nullptr, nullptr, 0, TIMER_ALL_ACCESS)) {}
+
+WaitableWakeTimer::~WaitableWakeTimer()
+{
+    if (timer_ != nullptr) {
+        ::CancelWaitableTimer(timer_);
+        ::CloseHandle(timer_);
+    }
+}
+
+void WaitableWakeTimer::Arm(std::int64_t unixMs)
+{
+    if (timer_ == nullptr || unixMs < 0) {
+        return;
+    }
+    LARGE_INTEGER due{};
+    due.QuadPart = (unixMs + kFileTimeEpochMs) * kFileTimeTicksPerMs;  // positive: an absolute UTC time
+    // Waking may be refused by the power options or the hardware; the start then happens when the
+    // computer is awake anyway.
+    (void)::SetWaitableTimer(timer_, &due, 0, nullptr, nullptr, TRUE);
+}
+
+void WaitableWakeTimer::Disarm()
+{
+    if (timer_ != nullptr) {
+        (void)::CancelWaitableTimer(timer_);
     }
 }
 

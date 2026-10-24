@@ -28,6 +28,8 @@ add_library(ldm_core STATIC
     Ports.h
     QueueRunner.cpp
     QueueRunner.h
+    Scheduler.cpp
+    Scheduler.h
     SegmentPlanner.cpp
     SegmentPlanner.h
     Snapshot.h

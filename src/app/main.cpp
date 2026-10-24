@@ -176,6 +176,8 @@ int WINAPI wWinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int sho
     ldm::storage::DpapiSecretProtector secrets;
     ldm::platform::RandomIdGenerator ids;
     ldm::platform::PowerRequest power;
+    ldm::platform::WinTimeZone timeZone;
+    ldm::platform::WaitableWakeTimer wakeTimer;
     ldm::platform::WinHttpProxyResolver proxy(secrets, core);  // answers slow lookups through the core thread
     ldm::platform::WinShellActions shell;
     ldm::platform::WinSystemActions system;
@@ -196,6 +198,8 @@ int WINAPI wWinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int sho
     ports.power = &power;
     ports.proxy = &proxy;
     ports.media = &mediaTools;
+    ports.timeZone = &timeZone;
+    ports.wakeTimer = &wakeTimer;
     ldm::core::CoordinatorConfig config;
     config.downloadsFolder = *downloads;
     ldm::core::Coordinator coordinator(ports, config);

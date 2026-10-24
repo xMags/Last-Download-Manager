@@ -38,6 +38,10 @@ struct CoordinatorPorts {
     ProxyResolver* proxy = nullptr;
     // Joins finished streams; without it a stream fails when its pieces are all on disk.
     MediaTools* media = nullptr;
+    // Local time for queue schedules; without it schedules never start or stop a queue.
+    TimeZone* timeZone = nullptr;
+    // Wakes the computer for a scheduled start; optional.
+    WakeTimer* wakeTimer = nullptr;
 };
 
 struct CoordinatorConfig {
@@ -170,6 +174,11 @@ private:
     // Starts members of running queues in free slots and stops queues that are done. Runs on
     // every Tick and after a queue starts.
     void RunQueues();
+    // Schedules (M4 design section 4): queues set to start with LDM, and starts and stops due now.
+    void StartQueuesOnAppStart();
+    void CheckSchedules();
+    // The next start or stop of any schedule after the last check, and the wake timer.
+    void PlanSchedules();
     [[nodiscard]] model::Queue* FindQueue(model::QueueId id);
     [[nodiscard]] std::optional<model::QueueId> MainQueue() const;
     [[nodiscard]] std::int64_t NextQueuePosition(model::QueueId id) const;
@@ -271,6 +280,11 @@ private:
         bool startedAny = false;  // the completion action runs only after the queue downloaded something
     };
     std::map<model::QueueId, QueueRun> queueRuns_;
+    // Schedules: starts and stops after the last check are due; the next of them, if any.
+    std::int64_t lastScheduleCheckUnixMs_ = 0;
+    std::optional<std::int64_t> nextScheduleEventUnixMs_;
+    bool anyScheduleEnabled_ = false;
+    std::optional<std::int64_t> armedWakeUnixMs_;
     std::int64_t nextSortOrder_ = 1;
     bool speedLimiterOn_ = false;
     bool shuttingDown_ = false;

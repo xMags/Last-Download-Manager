@@ -160,6 +160,20 @@ public:
     std::vector<std::pair<DownloadId, std::int64_t>> lookups;
 };
 
+// Local time is UTC.
+class UtcZone final : public ldm::core::TimeZone {
+public:
+    std::int64_t LocalToUnixMs(std::int64_t localMs) const override { return localMs; }
+    std::int64_t UnixToLocalMs(std::int64_t unixMs) const override { return unixMs; }
+};
+
+class FakeWakeTimer final : public ldm::core::WakeTimer {
+public:
+    void Arm(std::int64_t unixMs) override { armed = unixMs; }
+    void Disarm() override { armed.reset(); }
+    std::optional<std::int64_t> armed;
+};
+
 class RecordingObserver final : public ldm::core::CoreObserver {
 public:
     void OnSnapshot(std::shared_ptr<const ldm::core::Snapshot> value) override { snapshot = std::move(value); }
@@ -205,6 +219,8 @@ protected:
         ports.power = &power_;
         ports.proxy = &proxy_;
         ports.media = &media_;
+        ports.timeZone = timeZone_;
+        ports.wakeTimer = &wakeTimer_;
         ldm::core::CoordinatorConfig config;
         config.downloadsFolder = kRoot;
         coordinator_ = std::make_unique<Coordinator>(ports, config);
@@ -289,6 +305,8 @@ protected:
     FakePower power_;
     FakeProxy proxy_;
     FakeMediaTools media_;
+    FakeWakeTimer wakeTimer_;
+    ldm::core::TimeZone* timeZone_ = nullptr;  // no schedules unless a test sets one
     RecordingObserver observer_;
     std::unique_ptr<Coordinator> coordinator_;
     std::uint64_t token_ = 0;
@@ -2061,3 +2079,158 @@ TEST_F(QueueTest, AQueueWaitsForTheQuotaInsteadOfFinishing)
     EXPECT_NE(std::find(started.begin(), started.end(), a), started.end()) << "it starts when the period ends";
 }
 
+
+// ---------------------------------------------------------------------------------------------
+// Queue schedules (M4 design section 4). The fake clock starts on a Friday at 08:00 UTC.
+
+constexpr std::int64_t kMinuteMs = 60'000;
+constexpr std::int64_t kFridayMidnight = 1'800'000'000'000 - 8 * 60 * kMinuteMs;
+
+std::int64_t FridayAt(int hours, int minutes)
+{
+    return kFridayMidnight + (std::int64_t{hours} * 60 + minutes) * kMinuteMs;
+}
+
+ldm::model::Schedule DailyAt(int hours, int minutes)
+{
+    ldm::model::Schedule schedule;
+    schedule.enabled = true;
+    schedule.mode = ldm::model::ScheduleMode::Daily;
+    schedule.startMinutes = hours * 60 + minutes;
+    return schedule;
+}
+
+class ScheduleTest : public QueueTest {
+protected:
+    void SetUp() override
+    {
+        QueueTest::SetUp();
+        timeZone_ = &utc_;
+        Recreate();
+    }
+
+    ldm::model::QueueId Scheduled(const ldm::model::Schedule& schedule, const std::string& name = "Nightly")
+    {
+        ldm::model::Queue queue;
+        queue.name = name;
+        queue.schedule = schedule;
+        coordinator_->Handle(ldm::core::SaveQueueCommand{queue});
+        Publish();
+        const auto id = observer_.snapshot->queues.back().queue.id;
+        AddTo(id, "http://x.test/" + name + ".dat");
+        return id;
+    }
+
+    void Wait(std::chrono::minutes minutes)
+    {
+        clock_.Advance(minutes);
+        coordinator_->Tick();
+    }
+
+    UtcZone utc_;
+};
+
+TEST_F(ScheduleTest, AQueueStartsAtItsScheduledTime)
+{
+    const auto queue = Scheduled(DailyAt(8, 30));
+    EXPECT_EQ(wakeTimer_.armed, FridayAt(8, 30)) << "the computer may sleep until then";
+    Wait(std::chrono::minutes(29));
+    EXPECT_TRUE(engine_.starts.empty());
+    EXPECT_LE(coordinator_->NextDeadline(), clock_.Steady() + std::chrono::minutes(1));
+
+    Wait(std::chrono::minutes(1));
+    EXPECT_EQ(engine_.starts.size(), 1u);
+    EXPECT_EQ(observer_.All<ldm::core::QueueStarted>().size(), 1u);
+    EXPECT_TRUE(QueueOf(queue).running);
+    EXPECT_TRUE(QueueOf(queue).queue.schedule.lastStartedAtMs);
+    EXPECT_EQ(wakeTimer_.armed, FridayAt(8, 30) + 24 * 60 * kMinuteMs) << "then the next day's start";
+}
+
+TEST_F(ScheduleTest, AQueueStopsAtItsStopTime)
+{
+    ldm::model::Schedule schedule = DailyAt(8, 30);
+    schedule.stopEnabled = true;
+    schedule.stopMinutes = 9 * 60;
+    const auto queue = Scheduled(schedule);
+    Wait(std::chrono::minutes(31));
+    ASSERT_TRUE(QueueOf(queue).running);
+    Wait(std::chrono::minutes(30));
+    EXPECT_FALSE(QueueOf(queue).running);
+    EXPECT_EQ(observer_.All<ldm::core::QueueStopped>().size(), 1u);
+    EXPECT_EQ(engine_.stops.size(), 1u);
+    EXPECT_TRUE(observer_.All<ldm::core::QueueFinished>().empty()) << "no completion action at the stop time";
+}
+
+TEST_F(ScheduleTest, AStartMissedWhileLdmWasClosedIsNotCaughtUp)
+{
+    const auto queue = Scheduled(DailyAt(8, 30));
+    coordinator_.reset();
+    clock_.Advance(std::chrono::minutes(40));
+    Recreate();
+    Publish();
+    EXPECT_TRUE(engine_.starts.empty());
+    EXPECT_FALSE(QueueOf(queue).running);
+}
+
+TEST_F(ScheduleTest, AStartTheComputerSleptThroughHappensWhenItWakesSoonAfter)
+{
+    const auto queue = Scheduled(DailyAt(8, 30));
+    clock_.Advance(std::chrono::minutes(35));  // asleep: no ticks
+    coordinator_->Handle(ldm::core::ClockChangedCommand{});
+    EXPECT_TRUE(QueueOf(queue).running);
+}
+
+TEST_F(ScheduleTest, AStartLongBeforeTheComputerWokeIsMissed)
+{
+    const auto queue = Scheduled(DailyAt(8, 30));
+    clock_.Advance(std::chrono::minutes(50));
+    coordinator_->Handle(ldm::core::ClockChangedCommand{});
+    coordinator_->Tick();
+    EXPECT_FALSE(QueueOf(queue).running);
+}
+
+TEST_F(ScheduleTest, AQueueCanStartWithLdm)
+{
+    ldm::model::Schedule schedule;
+    schedule.startOnAppStart = true;
+    const auto queue = Scheduled(schedule);
+    EXPECT_FALSE(QueueOf(queue).running);
+    Recreate();
+    EXPECT_TRUE(QueueOf(queue).running);
+    EXPECT_EQ(engine_.starts.size(), 1u);
+}
+
+TEST_F(ScheduleTest, ASingleStartHappensOnceEvenWhenTheClockGoesBack)
+{
+    ldm::model::Schedule schedule;
+    schedule.enabled = true;
+    schedule.mode = ldm::model::ScheduleMode::Once;
+    schedule.startDay = kFridayMidnight / (24 * 60 * kMinuteMs);
+    schedule.startMinutes = 8 * 60 + 30;
+    const auto queue = Scheduled(schedule);
+    Wait(std::chrono::minutes(31));
+    ASSERT_TRUE(QueueOf(queue).running);
+    coordinator_->Handle(ldm::core::StopQueueCommand{queue});
+
+    clock_.unixMs -= 10 * kMinuteMs;
+    coordinator_->Handle(ldm::core::ClockChangedCommand{});
+    Wait(std::chrono::minutes(10));
+    EXPECT_FALSE(QueueOf(queue).running);
+    EXPECT_EQ(observer_.All<ldm::core::QueueStarted>().size(), 1u);
+    EXPECT_FALSE(wakeTimer_.armed) << "nothing left to wake up for";
+}
+
+TEST_F(ScheduleTest, TheWakeTimerIsSetForTheEarliestStart)
+{
+    const auto nine = Scheduled(DailyAt(9, 0), "Nine");
+    const auto early = Scheduled(DailyAt(8, 45), "Early");
+    EXPECT_EQ(wakeTimer_.armed, FridayAt(8, 45));
+
+    ldm::model::Queue changed = QueueOf(early).queue;
+    changed.schedule.enabled = false;
+    coordinator_->Handle(ldm::core::SaveQueueCommand{changed});
+    EXPECT_EQ(wakeTimer_.armed, FridayAt(9, 0));
+
+    coordinator_->Handle(ldm::core::DeleteQueueCommand{nine});
+    EXPECT_FALSE(wakeTimer_.armed);
+}

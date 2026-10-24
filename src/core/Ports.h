@@ -59,6 +59,26 @@ public:
     [[nodiscard]] virtual std::string NewPublicId() = 0;
 };
 
+// The user's time zone, for schedules given in local time (M4 design section 4). Local times are
+// milliseconds since 1970-01-01 00:00 in local time, counted as if every day had 24 hours.
+class TimeZone {
+public:
+    virtual ~TimeZone() = default;
+    // A local time that does not exist (skipped when clocks go forward) or exists twice (repeated
+    // when they go back) gives one of the instants near it; schedules accept either.
+    [[nodiscard]] virtual std::int64_t LocalToUnixMs(std::int64_t localMs) const = 0;
+    [[nodiscard]] virtual std::int64_t UnixToLocalMs(std::int64_t unixMs) const = 0;
+};
+
+// Wakes the computer from sleep at a scheduled queue start, where Windows allows wake timers
+// (checklist Q-07). One time at most is armed; arming again replaces it.
+class WakeTimer {
+public:
+    virtual ~WakeTimer() = default;
+    virtual void Arm(std::int64_t unixMs) = 0;
+    virtual void Disarm() = 0;
+};
+
 // Keeps Windows awake while transfers run (checklist ENG-17).
 class PowerRequests {
 public:

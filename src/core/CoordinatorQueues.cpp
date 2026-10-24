@@ -4,6 +4,7 @@
 #include "core/Coordinator.h"
 
 #include "base/Utf.h"
+#include "core/Scheduler.h"
 
 #include <algorithm>
 #include <cctype>
@@ -133,6 +134,7 @@ void Coordinator::SaveQueue(model::Queue queue)
         queue.id = id.Value();
         queues_.push_back(std::move(queue));
         snapshotDirty_ = true;
+        PlanSchedules();
         return;
     }
     queue.kind = existing->kind;
@@ -145,6 +147,7 @@ void Coordinator::SaveQueue(model::Queue queue)
     }
     *existing = std::move(queue);
     MarkMembersChanged(existing->id);  // the number of retries decides which members wait in it
+    PlanSchedules();
 }
 
 void Coordinator::DeleteQueue(model::QueueId id)
@@ -173,6 +176,7 @@ void Coordinator::DeleteQueue(model::QueueId id)
     }
     std::erase_if(queues_, [id](const model::Queue& q) { return q.id == id; });
     snapshotDirty_ = true;
+    PlanSchedules();
 }
 
 void Coordinator::SetQueue(const std::vector<model::DownloadId>& ids, std::optional<model::QueueId> queue)
@@ -351,6 +355,102 @@ void Coordinator::RunQueues()
         queueRuns_.erase(run);
         MarkMembersChanged(id);
         Notify(std::move(finished));
+    }
+}
+
+void Coordinator::StartQueuesOnAppStart()
+{
+    std::vector<model::QueueId> starting;
+    for (const model::Queue& queue : queues_) {
+        if (queue.schedule.startOnAppStart) {
+            starting.push_back(queue.id);
+        }
+    }
+    for (const model::QueueId id : starting) {
+        StartQueue(id);
+    }
+}
+
+void Coordinator::CheckSchedules()
+{
+    if (ports_.timeZone == nullptr) {
+        return;
+    }
+    const std::int64_t now = ports_.clock->NowUnixMs();
+    if (now < lastScheduleCheckUnixMs_) {
+        // The clock went back: what lies between now and the last check was handled already.
+        lastScheduleCheckUnixMs_ = now;
+        PlanSchedules();
+        return;
+    }
+    const std::int64_t after = std::max(lastScheduleCheckUnixMs_, now - kScheduleGraceMs);
+    lastScheduleCheckUnixMs_ = now;
+    std::vector<model::QueueId> ids;
+    for (const model::Queue& queue : queues_) {
+        ids.push_back(queue.id);
+    }
+    for (const model::QueueId id : ids) {
+        model::Queue* queue = FindQueue(id);
+        if (queue == nullptr) {
+            continue;
+        }
+        const model::Schedule& schedule = queue->schedule;
+        auto start = NextScheduledStart(schedule, after, *ports_.timeZone);
+        auto stop = NextScheduledStop(schedule, after, *ports_.timeZone);
+        if (start && (*start > now || (schedule.mode == model::ScheduleMode::Once && schedule.lastStartedAtMs &&
+                                       *schedule.lastStartedAtMs >= *start))) {
+            start.reset();  // not yet, or a single start that already happened before the clock moved
+        }
+        if (stop && *stop > now) {
+            stop.reset();
+        }
+        if (start && stop && *stop >= *start) {
+            continue;  // both passed while LDM could not look: the queue would stop again at once
+        }
+        if (stop) {
+            StopQueue(id);
+        }
+        if (!start) {
+            continue;
+        }
+        queue->schedule.lastStartedAtMs = now;
+        if (base::Status saved = ports_.store->SaveQueue(*queue); !saved) {
+            ReportError("The queue could not be saved: " + saved.GetError().message);
+        }
+        snapshotDirty_ = true;
+        StartQueue(id);
+    }
+    PlanSchedules();
+}
+
+void Coordinator::PlanSchedules()
+{
+    nextScheduleEventUnixMs_.reset();
+    anyScheduleEnabled_ = false;
+    std::optional<std::int64_t> nextStart;
+    if (ports_.timeZone != nullptr) {
+        for (const model::Queue& queue : queues_) {
+            anyScheduleEnabled_ = anyScheduleEnabled_ || queue.schedule.enabled;
+            const auto start = NextScheduledStart(queue.schedule, lastScheduleCheckUnixMs_, *ports_.timeZone);
+            const auto stop = NextScheduledStop(queue.schedule, lastScheduleCheckUnixMs_, *ports_.timeZone);
+            for (const auto& at : {start, stop}) {
+                if (at && (!nextScheduleEventUnixMs_ || *at < *nextScheduleEventUnixMs_)) {
+                    nextScheduleEventUnixMs_ = at;
+                }
+            }
+            if (start && (!nextStart || *start < *nextStart)) {
+                nextStart = start;
+            }
+        }
+    }
+    if (ports_.wakeTimer == nullptr || nextStart == armedWakeUnixMs_) {
+        return;
+    }
+    armedWakeUnixMs_ = nextStart;
+    if (nextStart) {
+        ports_.wakeTimer->Arm(*nextStart);
+    } else {
+        ports_.wakeTimer->Disarm();
     }
 }
 

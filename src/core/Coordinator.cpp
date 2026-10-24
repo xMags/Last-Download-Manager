@@ -25,6 +25,8 @@ namespace {
 using model::DownloadStatus;
 
 constexpr int kMaxNumberedNames = 9999;
+// How long the core thread sleeps at most while a schedule is enabled (M4 design section 4.1).
+constexpr std::chrono::seconds kScheduleRecheck{60};
 constexpr int kMaxFinalizeAttempts = 3;
 constexpr int kMaxConnections = 32;
 constexpr int kMaxSpeedLimiterKilobytes = 10'000'000;
@@ -229,6 +231,10 @@ base::Status Coordinator::Initialize()
     speedLimiterOn_ = settings_.speedLimiterOnStartup;
     ApplySpeedLimiter();
     ports_.proxy->Configure(settings_);
+    // Starts that passed while LDM was not running are missed (M4 design decision 4).
+    lastScheduleCheckUnixMs_ = ports_.clock->NowUnixMs();
+    PlanSchedules();
+    StartQueuesOnAppStart();
     PublishSnapshot();
     return {};
 }
@@ -398,6 +404,8 @@ void Coordinator::Handle(Command command)
                 StartQueue(typed.id);
             } else if constexpr (std::is_same_v<T, StopQueueCommand>) {
                 StopQueue(typed.id);
+            } else if constexpr (std::is_same_v<T, ClockChangedCommand>) {
+                CheckSchedules();
             } else {
                 static_assert(sizeof(T) == 0, "unhandled command");
             }
@@ -2318,6 +2326,16 @@ void Coordinator::Tick()
     if (waitingForAddress_ && now - waitingSince_ >= kAddressWaitLimit) {
         StopWaitingForAddress(*waitingForAddress_);
     }
+    if (ports_.timeZone != nullptr) {
+        const std::int64_t nowUnixMs = ports_.clock->NowUnixMs();
+        if (nowUnixMs < lastScheduleCheckUnixMs_ ||
+            (nextScheduleEventUnixMs_ && nowUnixMs >= *nextScheduleEventUnixMs_)) {
+            CheckSchedules();
+        } else {
+            // Nothing is planned before now, so nothing up to now can be due later.
+            lastScheduleCheckUnixMs_ = nowUnixMs;
+        }
+    }
     RunQueues();
     if (snapshotDirty_ && now - lastSnapshot_ >= config_.snapshotInterval) {
         PublishSnapshot();
@@ -2348,6 +2366,14 @@ std::chrono::steady_clock::time_point Coordinator::NextDeadline() const
     }
     if (waitingForAddress_) {
         deadline = std::min(deadline, waitingSince_ + kAddressWaitLimit);
+    }
+    if (nextScheduleEventUnixMs_) {
+        const std::int64_t wait = std::max<std::int64_t>(0, *nextScheduleEventUnixMs_ - ports_.clock->NowUnixMs());
+        deadline = std::min(deadline, now + std::chrono::milliseconds(wait));
+    }
+    if (anyScheduleEnabled_) {
+        // The steady clock may not count while the computer sleeps; look at the time again soon.
+        deadline = std::min(deadline, now + kScheduleRecheck);
     }
     return deadline;
 }

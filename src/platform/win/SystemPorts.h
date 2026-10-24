@@ -28,6 +28,31 @@ public:
     std::string NewPublicId() override;
 };
 
+// The time zone Windows is set to at each call, with its daylight saving rules, so a change of
+// zone while LDM runs applies at once.
+class WinTimeZone final : public core::TimeZone {
+public:
+    std::int64_t LocalToUnixMs(std::int64_t localMs) const override;
+    std::int64_t UnixToLocalMs(std::int64_t unixMs) const override;
+};
+
+// A waitable timer that resumes the computer from sleep when it fires; Windows' power options
+// decide whether wake timers may do that. Nothing waits on it: waking up is all it does, and the
+// main window then tells the core to look at its schedules.
+class WaitableWakeTimer final : public core::WakeTimer {
+public:
+    WaitableWakeTimer();
+    ~WaitableWakeTimer() override;
+    WaitableWakeTimer(const WaitableWakeTimer&) = delete;
+    WaitableWakeTimer& operator=(const WaitableWakeTimer&) = delete;
+
+    void Arm(std::int64_t unixMs) override;
+    void Disarm() override;
+
+private:
+    HANDLE timer_ = nullptr;
+};
+
 // A "system required" power request while transfers run, so Windows does not sleep mid-download
 // (checklist ENG-17). The display may still turn off.
 class PowerRequest final : public core::PowerRequests {
