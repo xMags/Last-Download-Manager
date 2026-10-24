@@ -505,6 +505,62 @@ TEST_F(EngineTest, FetchSendsCookiesAndReportsHttpErrors)
     EXPECT_EQ(allowed->body.size(), static_cast<size_t>(server_->Size()));
 }
 
+// The Grabber's fetches (M4 design section 6.2): HEAD requests, pages only, site logins.
+TEST_F(EngineTest, FetchAsksForTheHeadOnly)
+{
+    auto request = FetchOf(server_->Url("/range.bin"), 8 * 1024 * 1024);
+    request.headOnly = true;
+    engine_->Fetch(std::move(request));
+    const auto fetched = listener_.WaitFor<ldm::core::FetchFinished>(DownloadId{}, 0, 60s);
+    ASSERT_TRUE(fetched);
+    ASSERT_FALSE(fetched->failure) << fetched->failure->message;
+    EXPECT_TRUE(fetched->body.empty());
+    EXPECT_EQ(fetched->contentLength, server_->Size());
+    ASSERT_TRUE(fetched->contentType);
+}
+
+TEST_F(EngineTest, FetchSkipsBodiesOfOtherTypes)
+{
+    auto request = FetchOf(server_->Url("/range.bin"), 64 * 1024);  // smaller than the file: never read
+    request.bodyTypes = {"text/html", "application/xhtml+xml"};
+    engine_->Fetch(std::move(request));
+    const auto skipped = listener_.WaitFor<ldm::core::FetchFinished>(DownloadId{}, 0, 60s);
+    ASSERT_TRUE(skipped);
+    ASSERT_FALSE(skipped->failure) << skipped->failure->message;
+    EXPECT_TRUE(skipped->bodySkipped);
+    EXPECT_TRUE(skipped->body.empty());
+    EXPECT_EQ(skipped->contentLength, server_->Size());
+
+    auto page = FetchOf(server_->Url("/page.bin"), 64 * 1024);
+    page.fetchId = 8;
+    page.bodyTypes = {"TEXT/HTML"};
+    engine_->Fetch(std::move(page));
+    std::optional<ldm::core::FetchFinished> read;
+    for (int i = 0; i < 600 && !read; ++i) {
+        for (const auto& event : listener_.All<ldm::core::FetchFinished>(DownloadId{}, 0)) {
+            if (event.fetchId == 8) {
+                read = event;
+            }
+        }
+        std::this_thread::sleep_for(100ms);
+    }
+    ASSERT_TRUE(read);
+    ASSERT_FALSE(read->failure) << read->failure->message;
+    EXPECT_FALSE(read->bodySkipped);
+    EXPECT_NE(read->body.find("<title>"), std::string::npos);
+}
+
+TEST_F(EngineTest, FetchSendsCredentials)
+{
+    auto request = FetchOf(server_->Url("/auth/digest.bin"), 8 * 1024 * 1024);
+    request.credentials = ldm::core::TransferCredentials{"ldm", "secret"};
+    engine_->Fetch(std::move(request));
+    const auto fetched = listener_.WaitFor<ldm::core::FetchFinished>(DownloadId{}, 0, 60s);
+    ASSERT_TRUE(fetched);
+    ASSERT_FALSE(fetched->failure) << fetched->failure->message;
+    EXPECT_EQ(fetched->body.size(), static_cast<size_t>(server_->Size()));
+}
+
 TEST_F(EngineTest, FormDownloadsSendTheFormAgain)
 {
     const auto denied = Run(Request("/post.bin", 1));
