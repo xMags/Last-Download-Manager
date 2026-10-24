@@ -172,6 +172,13 @@ public:
     std::int64_t UnixToLocalMs(std::int64_t unixMs) const override { return unixMs; }
 };
 
+class FakeWakeTimer final : public ldm::core::WakeTimer {
+public:
+    void Arm(std::int64_t unixMs) override { armed = unixMs; }
+    void Disarm() override { armed.reset(); }
+    std::optional<std::int64_t> armed;
+};
+
 class RecordingObserver final : public ldm::grabber::GrabberObserver {
 public:
     void OnGrabberSnapshot(std::shared_ptr<const ldm::grabber::GrabberSnapshot> value) override { snapshot = value; }
@@ -212,6 +219,7 @@ protected:
         ports_.secrets = &secrets_;
         ports_.clock = &clock_;
         ports_.timeZone = &zone_;
+        ports_.wakeTimer = &wake_;
         ports_.observer = &observer_;
     }
 
@@ -342,6 +350,7 @@ protected:
     FakeSecrets secrets_;
     FakeClock clock_;
     UtcZone zone_;
+    FakeWakeTimer wake_;
     RecordingObserver observer_;
     ldm::grabber::ExplorerPorts ports_;
     std::unique_ptr<GrabberExplorer> explorer_;
@@ -751,6 +760,10 @@ TEST_F(GrabberExplorerTest, RunsProjectSchedules)
 
     // An open window keeps the schedule from starting it.
     explorer_->Handle(scheduled);
+    const std::int64_t dayStart = clock_.unixMs - clock_.unixMs % (24 * 3'600'000);
+    ASSERT_TRUE(wake_.armed) << "the computer wakes for the start";
+    EXPECT_EQ(*wake_.armed % 60'000, 0);
+    EXPECT_GE(*wake_.armed, dayStart);
     explorer_->Handle(ldm::core::GrabberOpenCommand{id, true});
     clock_.Advance(std::chrono::minutes(3));
     explorer_->Tick();

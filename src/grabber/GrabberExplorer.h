@@ -38,6 +38,9 @@ struct ExplorerPorts {
     core::Clock* clock = nullptr;
     // Local time for project schedules; without it projects never start by themselves.
     core::TimeZone* timeZone = nullptr;
+    // Wakes the computer for a project's scheduled start; optional. Not the coordinator's: each
+    // arms its own timer.
+    core::WakeTimer* wakeTimer = nullptr;
     GrabberObserver* observer = nullptr;
 };
 
@@ -209,6 +212,7 @@ private:
 
     std::int64_t lastScheduleCheckUnixMs_ = 0;
     std::optional<std::int64_t> nextScheduleEventUnixMs_;
+    std::optional<std::int64_t> armedWakeUnixMs_;
 
     bool snapshotDirty_ = true;
     std::uint64_t snapshotVersion_ = 0;
