@@ -548,6 +548,9 @@
 #define IDC_SCHED_QUOTA_WARN 1695
 #define IDC_SCHED_QUOTA_NOTE 1696
 #define IDC_SCHED_LIMITS_LAST 1696
+// Shown on the schedule page for Site Grabber projects only.
+#define IDC_SCHED_PROJECT_MODE_LABEL 1697
+#define IDC_SCHED_PROJECT_MODE 1698
 
 // Site Grabber (M4 design section 6.5)
 #define IDD_GRABBER_PROJECTS 341

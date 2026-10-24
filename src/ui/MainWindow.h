@@ -142,6 +142,7 @@ private:
     std::unique_ptr<BrowserSessions> browserSessions_;
     std::unique_ptr<MediaPanelController> mediaPanel_;  // uses browserSessions_; declared after it
     std::unique_ptr<GrabberController> grabber_;  // uses browserSessions_; declared after it
+    std::shared_ptr<const grabber::GrabberSnapshot> grabberSnapshot_;  // the newest
 
     UniqueFont uiFont_;
     UniqueFont listFont_;
