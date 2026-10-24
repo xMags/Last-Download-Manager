@@ -611,6 +611,7 @@ TEST_F(MediaJoinTest, HlsSubtitlesBecomeAWebVttFile)
     EXPECT_TRUE(vtt.starts_with("WEBVTT")) << vtt.substr(0, 40);
     EXPECT_NE(vtt.find("First cue"), std::string::npos);
     EXPECT_NE(vtt.find("Second cue"), std::string::npos);
+    EXPECT_EQ(vtt.find("WEBVTT", 1), std::string::npos) << "the pieces' headers stay out of the cues:\n" << vtt;
     EXPECT_EQ(muxed->mediaInfo, "WebVTT subtitles, en");
 }
 

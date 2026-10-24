@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <array>
 #include <fstream>
+#include <iterator>
 #include <string>
 #include <system_error>
 #include <vector>
@@ -60,6 +61,41 @@ bool StartsWithWebVtt(const std::filesystem::path& path)
     const std::string text(head.data(), static_cast<size_t>(in.gcount()));
     const std::string_view body = text.starts_with("\xEF\xBB\xBF") ? std::string_view(text).substr(3) : std::string_view(text);
     return body.starts_with("WEBVTT");
+}
+
+// FFmpeg's HLS reader runs WebVTT pieces together as one text, so a piece that does not end
+// with a blank line takes the next piece's WEBVTT header into its last cue, and players then
+// show "WEBVTT" as subtitle text. Copies of the pieces that each end with a blank line go into
+// `folder`\subtitles; the returned input names them. Nothing when a piece cannot be read or
+// written.
+std::optional<core::MuxInput> WithSeparatedCues(const core::MuxInput& input, const std::filesystem::path& folder)
+{
+    core::MuxInput copy = input;
+    const std::filesystem::path copies = folder / L"subtitles";
+    std::error_code error;
+    std::filesystem::create_directories(copies, error);
+    if (error) {
+        return std::nullopt;
+    }
+    for (core::MuxPiece& piece : copy.pieces) {
+        if (piece.init) {
+            continue;
+        }
+        std::ifstream in(piece.file, std::ios::binary);
+        if (!in) {
+            return std::nullopt;
+        }
+        std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        if (!text.ends_with("\n\n") && !text.ends_with("\r\n\r\n")) {
+            text += text.ends_with("\n") ? "\n" : "\n\n";
+        }
+        const std::filesystem::path separated = copies / piece.file.filename();
+        if (!WriteFile(separated, text)) {
+            return std::nullopt;
+        }
+        piece.file = separated;
+    }
+    return copy;
 }
 
 class EventHandle {
@@ -310,7 +346,8 @@ core::MuxFinished FfmpegMediaTools::ConvertSubtitles(const core::MuxRequest& req
         }
         source = MuxSource{*single, false, model::TrackRole::Subtitles};
     } else {
-        const auto playlist = LocalPlaylist(input, request.folder);
+        const auto separated = WithSeparatedCues(input, request.folder);
+        const auto playlist = separated ? LocalPlaylist(*separated, request.folder) : std::nullopt;
         const std::filesystem::path file = request.folder / L"subtitles.m3u8";
         if (!playlist || !WriteFile(file, *playlist)) {
             result.failure = JoinFailure("the subtitles' pieces could not be listed");
