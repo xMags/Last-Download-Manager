@@ -184,6 +184,19 @@ export function createReferenceFixture({
 
   // Answers a request for `body` with range support when `ranges` is set. Returns after headers.
   const serveBody = (request, response, id, body, { ranges = true, etag, lastModified, name, disposition, cutAfter, salt, contentType } = {}) => {
+    // Conditional requests (RFC 9110 13.1): If-None-Match decides when present, else If-Modified-Since.
+    const noneMatch = request.headers['if-none-match'];
+    const modifiedSince = request.headers['if-modified-since'];
+    const notModified = noneMatch !== undefined
+      ? etag !== undefined && noneMatch.split(',').map((tag) => tag.trim().replace(/^W\//, '')).some((tag) => tag === '*' || tag === etag)
+      : modifiedSince !== undefined && lastModified !== undefined && Date.parse(lastModified) <= Date.parse(modifiedSince);
+    if (notModified && (request.method === 'GET' || request.method === 'HEAD')) {
+      const unchanged = {};
+      if (etag) unchanged.ETag = etag;
+      if (lastModified) unchanged['Last-Modified'] = lastModified;
+      response.writeHead(304, unchanged).end();
+      return;
+    }
     let start = 0;
     let end = body.length - 1;
     const rangeHeader = ranges ? request.headers.range : undefined;

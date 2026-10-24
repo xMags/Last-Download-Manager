@@ -96,11 +96,14 @@ TEST(QueueRunner, FailedMembersAreTriedAgainWhileRetriesAreLeft)
     EXPECT_TRUE(PlanQueue(MakeQueue(1, 0), {failed}, true).start.empty()) << "no retries: one attempt";
 }
 
-TEST(QueueRunner, ACompletedMemberIsDownloadedAgainExceptInTheSynchronizationQueue)
+TEST(QueueRunner, ACompletedMemberStartsAgainUntilItIsHeld)
 {
-    const QueueMember completed = Member(1, 1, DownloadStatus::Completed);
+    QueueMember completed = Member(1, 1, DownloadStatus::Completed);
     EXPECT_EQ(Ids(PlanQueue(MakeQueue(1), {completed}, true).start), (std::vector<std::int64_t>{1}));
+    EXPECT_EQ(Ids(PlanQueue(MakeQueue(1, 3, QueueKind::Sync), {completed}, true).start), (std::vector<std::int64_t>{1}))
+        << "the synchronization queue checks it";
 
+    completed.held = true;  // checked in this run already
     const auto sync = PlanQueue(MakeQueue(1, 3, QueueKind::Sync), {completed}, true);
     EXPECT_TRUE(sync.start.empty());
     EXPECT_TRUE(sync.finished);

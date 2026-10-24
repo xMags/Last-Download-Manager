@@ -636,4 +636,105 @@ TEST_F(CoreTest, RandomCommandRacesAreSafe)
     }
 }
 
+const ldm::core::QueueView* FindQueue(const ldm::core::Snapshot& snapshot, ldm::model::QueueKind kind)
+{
+    for (const auto& view : snapshot.queues) {
+        if (view.queue.kind == kind) {
+            return &view;
+        }
+    }
+    return nullptr;
+}
+
+// M4 design section 8: a queue never runs more members at once than it allows.
+TEST_F(CoreTest, AQueueRunsAtMostItsConcurrencyAtOnce)
+{
+    auto stack = Launch();
+    ASSERT_TRUE(stack->observer.WaitSnapshot([](const auto& s) { return !s.queues.empty(); }, 10s));
+    ldm::model::Queue main = FindQueue(*stack->observer.Latest(), ldm::model::QueueKind::Main)->queue;
+    main.concurrent = 2;
+    stack->Post(ldm::core::SaveQueueCommand{main});
+    std::vector<DownloadId> ids;
+    for (int i = 0; i < 5; ++i) {
+        const auto added = stack->observer.WaitAdd(stack->Add(server_->Url("/range.bin"), ldm::core::AddMode::Later));
+        ASSERT_TRUE(added && added->id);
+        ids.push_back(*added->id);
+    }
+    stack->Post(ldm::core::StartQueueCommand{main.id});
+
+    int mostAtOnce = 0;
+    const bool done = stack->observer.WaitSnapshot(
+        [&](const ldm::core::Snapshot& snapshot) {
+            const auto* queue = FindQueue(snapshot, ldm::model::QueueKind::Main);
+            int downloading = 0;
+            int completed = 0;
+            for (const DownloadId id : ids) {
+                const auto* view = FindView(snapshot, id);
+                downloading += view && view->download.status == DownloadStatus::Downloading ? 1 : 0;
+                completed += view && view->download.status == DownloadStatus::Completed ? 1 : 0;
+            }
+            mostAtOnce = std::max({mostAtOnce, downloading, queue ? queue->runningMembers : 0});
+            return completed == 5 && queue && !queue->running;
+        },
+        120s);
+    ASSERT_TRUE(done) << "the queue did not finish";
+    EXPECT_EQ(mostAtOnce, 2);
+    EXPECT_EQ(FindQueue(*stack->observer.Latest(), ldm::model::QueueKind::Main)->members, 0)
+        << "completed members leave the queue";
+    EXPECT_TRUE(PartialFiles().empty());
+    EXPECT_TRUE(stack->observer.Errors().empty());
+}
+
+// M4 design section 5: the synchronization queue replaces a file that changed on the server and
+// leaves an unchanged one alone.
+TEST_F(CoreTest, TheSynchronizationQueueReplacesOnlyAChangedFile)
+{
+    auto stack = Launch();
+    const auto added = stack->observer.WaitAdd(stack->Add(server_->Url("/versioned.bin")));
+    ASSERT_TRUE(added && added->id);
+    const DownloadId id = *added->id;
+    const auto completed = [id](const ldm::core::Snapshot& snapshot) {
+        const auto* view = FindView(snapshot, id);
+        return view && view->download.status == DownloadStatus::Completed;
+    };
+    ASSERT_TRUE(stack->observer.WaitSnapshot(completed, 60s));
+    const fs::path file = root_ / "downloads" / "Programs" / "versioned.bin";
+    const auto read = [&file] {
+        std::ifstream stream(file, std::ios::binary);
+        return std::vector<char>((std::istreambuf_iterator<char>(stream)), {});
+    };
+    const auto original = read();
+    ASSERT_EQ(static_cast<std::int64_t>(original.size()), server_->Size());
+    const auto sync = FindQueue(*stack->observer.Latest(), ldm::model::QueueKind::Sync)->queue.id;
+    stack->Post(ldm::core::SetQueueCommand{{id}, sync});
+
+    stack->Post(ldm::core::StartQueueCommand{sync});
+    ASSERT_TRUE(stack->observer.WaitSnapshot(
+        [id](const ldm::core::Snapshot& snapshot) {
+            const auto* view = FindView(snapshot, id);
+            const auto* queue = FindQueue(snapshot, ldm::model::QueueKind::Sync);
+            return view && view->download.lastResult == "Unchanged on the server" && queue && !queue->running;
+        },
+        30s));
+    EXPECT_EQ(read(), original);
+
+    server_->Bump();
+    const auto firstCompletion = FindView(*stack->observer.Latest(), id)->download.completedAtMs;
+    stack->Post(ldm::core::StartQueueCommand{sync});
+    ASSERT_TRUE(stack->observer.WaitSnapshot(
+        [id, firstCompletion](const ldm::core::Snapshot& snapshot) {
+            const auto* view = FindView(snapshot, id);
+            const auto* queue = FindQueue(snapshot, ldm::model::QueueKind::Sync);
+            return view && view->download.status == DownloadStatus::Completed &&
+                   view->download.completedAtMs != firstCompletion && queue && !queue->running;
+        },
+        60s));
+    const auto replaced = read();
+    EXPECT_EQ(static_cast<std::int64_t>(replaced.size()), server_->Size());
+    EXPECT_NE(replaced, original) << "the changed file replaced the old one";
+    EXPECT_EQ(FindView(*stack->observer.Latest(), id)->download.queueId, sync);
+    EXPECT_TRUE(PartialFiles().empty());
+    EXPECT_TRUE(stack->observer.Errors().empty());
+}
+
 }  // namespace

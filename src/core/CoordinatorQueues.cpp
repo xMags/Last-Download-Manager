@@ -4,6 +4,7 @@
 #include "core/Coordinator.h"
 
 #include "base/Utf.h"
+#include "core/FailureText.h"
 #include "core/Scheduler.h"
 
 #include <algorithm>
@@ -335,10 +336,15 @@ void Coordinator::RunQueues()
                 continue;
             }
             run->second.startedAny = true;
-            if (entry->download.status == DownloadStatus::Completed) {
-                Redownload(start);  // M4 design decision 3: the file is replaced once the new one is complete
-            } else {
+            if (queue->kind == model::QueueKind::Sync) {
+                run->second.started.insert(start);
+            }
+            if (entry->download.status != DownloadStatus::Completed) {
                 Start(*entry);
+            } else if (queue->kind == model::QueueKind::Sync) {
+                StartSyncCheck(*entry);
+            } else {
+                Redownload(start);  // M4 design decision 3: the file is replaced once the new one is complete
             }
         }
         if (!plan.finished) {
@@ -356,6 +362,69 @@ void Coordinator::RunQueues()
         MarkMembersChanged(id);
         Notify(std::move(finished));
     }
+}
+
+void Coordinator::StartSyncCheck(Entry& entry)
+{
+    model::Download& d = entry.download;
+    Entry::SyncCheck check{d.segments, d.totalSize, d.resumable, d.validators, d.finalUrl, d.completedAtMs};
+    ResetProgress(entry);
+    entry.syncCheck = std::move(check);
+    entry.replaceFinalFile = true;  // a changed file replaces the old one once it is complete
+    entry.automaticRestarts = 0;
+    entry.forcedMaxConnections.reset();
+    d.status = DownloadStatus::Queued;
+    Start(entry);
+    if (!entry.running && entry.syncCheck) {
+        // The run could not begin (its folder could not be made, or the quota holds it): the
+        // completed download stays as it was.
+        const std::optional<std::string> reason =
+            d.status == DownloadStatus::Failed ? d.lastResult : std::optional<std::string>();
+        entry.quotaHeld = false;
+        (void)EndSyncCheck(entry, TransferOutcome::Stopped, std::nullopt);
+        if (reason) {
+            d.lastResult = "Could not check the server for changes: " + *reason;
+            Save(entry);
+        }
+    }
+}
+
+bool Coordinator::EndSyncCheck(Entry& entry, TransferOutcome outcome, const std::optional<TransferFailure>& failure)
+{
+    model::Download& d = entry.download;
+    const std::optional<Entry::SyncCheck> check = std::exchange(entry.syncCheck, std::nullopt);
+    if (!check || outcome == TransferOutcome::Completed) {
+        return false;  // a changed file arrived whole: it completes like any download
+    }
+    if (outcome != TransferOutcome::Unchanged && d.DownloadedBytes() > 0) {
+        return false;  // part of a changed file arrived: it continues like an interrupted Redownload
+    }
+    if (d.partialPath) {
+        if (base::Status removed = ports_.fileSystem->Remove(std::filesystem::path(base::ToUtf16(*d.partialPath)));
+            !removed) {
+            ReportError("A partial file could not be deleted: " + removed.GetError().message);
+        }
+        d.partialPath.reset();
+    }
+    d.segments = check->segments;
+    d.totalSize = check->totalSize;
+    d.resumable = check->resumable;
+    d.validators = check->validators;
+    d.finalUrl = check->finalUrl;
+    d.completedAtMs = check->completedAtMs;
+    d.status = DownloadStatus::Completed;
+    entry.replaceFinalFile = false;
+    entry.receivedBytes = d.DownloadedBytes();
+    if (outcome == TransferOutcome::Unchanged) {
+        d.lastResult = "Unchanged on the server";
+    } else if (failure) {
+        d.lastResult = "Could not check the server for changes: " + DescribeFailure(*failure);
+    } else {
+        d.lastResult = "The check for changes was stopped";
+    }
+    Save(entry);
+    MarkChanged(entry);
+    return true;
 }
 
 void Coordinator::StartQueuesOnAppStart()
@@ -488,13 +557,21 @@ QueueMember Coordinator::DescribeMember(const Entry& entry) const
     member.failures = d.queueFailures;
     member.busy = entry.running || entry.finalizing || entry.muxing || entry.describing || entry.quotaHeld;
     bool stoppedByUser = false;
+    bool startedInThisRun = false;
     if (d.queueId) {
         if (const auto run = queueRuns_.find(*d.queueId); run != queueRuns_.end()) {
             stoppedByUser = run->second.stoppedByUser.contains(d.id);
+            startedInThisRun = run->second.started.contains(d.id);
         }
     }
+    // The synchronization queue checks a completed member once per run, and only files: a stream
+    // has no single file on the server to compare.
+    const auto queue = std::find_if(queues_.begin(), queues_.end(),
+                                    [&d](const model::Queue& q) { return d.queueId && q.id == *d.queueId; });
+    const bool synchronized = queue != queues_.end() && queue->kind == model::QueueKind::Sync &&
+                              d.status == DownloadStatus::Completed && (startedInThisRun || d.IsStream());
     member.held = d.awaitingConfirmation || entry.deleteWhenStopped || entry.holdFinalize ||
-                  waitingForAddress_ == d.id || stoppedByUser;
+                  waitingForAddress_ == d.id || stoppedByUser || synchronized;
     return member;
 }
 

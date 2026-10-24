@@ -181,6 +181,9 @@ private:
     std::uint32_t file_ = 0;
     bool http_ = true;
     bool resumeRun_ = false;  // the run continues stored progress
+    // Synchronization: the first request asked whether the file changed; the answer was no.
+    bool conditionalRequest_ = false;
+    bool unchangedOnServer_ = false;
 
     Phase phase_ = Phase::Starting;
     // Set by callbacks and commands; acted on in Service(), where connections may be removed.

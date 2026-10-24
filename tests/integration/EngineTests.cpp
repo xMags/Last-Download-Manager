@@ -666,4 +666,56 @@ TEST_F(EngineTest, ShutdownStopsRunningTransfers)
     EXPECT_EQ(finished->outcome, TransferOutcome::Stopped);
 }
 
+// Synchronization (checklist Q-05): a check that asks the server whether its file changed.
+TEST_F(EngineTest, SynchronizationLeavesAnUnchangedFileAlone)
+{
+    const auto first = Run(Request("/versioned.bin", 1, 1));
+    ASSERT_EQ(first.outcome, TransferOutcome::Completed) << (first.failure ? first.failure->message : "");
+    const auto info = listener_.WaitFor<ResponseInfo>(DownloadId{1}, 1, 1s);
+    ASSERT_TRUE(info);
+    ASSERT_TRUE(info->validators.etag);
+    ASSERT_TRUE(info->validators.lastModified);
+
+    auto byTag = Request("/versioned.bin", 1, 2);
+    byTag.skipIfUnchanged = true;
+    byTag.validators = info->validators;
+    byTag.knownSize = first.totalSize;
+    const auto unchanged = Run(std::move(byTag));
+    EXPECT_EQ(unchanged.outcome, TransferOutcome::Unchanged) << (unchanged.failure ? unchanged.failure->message : "");
+    EXPECT_TRUE(ReadFile(PartialPath(2)).empty()) << "nothing is written";
+
+    auto byDate = Request("/versioned.bin", 1, 3);
+    byDate.skipIfUnchanged = true;
+    byDate.validators.lastModified = info->validators.lastModified;
+    byDate.knownSize = first.totalSize;
+    EXPECT_EQ(Run(std::move(byDate)).outcome, TransferOutcome::Unchanged) << "If-Modified-Since without an ETag";
+
+    server_->Bump();
+    auto changed = Request("/versioned.bin", 1, 4);
+    changed.skipIfUnchanged = true;
+    changed.validators = info->validators;
+    changed.knownSize = first.totalSize;
+    const auto downloaded = Run(std::move(changed));
+    ASSERT_EQ(downloaded.outcome, TransferOutcome::Completed) << (downloaded.failure ? downloaded.failure->message : "");
+    EXPECT_EQ(static_cast<std::int64_t>(ReadFile(PartialPath(4)).size()), server_->Size());
+}
+
+TEST_F(EngineTest, SynchronizationWithoutValidatorsComparesTheSize)
+{
+    auto same = FtpRequest();
+    same.skipIfUnchanged = true;
+    same.knownSize = server_->Size();
+    const auto unchanged = Run(std::move(same));
+    EXPECT_EQ(unchanged.outcome, TransferOutcome::Unchanged) << (unchanged.failure ? unchanged.failure->message : "");
+
+    auto other = FtpRequest();
+    other.id = DownloadId{2};
+    other.partialPath = PartialPath(2);
+    other.skipIfUnchanged = true;
+    other.knownSize = server_->Size() - 1;
+    const auto downloaded = Run(std::move(other));
+    ASSERT_EQ(downloaded.outcome, TransferOutcome::Completed) << (downloaded.failure ? downloaded.failure->message : "");
+    EXPECT_TRUE(HoldsPayload(PartialPath(2), server_->Size()));
+}
+
 }  // namespace

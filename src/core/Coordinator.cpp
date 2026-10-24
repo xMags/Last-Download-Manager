@@ -807,6 +807,7 @@ void Coordinator::Redownload(model::DownloadId id)
         RequestStop(*entry);
         return;
     }
+    entry->syncCheck.reset();  // the user wants the file again, whether it changed or not
     if (entry->download.status == DownloadStatus::Completed) {
         entry->replaceFinalFile = true;
         entry->download.completedAtMs.reset();
@@ -1329,6 +1330,10 @@ void Coordinator::OnRunEnded(Entry& entry, TransferOutcome outcome, const std::o
         UpdatePowerRequest();
         return;
     }
+    if (entry.syncCheck && EndSyncCheck(entry, outcome, reportedFailure)) {
+        UpdatePowerRequest();
+        return;
+    }
     if (entry.resumeWhenStopped && outcome != TransferOutcome::Completed) {
         // The old run ended after a new address arrived: continue from the new one.
         entry.resumeWhenStopped = false;
@@ -1366,6 +1371,7 @@ void Coordinator::OnRunEnded(Entry& entry, TransferOutcome outcome, const std::o
         }
         break;
     case TransferOutcome::Stopped:
+    case TransferOutcome::Unchanged:  // only for a synchronization check, which ended above
         d.status = DownloadStatus::Paused;
         Save(entry);
         break;
@@ -1575,6 +1581,12 @@ TransferRequest Coordinator::BuildRequest(Entry& entry)
     request.knownSize = d.totalSize;
     request.resumable = d.resumable;
     request.validators = d.validators;
+    if (entry.syncCheck) {
+        // A fresh run that asks whether the completed file changed.
+        request.skipIfUnchanged = true;
+        request.knownSize = entry.syncCheck->totalSize;
+        request.validators = entry.syncCheck->validators;
+    }
     request.knownContentType = d.contentType;
     request.ignoreLastModified = settings_.ignoreModificationTimeChanges;
     request.segments = d.segments;

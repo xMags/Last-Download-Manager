@@ -20,7 +20,8 @@ struct QueueMember {
     // it takes one of the queue's slots and the queue is not done while it lasts.
     bool busy = false;
     // Must not start now: its info dialog is open, it is being deleted, the user stopped it during
-    // this run, or it waits for a new address from the browser.
+    // this run, it waits for a new address from the browser, or the synchronization queue already
+    // started it in this run.
     bool held = false;
 };
 
@@ -29,8 +30,8 @@ struct QueueMember {
 [[nodiscard]] bool HasRetriesLeft(const model::Queue& queue, int failures) noexcept;
 
 // The queue would start this member when a slot is free. A completed member of an ordinary queue
-// is downloaded again (M4 design decision 3); the synchronization queue does not download its
-// completed members again.
+// is downloaded again (M4 design decision 3); one of the synchronization queue is checked for a
+// change on the server, which the coordinator does once per run by holding it afterwards.
 [[nodiscard]] bool IsStartable(const model::Queue& queue, const QueueMember& member) noexcept;
 
 struct QueuePlan {
