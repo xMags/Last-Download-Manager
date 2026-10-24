@@ -137,7 +137,7 @@ void TransferWindows::OnCompleted(const core::DownloadCompleted& completed)
         completeDialogs_.push_back(std::move(dialog));
         created.Open(context_.owner);
     }
-    RunCompletionAction(completed.completionAction);
+    RunCompletionAction(completed.completionAction, L"The download is complete.");
 }
 
 void TransferWindows::OnFailed(const core::DownloadFailed& failed)
@@ -184,10 +184,11 @@ void TransferWindows::OnQueueFinished(const core::QueueFinished& finished)
                       L" could not be opened.");
         }
     }
-    RunCompletionAction(finished.completionAction, finished.forceTerminate);
+    RunCompletionAction(finished.completionAction, L"The queue \"" + base::ToUtf16(finished.name) + L"\" is done.",
+                        finished.forceTerminate);
 }
 
-void TransferWindows::RunCompletionAction(model::CompletionAction action, bool forceTerminate)
+void TransferWindows::RunCompletionAction(model::CompletionAction action, const std::wstring& reason, bool forceTerminate)
 {
     if (action == model::CompletionAction::None) {
         return;
@@ -196,7 +197,7 @@ void TransferWindows::RunCompletionAction(model::CompletionAction action, bool f
                           : action == model::CompletionAction::Shutdown ? L"shut down the computer"
                           : action == model::CompletionAction::Sleep    ? L"put the computer to sleep"
                                                                         : L"hibernate the computer";
-    CountdownDialog countdown(*context_.theme, text, kPowerActionCountdownSeconds);
+    CountdownDialog countdown(*context_.theme, reason, text, kPowerActionCountdownSeconds);
     if (!countdown.Run(context_.owner)) {
         return;
     }

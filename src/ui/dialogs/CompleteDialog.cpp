@@ -133,8 +133,8 @@ void CompleteDialog::OnDestroyed()
     }
 }
 
-CountdownDialog::CountdownDialog(const Theme& theme, std::wstring action, int seconds)
-    : Dialog(IDD_COUNTDOWN, theme), action_(std::move(action)), remaining_(seconds)
+CountdownDialog::CountdownDialog(const Theme& theme, std::wstring reason, std::wstring action, int seconds)
+    : Dialog(IDD_COUNTDOWN, theme), reason_(std::move(reason)), action_(std::move(action)), remaining_(seconds)
 {
 }
 
@@ -153,8 +153,8 @@ bool CountdownDialog::OnInit()
 
 void CountdownDialog::Refresh()
 {
-    SetText(IDC_COUNT_TEXT, L"The download is complete. Last Download Manager will " + action_ + L" in " +
-                                std::to_wstring(remaining_) + L" seconds.");
+    SetText(IDC_COUNT_TEXT, reason_ + L" Last Download Manager will " + action_ + L" in " + std::to_wstring(remaining_) +
+                                L" seconds.");
 }
 
 bool CountdownDialog::OnCommand(int id, int code, HWND control)
