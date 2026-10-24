@@ -86,8 +86,9 @@ public:
 
     [[nodiscard]] const TabMedia* Find(BrowserConnectionId connection, int tabId) const;
     // The items to list, in the order they were found: ready ones, without the media playlists a
-    // listed master playlist already covers.
-    [[nodiscard]] std::vector<const MediaItem*> Offered(const TabMedia& tab) const;
+    // listed master playlist already covers. Protected streams only when `includeDrm` (Options:
+    // say so when a video is protected).
+    [[nodiscard]] std::vector<const MediaItem*> Offered(const TabMedia& tab, bool includeDrm) const;
     // Something to offer, counting a DRM notice only when `includeDrm`.
     [[nodiscard]] bool HasMedia(const TabMedia& tab, bool includeDrm) const;
 

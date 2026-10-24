@@ -71,8 +71,8 @@ TEST_F(MediaCatalogTest, FilesAreOfferedAtOnce)
     const auto* tab = catalog_.Find(1, 5);
     ASSERT_NE(tab, nullptr);
     EXPECT_EQ(tab->pageTitle, "A film");
-    ASSERT_EQ(catalog_.Offered(*tab).size(), 1u);
-    EXPECT_EQ(catalog_.Offered(*tab)[0]->fileSize, 5'000'000);
+    ASSERT_EQ(catalog_.Offered(*tab, true).size(), 1u);
+    EXPECT_EQ(catalog_.Offered(*tab, true)[0]->fileSize, 5'000'000);
     EXPECT_TRUE(catalog_.HasMedia(*tab, false));
     EXPECT_EQ(changes_.size(), 1u);
 
@@ -95,8 +95,8 @@ TEST_F(MediaCatalogTest, AnHlsMasterIsFetchedReadAndItsLengthLookedUp)
 
     Answer(fetches_[0].fetchId, ReadFixture("hls/master.m3u8"), "https://media.example.test/show/ep1/master.m3u8");
     tab = catalog_.Find(1, 5);
-    ASSERT_EQ(catalog_.Offered(*tab).size(), 1u);
-    const MediaItem& item = *catalog_.Offered(*tab)[0];
+    ASSERT_EQ(catalog_.Offered(*tab, true).size(), 1u);
+    const MediaItem& item = *catalog_.Offered(*tab, true)[0];
     EXPECT_EQ(item.finalUrl, "https://media.example.test/show/ep1/master.m3u8");
     EXPECT_FALSE(item.qualities.entries.empty());
     EXPECT_FALSE(item.seconds);
@@ -104,7 +104,7 @@ TEST_F(MediaCatalogTest, AnHlsMasterIsFetchedReadAndItsLengthLookedUp)
     ASSERT_EQ(fetches_.size(), 2u) << "the first media playlist, for the length";
     EXPECT_EQ(fetches_[1].url, "https://media.example.test/show/ep1/1080p/index.m3u8");
     Answer(fetches_[1].fetchId, ReadFixture("hls/vod-ts.m3u8"), fetches_[1].url);
-    const MediaItem& sized = *catalog_.Offered(*catalog_.Find(1, 5))[0];
+    const MediaItem& sized = *catalog_.Offered(*catalog_.Find(1, 5), true)[0];
     EXPECT_DOUBLE_EQ(sized.seconds.value_or(0), 15.75);
     EXPECT_TRUE(sized.qualities.entries[0].approximateBytes);
 }
@@ -119,15 +119,15 @@ TEST_F(MediaCatalogTest, MediaPlaylistsOfAListedMasterAreNotListedAgain)
     Answer(variantFetch, ReadFixture("hls/vod-ts.m3u8"), "https://media.example.test/show/ep1/1080p/index.m3u8");
     const auto* tab = catalog_.Find(1, 5);
     EXPECT_EQ(tab->items.size(), 2u);
-    ASSERT_EQ(catalog_.Offered(*tab).size(), 1u);
-    EXPECT_EQ(catalog_.Offered(*tab)[0]->url, "https://media.example.test/show/ep1/master.m3u8");
+    ASSERT_EQ(catalog_.Offered(*tab, true).size(), 1u);
+    EXPECT_EQ(catalog_.Offered(*tab, true)[0]->url, "https://media.example.test/show/ep1/master.m3u8");
 }
 
 TEST_F(MediaCatalogTest, AMediaPlaylistAloneIsOneQuality)
 {
     catalog_.OnMediaFound(1, Found(MediaKind::Hls, "https://media.example.test/show/ep1/index.m3u8"));
     Answer(fetches_[0].fetchId, ReadFixture("hls/vod-ts.m3u8"), "https://media.example.test/show/ep1/index.m3u8");
-    const auto offered = catalog_.Offered(*catalog_.Find(1, 5));
+    const auto offered = catalog_.Offered(*catalog_.Find(1, 5), true);
     ASSERT_EQ(offered.size(), 1u);
     EXPECT_DOUBLE_EQ(offered[0]->seconds.value_or(0), 15.75);
     EXPECT_EQ(offered[0]->qualities.entries.size(), 1u);
@@ -137,7 +137,7 @@ TEST_F(MediaCatalogTest, DashManifestsAreReadWithTheXmlReader)
 {
     catalog_.OnMediaFound(1, Found(MediaKind::Dash, "https://media.example.test/vod/movie/manifest.mpd"));
     Answer(fetches_[0].fetchId, ReadFixture("dash/template-number.mpd"), "https://media.example.test/vod/movie/manifest.mpd");
-    const auto offered = catalog_.Offered(*catalog_.Find(1, 5));
+    const auto offered = catalog_.Offered(*catalog_.Find(1, 5), true);
     ASSERT_EQ(offered.size(), 1u);
     EXPECT_DOUBLE_EQ(offered[0]->seconds.value_or(0), 9.5);
     EXPECT_EQ(offered[0]->qualities.entries.size(), 5u);
@@ -150,6 +150,14 @@ TEST_F(MediaCatalogTest, ProtectedStreamsCountOnlyForTheNotice)
     const auto* tab = catalog_.Find(1, 5);
     EXPECT_TRUE(catalog_.HasMedia(*tab, true));
     EXPECT_FALSE(catalog_.HasMedia(*tab, false));
+
+    // Beside a clear stream, the protected one is listed only when the notice is on.
+    catalog_.OnMediaFound(1, Found(MediaKind::Dash, "https://media.example.test/vod/clear/manifest.mpd"));
+    Answer(fetches_.back().fetchId, ReadFixture("dash/template-number.mpd"), "https://media.example.test/vod/clear/manifest.mpd");
+    EXPECT_EQ(catalog_.Offered(*catalog_.Find(1, 5), true).size(), 2u);
+    const auto clearOnly = catalog_.Offered(*catalog_.Find(1, 5), false);
+    ASSERT_EQ(clearOnly.size(), 1u);
+    EXPECT_FALSE(clearOnly[0]->qualities.drm);
 }
 
 TEST_F(MediaCatalogTest, FailedAndUnreadableManifestsAreNotOffered)
@@ -163,7 +171,7 @@ TEST_F(MediaCatalogTest, FailedAndUnreadableManifestsAreNotOffered)
     catalog_.OnMediaFound(1, Found(MediaKind::Hls, "https://cdn.test/b.m3u8"));
     Answer(fetches_[1].fetchId, "<html>not a playlist</html>", "https://cdn.test/b.m3u8");
     const auto* tab = catalog_.Find(1, 5);
-    EXPECT_TRUE(catalog_.Offered(*tab).empty());
+    EXPECT_TRUE(catalog_.Offered(*tab, true).empty());
     EXPECT_EQ(tab->items[0].state, MediaItem::State::Failed);
     EXPECT_EQ(tab->items[0].failure, "HTTP status 403");
 }

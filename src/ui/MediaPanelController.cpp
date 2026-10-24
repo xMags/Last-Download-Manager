@@ -189,7 +189,7 @@ void MediaPanelController::Place()
         hide(true);
         return;
     }
-    const auto offered = catalog_.Offered(*tab);
+    const auto offered = catalog_.Offered(*tab, drmNotice_);
     const bool onlyProtected = std::all_of(offered.begin(), offered.end(),
                                            [](const MediaItem* item) { return item->qualities.drm.has_value(); });
     panel_.SetContent(onlyProtected);
@@ -206,7 +206,7 @@ void MediaPanelController::OpenMenu(POINT anchor)
     if (tab == nullptr) {
         return;
     }
-    const std::vector<PanelMenuItem> items = BuildPanelMenu(catalog_.Offered(*tab), panel_.Mini());
+    const std::vector<PanelMenuItem> items = BuildPanelMenu(catalog_.Offered(*tab, drmNotice_), panel_.Mini());
     UniqueMenu menu(::CreatePopupMenu());
     std::vector<PanelAction> actions;
     AppendItems(menu.get(), items, actions);

@@ -128,7 +128,7 @@ const TabMedia* MediaCatalog::Find(BrowserConnectionId connection, int tabId) co
     return it == tabs_.end() ? nullptr : &it->second;
 }
 
-std::vector<const MediaItem*> MediaCatalog::Offered(const TabMedia& tab) const
+std::vector<const MediaItem*> MediaCatalog::Offered(const TabMedia& tab, bool includeDrm) const
 {
     std::set<std::string> covered;
     for (const MediaItem& item : tab.items) {
@@ -147,6 +147,9 @@ std::vector<const MediaItem*> MediaCatalog::Offered(const TabMedia& tab) const
         if (item.kind != browser::MediaKind::File && item.qualities.entries.empty() && !item.qualities.drm) {
             continue;  // a stream with nothing to choose
         }
+        if (item.qualities.drm && !includeDrm) {
+            continue;
+        }
         offered.push_back(&item);
     }
     return offered;
@@ -154,10 +157,7 @@ std::vector<const MediaItem*> MediaCatalog::Offered(const TabMedia& tab) const
 
 bool MediaCatalog::HasMedia(const TabMedia& tab, bool includeDrm) const
 {
-    const auto offered = Offered(tab);
-    return std::any_of(offered.begin(), offered.end(), [includeDrm](const MediaItem* item) {
-        return includeDrm || !item->qualities.drm.has_value();
-    });
+    return !Offered(tab, includeDrm).empty();
 }
 
 void MediaCatalog::StartFetch(const TabMedia& tab, const MediaItem& item, const std::string& url, FetchPurpose purpose)
