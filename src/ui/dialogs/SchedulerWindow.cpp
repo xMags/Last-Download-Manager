@@ -879,9 +879,10 @@ bool SchedulerWindow::OnCommand(int id, int code, HWND control)
     case IDC_SCHED_START_NOW:
         // A queue runs with its saved settings, so changes are settled first.
         if (chosenProject_) {
-            const grabber::GrabberProjectView* project = ChosenProject();
-            if (project != nullptr && SettleChanges() && callbacks_.postGrabber) {
-                const model::GrabberScheduleMode mode = project->project.scheduleMode;
+            // SettleChanges may ask a question, during which a newer snapshot replaces the view;
+            // the mode is the one just applied, or else the loaded one.
+            if (ChosenProject() != nullptr && SettleChanges() && callbacks_.postGrabber && loadedProject_) {
+                const model::GrabberScheduleMode mode = loadedProject_->scheduleMode;
                 if (mode == model::GrabberScheduleMode::DownloadChecked) {
                     callbacks_.postGrabber(core::GrabberDownloadCommand{*chosenProject_});
                 } else {

@@ -369,22 +369,31 @@ void GrabberWindow::ShowStatistics()
 
 void GrabberWindow::ShowListMenu(POINT screen)
 {
-    const std::vector<int> rows = SelectedRows();
-    const model::GrabberItem* single = rows.size() == 1 ? RowItem(rows.front()) : nullptr;
+    // What the menu acts on is copied now: the menu runs its own message loop, during which newer
+    // snapshots replace the items and the rows.
+    std::vector<std::int64_t> items;
+    for (const int row : SelectedRows()) {
+        if (const model::GrabberItem* item = RowItem(row)) {
+            items.push_back(item->id);
+        }
+    }
+    const model::GrabberItem* single = items.size() == 1 ? RowItem(SelectedRows().front()) : nullptr;
     const bool done = single != nullptr && single->state == model::GrabberItemState::Done && !single->localPath.empty();
+    const std::filesystem::path localPath = done ? std::filesystem::path(base::ToUtf16(single->localPath)) : std::filesystem::path();
+    const bool any = !items.empty();
     HMENU menu = ::CreatePopupMenu();
     const auto add = [menu](UINT id, const wchar_t* text, bool enabled) {
         ::AppendMenuW(menu, MF_STRING | (enabled ? 0 : MF_GRAYED), id, text);
     };
-    add(ID_GRABBER_CHECK, L"&Check", !rows.empty());
-    add(ID_GRABBER_UNCHECK, L"&Uncheck", !rows.empty());
+    add(ID_GRABBER_CHECK, L"&Check", any);
+    add(ID_GRABBER_UNCHECK, L"&Uncheck", any);
     add(ID_GRABBER_CHECK_ALL, L"Check &all", true);
     add(ID_GRABBER_UNCHECK_ALL, L"U&ncheck all", true);
     ::AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     add(ID_GRABBER_OPEN, L"&Open", done);
     add(ID_GRABBER_OPEN_FOLDER, L"Open &folder", done);
     ::AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-    add(ID_GRABBER_ADD_MAIN, L"Add to the &main list", !rows.empty());
+    add(ID_GRABBER_ADD_MAIN, L"Add to the &main list", any);
     if (screen.x == -1 && screen.y == -1) {
         RECT rect{};
         ::GetWindowRect(Item(IDC_GG_LIST), &rect);
@@ -394,10 +403,10 @@ void GrabberWindow::ShowListMenu(POINT screen)
     ::DestroyMenu(menu);
     switch (command) {
     case ID_GRABBER_CHECK:
-        CheckRows(rows, true);
-        break;
     case ID_GRABBER_UNCHECK:
-        CheckRows(rows, false);
+        if (any) {
+            Post(core::GrabberCheckCommand{project_, items, false, command == ID_GRABBER_CHECK});
+        }
         break;
     case ID_GRABBER_CHECK_ALL:
     case ID_GRABBER_UNCHECK_ALL: {
@@ -410,27 +419,19 @@ void GrabberWindow::ShowListMenu(POINT screen)
     }
     case ID_GRABBER_OPEN:
         if (done && callbacks_.openFile) {
-            callbacks_.openFile(std::filesystem::path(base::ToUtf16(single->localPath)));
+            callbacks_.openFile(localPath);
         }
         break;
     case ID_GRABBER_OPEN_FOLDER:
         if (done && callbacks_.showInFolder) {
-            callbacks_.showInFolder(std::filesystem::path(base::ToUtf16(single->localPath)));
+            callbacks_.showInFolder(localPath);
         }
         break;
-    case ID_GRABBER_ADD_MAIN: {
-        core::GrabberAddToMainListCommand listed;
-        listed.id = project_;
-        for (const int row : rows) {
-            if (const model::GrabberItem* item = RowItem(row)) {
-                listed.items.push_back(item->id);
-            }
-        }
-        if (!listed.items.empty()) {
-            Post(std::move(listed));
+    case ID_GRABBER_ADD_MAIN:
+        if (any) {
+            Post(core::GrabberAddToMainListCommand{project_, items});
         }
         break;
-    }
     default:
         break;
     }
