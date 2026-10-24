@@ -1,10 +1,15 @@
 // The FFmpeg build that ships next to ldm.exe (M3 design section 6) and the media fixtures it makes
 // for the HLS and DASH tests: every fixture is checked by duration and stream count with ffprobe,
 // and FFmpeg is checked to be LGPL and to refuse network addresses under LDM's protocol list.
+// LDM's own HLS and DASH parsers then read what FFmpeg wrote, so the hand-written parser fixtures
+// cannot drift from real output unnoticed.
 #include "MediaFixtures.h"
 
 #include "base/Utf.h"
+#include "media/DashManifest.h"
+#include "media/HlsPlaylist.h"
 #include "platform/win/ChildProcess.h"
+#include "platform/win/XmlLiteReader.h"
 
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
@@ -12,7 +17,9 @@
 #include <windows.h>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -20,6 +27,7 @@
 #include <optional>
 #include <string>
 #include <system_error>
+#include <variant>
 #include <vector>
 
 namespace {
@@ -237,6 +245,173 @@ TEST_F(MediaFixtureTest, DashWithSeparateVideoAndAudio)
     }
     EXPECT_EQ(streams["video"], 1);
     EXPECT_EQ(streams["audio"], 1);
+}
+
+// The fixtures as if served from this address, so every parsed address maps back to a file.
+constexpr std::string_view kFixtureOrigin = "https://fixture.test/";
+
+class ParsedFixtureTest : public MediaFixtureTest {
+protected:
+    static std::string UrlOf(const std::filesystem::path& file)
+    {
+        return std::string(kFixtureOrigin) + std::filesystem::relative(file, folder_).generic_string();
+    }
+
+    // The fixture file an address parsed from a fixture points at.
+    static std::filesystem::path FileOf(const std::string& url)
+    {
+        EXPECT_TRUE(url.starts_with(kFixtureOrigin)) << url;
+        return folder_ / std::filesystem::path(url.substr(std::min(url.size(), kFixtureOrigin.size())));
+    }
+
+    static std::string ReadAll(const std::filesystem::path& file)
+    {
+        std::ifstream in(file, std::ios::binary);
+        return std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    }
+
+    static ldm::media::HlsPlaylist ParseHlsFile(const std::filesystem::path& file)
+    {
+        auto parsed = ldm::media::ParseHls(ReadAll(file), UrlOf(file));
+        EXPECT_TRUE(parsed) << file.string() << ": " << (parsed ? "" : parsed.GetError().message);
+        return parsed ? std::move(parsed).Value() : ldm::media::HlsPlaylist{};
+    }
+
+    static ldm::media::TrackSegments ParseHlsMedia(const std::filesystem::path& file)
+    {
+        auto playlist = ParseHlsFile(file);
+        if (!std::holds_alternative<ldm::media::TrackSegments>(playlist)) {
+            ADD_FAILURE() << file.string() << " is not a media playlist";
+            return {};
+        }
+        return std::get<ldm::media::TrackSegments>(std::move(playlist));
+    }
+
+    // Every address of the track names a fixture file, and the segments last the fixture's length.
+    static void ExpectTrackOnDisk(const ldm::media::TrackSegments& track)
+    {
+        EXPECT_FALSE(track.live);
+        EXPECT_FALSE(track.drm);
+        ASSERT_GE(track.segments.size(), 3u);
+        EXPECT_NEAR(ldm::media::TotalSeconds(track), ldm::test::kFixtureSeconds, 0.5);
+        for (const auto& init : track.inits) {
+            EXPECT_TRUE(std::filesystem::exists(FileOf(init.url))) << init.url;
+        }
+        for (const auto& segment : track.segments) {
+            const auto file = FileOf(segment.url);
+            ASSERT_TRUE(std::filesystem::exists(file)) << segment.url;
+            if (segment.range) {
+                EXPECT_LE(segment.range->offset + segment.range->length, std::filesystem::file_size(file));
+            }
+        }
+    }
+};
+
+TEST_F(ParsedFixtureTest, HlsTransportStreamPlaylist)
+{
+    const auto track = ParseHlsMedia(paths_->hlsTs);
+    ExpectTrackOnDisk(track);
+    EXPECT_TRUE(track.inits.empty());
+    size_t files = 0;
+    for (const auto& entry : std::filesystem::directory_iterator(paths_->hlsTs.parent_path())) {
+        files += entry.path().extension() == ".ts" ? 1 : 0;
+    }
+    EXPECT_EQ(track.segments.size(), files) << "one segment per file FFmpeg wrote";
+}
+
+TEST_F(ParsedFixtureTest, HlsFragmentedMp4Playlist)
+{
+    const auto track = ParseHlsMedia(paths_->hlsFmp4);
+    ExpectTrackOnDisk(track);
+    ASSERT_EQ(track.inits.size(), 1u);
+    EXPECT_EQ(FileOf(track.inits[0].url).filename(), "init.mp4");
+    for (const auto& segment : track.segments) {
+        EXPECT_EQ(segment.init, 0u);
+    }
+}
+
+TEST_F(ParsedFixtureTest, HlsByteRangePlaylistCoversItsFile)
+{
+    const auto track = ParseHlsMedia(paths_->hlsByteRange);
+    ExpectTrackOnDisk(track);
+    ASSERT_FALSE(track.segments.empty());
+    // The ranges follow each other without gaps, up to the file's end.
+    std::uint64_t next = track.segments.front().range ? track.segments.front().range->offset : 0;
+    for (const auto& segment : track.segments) {
+        ASSERT_TRUE(segment.range) << segment.url;
+        EXPECT_EQ(segment.url, track.segments.front().url);
+        EXPECT_EQ(segment.range->offset, next);
+        next = segment.range->offset + segment.range->length;
+    }
+    EXPECT_EQ(next, std::filesystem::file_size(FileOf(track.segments.front().url)));
+}
+
+TEST_F(ParsedFixtureTest, HlsAes128PlaylistNamesItsKeyAndIv)
+{
+    const auto track = ParseHlsMedia(paths_->hlsAes);
+    ExpectTrackOnDisk(track);
+    ASSERT_EQ(track.keys.size(), 1u);
+    EXPECT_EQ(FileOf(track.keys[0].url), paths_->hlsAesKey);
+    const std::array<std::uint8_t, 16> iv{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15};
+    for (const auto& segment : track.segments) {
+        EXPECT_EQ(segment.key, 0u);
+        EXPECT_EQ(segment.iv, iv) << "the IV of the key info file";
+    }
+}
+
+TEST_F(ParsedFixtureTest, HlsMasterPlaylistAndItsRenditions)
+{
+    const auto playlist = ParseHlsFile(paths_->hlsMaster);
+    ASSERT_TRUE(std::holds_alternative<ldm::media::MediaOffer>(playlist));
+    const auto& offer = std::get<ldm::media::MediaOffer>(playlist);
+    EXPECT_FALSE(offer.drm);
+    ASSERT_GE(offer.variants.size(), 1u);
+    ASSERT_EQ(offer.audio.size(), 1u);
+    ASSERT_EQ(offer.subtitles.size(), 1u);
+    EXPECT_EQ(offer.variants[0].audioGroup, offer.audio[0].groupId);
+    EXPECT_EQ(offer.variants[0].subtitleGroup, offer.subtitles[0].groupId);
+
+    const auto mediaPlaylist = [](const ldm::media::SegmentSource& source) {
+        const auto* address = std::get_if<ldm::media::PlaylistAddress>(&source);
+        EXPECT_TRUE(address);
+        return address ? FileOf(address->url) : std::filesystem::path();
+    };
+    ExpectTrackOnDisk(ParseHlsMedia(mediaPlaylist(offer.variants[0].source)));
+    ASSERT_TRUE(offer.audio[0].source);
+    ExpectTrackOnDisk(ParseHlsMedia(mediaPlaylist(*offer.audio[0].source)));
+    ASSERT_TRUE(offer.subtitles[0].source);
+    const auto subtitles = ParseHlsMedia(mediaPlaylist(*offer.subtitles[0].source));
+    ASSERT_FALSE(subtitles.segments.empty());
+    for (const auto& segment : subtitles.segments) {
+        EXPECT_TRUE(std::filesystem::exists(FileOf(segment.url))) << segment.url;
+    }
+}
+
+TEST_F(ParsedFixtureTest, DashManifest)
+{
+    auto root = ldm::platform::ReadXml(ReadAll(paths_->dash));
+    ASSERT_TRUE(root) << root.GetError().message;
+    auto parsed = ldm::media::ParseMpd(root.Value(), UrlOf(paths_->dash), std::chrono::system_clock::now());
+    ASSERT_TRUE(parsed) << parsed.GetError().message;
+    const auto& offer = parsed.Value();
+    EXPECT_FALSE(offer.live);
+    EXPECT_NEAR(offer.seconds.value_or(0), ldm::test::kFixtureSeconds, 0.5);
+    ASSERT_EQ(offer.variants.size(), 1u);
+    ASSERT_EQ(offer.audio.size(), 1u);
+    ASSERT_TRUE(offer.audio[0].source);
+    for (const ldm::media::SegmentSource* source : {&offer.variants[0].source, &*offer.audio[0].source}) {
+        const auto& track = std::get<ldm::media::TrackSegments>(*source);
+        ExpectTrackOnDisk(track);
+        ASSERT_EQ(track.inits.size(), 1u);
+        // One segment per chunk file FFmpeg wrote for this track ("chunk-stream0-00001.m4s").
+        const std::string name = FileOf(track.segments.front().url).filename().string();
+        const std::string prefix = name.substr(0, name.rfind('-') + 1);
+        size_t files = 0;
+        for (const auto& entry : std::filesystem::directory_iterator(paths_->dash.parent_path())) {
+            files += entry.path().filename().string().starts_with(prefix) ? 1 : 0;
+        }
+        EXPECT_EQ(track.segments.size(), files) << prefix;
+    }
 }
 
 }  // namespace
