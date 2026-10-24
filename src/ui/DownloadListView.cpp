@@ -8,6 +8,7 @@
 
 #include <commctrl.h>
 #include <shellapi.h>
+#include <windowsx.h>
 
 #include <algorithm>
 #include <set>
@@ -17,6 +18,7 @@ namespace ldm::ui {
 namespace {
 
 constexpr int kQueueMark96 = 12;
+constexpr UINT_PTR kListSubclassId = 1;
 
 }  // namespace
 
@@ -28,7 +30,7 @@ void DownloadListView::Create(HWND parent, Callbacks callbacks)
                                   LVS_SHAREIMAGELISTS,
                               0, 0, 0, 0, parent, nullptr, ::GetModuleHandleW(nullptr), nullptr);
     ListView_SetExtendedListViewStyle(list_, LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER | LVS_EX_HEADERDRAGDROP |
-                                                 LVS_EX_LABELTIP | LVS_EX_SUBITEMIMAGES | LVS_EX_INFOTIP);
+                                                 LVS_EX_LABELTIP | LVS_EX_SUBITEMIMAGES);
     // The shell's own small icons, so every file type looks as it does in Explorer.
     SHFILEINFOW info{};
     const auto systemImages = reinterpret_cast<HIMAGELIST>(::SHGetFileInfoW(  // documented to return the list
@@ -36,6 +38,62 @@ void DownloadListView::Create(HWND parent, Callbacks callbacks)
     ListView_SetImageList(list_, systemImages, LVSIL_SMALL);
     columns_ = DefaultColumns();
     ApplyColumns();
+
+    queueTip_ = ::CreateWindowExW(WS_EX_TOPMOST, TOOLTIPS_CLASSW, nullptr, WS_POPUP | TTS_NOPREFIX | TTS_ALWAYSTIP,
+                                  CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, list_, nullptr,
+                                  ::GetModuleHandleW(nullptr), nullptr);
+    TOOLINFOW tool{};
+    tool.cbSize = sizeof(tool);
+    tool.uFlags = TTF_IDISHWND | TTF_SUBCLASS;
+    tool.hwnd = list_;
+    tool.uId = reinterpret_cast<UINT_PTR>(list_);  // the documented form for TTF_IDISHWND
+    tool.lpszText = LPSTR_TEXTCALLBACKW;
+    ::SendMessageW(queueTip_, TTM_ADDTOOLW, 0, reinterpret_cast<LPARAM>(&tool));
+    ::SetWindowSubclass(list_, &DownloadListView::ListSubclass, kListSubclassId, reinterpret_cast<DWORD_PTR>(this));
+}
+
+std::wstring DownloadListView::QueueTipAt(POINT client) const
+{
+    LVHITTESTINFO hit{};
+    hit.pt = client;
+    if (!snapshot_ || ListView_SubItemHitTest(list_, &hit) < 0 || hit.iItem < 0 ||
+        static_cast<size_t>(hit.iItem) >= index_.size() || hit.iSubItem < 0 ||
+        static_cast<size_t>(hit.iSubItem) >= shown_.size() || shown_[static_cast<size_t>(hit.iSubItem)] != Column::Queue) {
+        return {};
+    }
+    const model::Queue* queue = QueueOf(*snapshot_->downloads[index_[static_cast<size_t>(hit.iItem)]]);
+    return queue != nullptr ? L"Queue: " + base::ToUtf16(queue->name) : std::wstring();
+}
+
+LRESULT CALLBACK DownloadListView::ListSubclass(HWND window, UINT message, WPARAM wParam, LPARAM lParam, UINT_PTR id,
+                                               DWORD_PTR data)
+{
+    auto* self = reinterpret_cast<DownloadListView*>(data);  // set with the subclass, alive as long as the list
+    switch (message) {
+    case WM_MOUSEMOVE: {
+        std::wstring text = self->QueueTipAt(POINT{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)});
+        if (text != self->queueTipText_) {
+            self->queueTipText_ = std::move(text);
+            ::SendMessageW(self->queueTip_, TTM_POP, 0, 0);  // shows again, with the new text, when the mouse rests
+        }
+        break;
+    }
+    case WM_NOTIFY: {
+        const auto* header = reinterpret_cast<const NMHDR*>(lParam);
+        if (header->hwndFrom == self->queueTip_ && header->code == TTN_GETDISPINFOW) {
+            auto* info = reinterpret_cast<NMTTDISPINFOW*>(lParam);
+            info->lpszText = const_cast<wchar_t*>(self->queueTipText_.c_str());  // empty: no tip
+            return 0;
+        }
+        break;
+    }
+    case WM_NCDESTROY:
+        ::RemoveWindowSubclass(window, &DownloadListView::ListSubclass, id);
+        break;
+    default:
+        break;
+    }
+    return ::DefSubclassProc(window, message, wParam, lParam);
 }
 
 void DownloadListView::SetColumns(const std::vector<ColumnState>& columns)
@@ -430,23 +488,6 @@ bool DownloadListView::HandleNotify(const NMHDR& header, LRESULT& result)
             result = CDRF_DODEFAULT;
             break;
         }
-        return true;
-    }
-    case LVN_GETINFOTIPW: {
-        // Over the Q column, the queue's name; elsewhere the list's own tip.
-        auto& tip = const_cast<NMLVGETINFOTIPW&>(reinterpret_cast<const NMLVGETINFOTIPW&>(header));  // documented in-out
-        LVHITTESTINFO hit{};
-        ::GetCursorPos(&hit.pt);
-        ::ScreenToClient(list_, &hit.pt);
-        if (snapshot_ && ListView_SubItemHitTest(list_, &hit) >= 0 && hit.iSubItem >= 0 &&
-            static_cast<size_t>(hit.iSubItem) < shown_.size() && shown_[static_cast<size_t>(hit.iSubItem)] == Column::Queue &&
-            static_cast<size_t>(hit.iItem) < index_.size() && tip.pszText != nullptr && tip.cchTextMax > 0) {
-            if (const model::Queue* queue = QueueOf(*snapshot_->downloads[index_[static_cast<size_t>(hit.iItem)]])) {
-                const std::wstring text = L"Queue: " + base::ToUtf16(queue->name);
-                wcsncpy_s(tip.pszText, static_cast<size_t>(tip.cchTextMax), text.c_str(), _TRUNCATE);
-            }
-        }
-        result = 0;
         return true;
     }
     case LVN_ITEMCHANGED:

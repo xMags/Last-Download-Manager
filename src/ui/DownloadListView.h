@@ -70,6 +70,11 @@ private:
     // cell, with the queue's name as the tip.
     void DrawQueueMark(const NMLVCUSTOMDRAW& draw) const;
     [[nodiscard]] const model::Queue* QueueOf(const core::DownloadView& view) const;
+    // The tip over the Q column: "Queue: <name>", or nothing elsewhere. The list view asks for
+    // no tip over an empty cell, so the list has a tooltip of its own, fed from mouse moves.
+    [[nodiscard]] std::wstring QueueTipAt(POINT client) const;
+    static LRESULT CALLBACK ListSubclass(HWND window, UINT message, WPARAM wParam, LPARAM lParam, UINT_PTR id,
+                                         DWORD_PTR data);
 
     Callbacks callbacks_;
     HWND list_ = nullptr;
@@ -86,6 +91,8 @@ private:
     std::map<std::wstring, int> iconCache_;  // extension -> system image list index
     UniqueIcon queueIcon_;
     UniqueIcon syncQueueIcon_;
+    HWND queueTip_ = nullptr;  // owned by the list, which destroys it
+    std::wstring queueTipText_;
     bool updating_ = false;
 };
 
