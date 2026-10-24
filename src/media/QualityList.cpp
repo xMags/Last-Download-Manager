@@ -57,10 +57,18 @@ std::uint64_t Rate(const Variant& variant)
     return variant.averageBandwidth.value_or(variant.bandwidth);
 }
 
+// A variant that says nothing about its streams (a media playlist on its own, or a master playlist
+// without CODECS and RESOLUTION) is taken to have a picture: sound saved as a video file still
+// plays, a video saved as sound does not.
 bool HasPicture(const Variant& variant)
 {
-    return variant.resolution.has_value() || !VideoCodecFamily(variant.codecs).empty() ||
-           variant.mimeType.starts_with("video/");
+    if (variant.resolution || variant.mimeType.starts_with("video/")) {
+        return true;
+    }
+    if (!variant.codecs.empty()) {
+        return !VideoCodecFamily(variant.codecs).empty();
+    }
+    return !variant.mimeType.starts_with("audio/");
 }
 
 bool CanDownload(const std::optional<SegmentSource>& source)
