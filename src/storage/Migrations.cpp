@@ -167,6 +167,10 @@ CREATE TABLE media_segments (
   FOREIGN KEY (download_id, track) REFERENCES media_tracks(download_id, track) ON DELETE CASCADE
 ) STRICT;
 )sql"},
+    // Live HLS recordings: a track whose playlist is still read again while it downloads.
+    Migration{6, R"sql(
+ALTER TABLE media_tracks ADD COLUMN live INTEGER NOT NULL DEFAULT 0 CHECK (live IN (0, 1));
+)sql"},
 };
 
 base::Result<int> CurrentVersion(Connection& connection)

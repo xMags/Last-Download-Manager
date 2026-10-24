@@ -3,6 +3,7 @@
 #include "core/Store.h"
 #include "storage/Sqlite.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <span>
 #include <string>
@@ -26,6 +27,8 @@ public:
     base::Status MarkMediaPiecesDone(model::DownloadId id, std::span<const core::MediaPieceDone> pieces) override;
     base::Status ReplaceMediaTrack(model::DownloadId id, std::uint32_t track,
                                    const model::MediaTrack& replacement) override;
+    base::Status AppendMediaTrack(model::DownloadId id, std::uint32_t track, const model::MediaTrack& grown,
+                                  std::uint32_t firstKey, std::uint32_t firstPiece) override;
     base::Status DeleteDownload(model::DownloadId id) override;
 
     base::Result<std::vector<model::Category>> LoadCategories() override;
@@ -48,6 +51,9 @@ private:
     base::Status WriteSegments(const model::Download& download);
     base::Status WriteRanges(model::DownloadId id, std::uint32_t track, const std::vector<model::Segment>& ranges);
     base::Status WriteTrack(model::DownloadId id, std::uint32_t index, const model::MediaTrack& track);
+    // The track's keys, or pieces, from index `first` on.
+    base::Status WriteKeys(model::DownloadId id, std::uint32_t index, const model::MediaTrack& track, size_t first);
+    base::Status WritePieces(model::DownloadId id, std::uint32_t index, const model::MediaTrack& track, size_t first);
     base::Status DeleteTrack(model::DownloadId id, std::uint32_t track);
     base::Status LoadSegments(std::vector<model::Download>& downloads);
     base::Status LoadTracks(std::vector<model::Download>& downloads);
