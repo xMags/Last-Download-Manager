@@ -59,6 +59,10 @@ struct MediaPiece {
     // On disk in full and flushed; `bytes` is then the size of its file.
     bool done = false;
     std::optional<std::int64_t> bytes;
+    // Given up on: a live recording's piece that left the stream's window before LDM fetched it,
+    // or was not fetched yet when the recording was finished. Never fetched; the join leaves it
+    // out and marks the gap. Pieces keep their places, because their files are named by them.
+    bool skipped = false;
 };
 
 struct MediaTrack {

@@ -171,6 +171,10 @@ CREATE TABLE media_segments (
     Migration{6, R"sql(
 ALTER TABLE media_tracks ADD COLUMN live INTEGER NOT NULL DEFAULT 0 CHECK (live IN (0, 1));
 )sql"},
+    // Pieces of a live recording that are left out: gone from the stream before they were fetched.
+    Migration{7, R"sql(
+ALTER TABLE media_segments ADD COLUMN skipped INTEGER NOT NULL DEFAULT 0 CHECK (skipped IN (0, 1));
+)sql"},
 };
 
 base::Result<int> CurrentVersion(Connection& connection)

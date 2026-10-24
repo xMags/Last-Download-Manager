@@ -420,7 +420,8 @@ base::Status SqliteStore::LoadTracks(std::vector<model::Download>& downloads)
 
     base::Result<Statement> pieces = connection_.Prepare(
         "SELECT download_id, track, idx, kind, url, range_offset, range_length, duration_us, sequence, "
-        "discontinuity, init_idx, key_idx, iv, done, bytes FROM media_segments ORDER BY download_id, track, idx");
+        "discontinuity, init_idx, key_idx, iv, done, bytes, skipped FROM media_segments "
+        "ORDER BY download_id, track, idx");
     if (!pieces) {
         return pieces.GetError();
     }
@@ -454,6 +455,7 @@ base::Status SqliteStore::LoadTracks(std::vector<model::Download>& downloads)
         piece.iv = ReadKey(r, 12);
         piece.done = r.Int64(13) != 0;
         piece.bytes = r.OptionalInt64(14);
+        piece.skipped = r.Int64(15) != 0;
         track->pieces.push_back(std::move(piece));
     }
 
@@ -597,8 +599,8 @@ base::Status SqliteStore::WritePieces(model::DownloadId id, std::uint32_t index,
 {
     base::Result<Statement> insertPiece = connection_.Prepare(
         "INSERT INTO media_segments (download_id, track, idx, kind, url, range_offset, range_length, duration_us, "
-        "sequence, discontinuity, init_idx, key_idx, iv, done, bytes) "
-        "VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)");
+        "sequence, discontinuity, init_idx, key_idx, iv, done, bytes, skipped) "
+        "VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)");
     if (!insertPiece) {
         return insertPiece.GetError();
     }
@@ -619,7 +621,7 @@ base::Status SqliteStore::WritePieces(model::DownloadId id, std::uint32_t index,
             .Bind(11, ToOptionalIndex(piece.init))
             .Bind(12, ToOptionalIndex(piece.key));
         BindKey(statement, 13, piece.iv);
-        statement.Bind(14, piece.done).Bind(15, piece.bytes);
+        statement.Bind(14, piece.done).Bind(15, piece.bytes).Bind(16, piece.skipped);
         base::Status pieceInserted = statement.Run();
         if (!pieceInserted) {
             return pieceInserted;
