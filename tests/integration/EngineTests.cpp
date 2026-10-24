@@ -508,7 +508,8 @@ TEST_F(EngineTest, FetchSendsCookiesAndReportsHttpErrors)
 // The Grabber's fetches (M4 design section 6.2): HEAD requests, pages only, site logins.
 TEST_F(EngineTest, FetchAsksForTheHeadOnly)
 {
-    auto request = FetchOf(server_->Url("/range.bin"), 8 * 1024 * 1024);
+    // The limit is for bodies: a HEAD answer for a larger file still tells its size.
+    auto request = FetchOf(server_->Url("/range.bin"), 1024);
     request.headOnly = true;
     engine_->Fetch(std::move(request));
     const auto fetched = listener_.WaitFor<ldm::core::FetchFinished>(DownloadId{}, 0, 60s);

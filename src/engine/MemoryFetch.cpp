@@ -58,7 +58,8 @@ MemoryFetch::MemoryFetch(CURLM* multi, core::FetchRequest request, long connectT
     // libcurl refuses an announced length over the limit before any byte arrives; with body types
     // the type decides first, so a large file is reported as skipped rather than too large. The
     // write callback holds the limit either way.
-    if (request_.bodyTypes.empty()) {
+    // A HEAD request has no body to limit; its Content-Length may be any size.
+    if (request_.bodyTypes.empty() && !request_.headOnly) {
         curl_easy_setopt(easy, CURLOPT_MAXFILESIZE_LARGE, static_cast<curl_off_t>(request_.maxBytes));
     }
     curl_easy_setopt(easy, CURLOPT_WRITEFUNCTION, &MemoryFetch::OnWrite);
