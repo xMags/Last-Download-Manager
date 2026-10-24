@@ -53,8 +53,21 @@ BrowserSessions::BrowserSessions(BrowserLink& link, std::string appVersion, Hand
 void BrowserSessions::OnEvent(BrowserEvent event, const model::Settings& settings)
 {
     if (!event.message) {
+        // Answered after the bookkeeping, since an answer may send a new request.
+        std::vector<CookiesAnswer> unanswered;
+        for (auto it = cookieRequests_.begin(); it != cookieRequests_.end();) {
+            if (it->second.connection == event.connection) {
+                unanswered.push_back(std::move(it->second.answer));
+                it = cookieRequests_.erase(it);
+            } else {
+                ++it;
+            }
+        }
         if (sessions_.erase(event.connection) > 0 && handlers_.onClosed) {
             handlers_.onClosed(event.connection);
+        }
+        for (CookiesAnswer& answer : unanswered) {
+            answer(std::nullopt);
         }
         return;
     }
@@ -99,6 +112,16 @@ void BrowserSessions::OnEvent(BrowserEvent event, const model::Settings& setting
         }
         return;
     }
+    if (auto* cookies = std::get_if<browser::Cookies>(&parsed.message)) {
+        const auto request = cookieRequests_.find(cookies->requestId);
+        // Only the connection that was asked may answer.
+        if (request != cookieRequests_.end() && request->second.connection == event.connection) {
+            CookiesAnswer answer = std::move(request->second.answer);
+            cookieRequests_.erase(request);
+            answer(std::move(cookies->cookies));
+        }
+        return;
+    }
     if (!session->second.hello) {
         return;  // media reports start after the extension's hello
     }
@@ -117,12 +140,8 @@ void BrowserSessions::OnEvent(BrowserEvent event, const model::Settings& setting
     }
 }
 
-bool BrowserSessions::OpenPage(const std::string& url)
+std::optional<BrowserConnectionId> BrowserSessions::PreferredConnection() const
 {
-    const auto parsed = core::ParseUrl(url);
-    if (!parsed || (parsed->scheme != "http" && parsed->scheme != "https")) {
-        return false;
-    }
     // A browser's lasting connection asks LDM not to start; the short ones of single requests ask
     // it to and close soon, so a message sent there could be lost.
     // Connection ids grow, so the last match is the newest.
@@ -137,12 +156,54 @@ bool BrowserSessions::OpenPage(const std::string& url)
             lasting = connection;
         }
     }
-    const std::optional<BrowserConnectionId> target = lasting ? lasting : any;
+    return lasting ? lasting : any;
+}
+
+bool BrowserSessions::OpenPage(const std::string& url)
+{
+    const auto parsed = core::ParseUrl(url);
+    if (!parsed || (parsed->scheme != "http" && parsed->scheme != "https")) {
+        return false;
+    }
+    const std::optional<BrowserConnectionId> target = PreferredConnection();
     if (!target) {
         return false;
     }
     link_.Send(*target, browser::EncodeOpenPage(url));
     return true;
+}
+
+bool BrowserSessions::RequestCookies(const std::string& url, CookiesAnswer answer,
+                                     std::chrono::steady_clock::time_point deadline)
+{
+    const auto parsed = core::ParseUrl(url);
+    if (!parsed || (parsed->scheme != "http" && parsed->scheme != "https")) {
+        return false;
+    }
+    const std::optional<BrowserConnectionId> target = PreferredConnection();
+    if (!target) {
+        return false;
+    }
+    std::string requestId = "cookies-" + std::to_string(++lastCookieRequest_);
+    link_.Send(*target, browser::EncodeCookiesRequest(requestId, url));
+    cookieRequests_.emplace(std::move(requestId), CookieRequest{*target, std::move(answer), deadline});
+    return true;
+}
+
+void BrowserSessions::ExpireCookieRequests(std::chrono::steady_clock::time_point now)
+{
+    std::vector<CookiesAnswer> expired;
+    for (auto it = cookieRequests_.begin(); it != cookieRequests_.end();) {
+        if (it->second.deadline <= now) {
+            expired.push_back(std::move(it->second.answer));
+            it = cookieRequests_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    for (CookiesAnswer& answer : expired) {
+        answer(std::nullopt);
+    }
 }
 
 void BrowserSessions::SendMediaList(BrowserConnectionId connection, int tabId, bool hasMedia)

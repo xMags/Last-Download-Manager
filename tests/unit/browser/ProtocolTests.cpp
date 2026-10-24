@@ -497,6 +497,30 @@ TEST(BrowserProtocol, ParsesMediaReset)
     EXPECT_FALSE(ldm::browser::ParseMessage(R"({"v":1,"id":"r","type":"media-reset"})"));
 }
 
+TEST(BrowserProtocol, ParsesTheCookiesAnswer)
+{
+    const auto parsed = ldm::browser::ParseMessage(
+        R"({"v":1,"id":"m9","type":"cookies","requestId":"cookies-1","cookies":[{"domain":"a.test","hostOnly":true,"path":"/","secure":false,"expires":0,"name":"sid","value":"x"}]})");
+    ASSERT_TRUE(parsed);
+    const auto* cookies = std::get_if<ldm::browser::Cookies>(&parsed->message);
+    ASSERT_NE(cookies, nullptr);
+    EXPECT_EQ(cookies->requestId, "cookies-1");
+    ASSERT_EQ(cookies->cookies.size(), 1u);
+    EXPECT_EQ(cookies->cookies[0].name, "sid");
+
+    EXPECT_FALSE(ldm::browser::ParseMessage(R"({"v":1,"id":"m9","type":"cookies","cookies":[]})"));
+    EXPECT_FALSE(ldm::browser::ParseMessage(R"({"v":1,"id":"m9","type":"cookies","requestId":"","cookies":[]})"));
+    EXPECT_FALSE(ldm::browser::ParseMessage(R"({"v":1,"id":"m9","type":"cookies","requestId":"c","cookies":{}})"));
+    EXPECT_FALSE(ldm::browser::ParseMessage(
+        R"({"v":1,"id":"m9","type":"cookies","requestId":"c","cookies":[{"domain":"","name":"x","value":"y"}]})"));
+
+    const auto request = nlohmann::json::parse(ldm::browser::EncodeCookiesRequest("cookies-2", "https://a.test/x"));
+    EXPECT_EQ(request["v"], 1);
+    EXPECT_EQ(request["id"], "cookies-2");
+    EXPECT_EQ(request["type"], "cookies-request");
+    EXPECT_EQ(request["url"], "https://a.test/x");
+}
+
 TEST(BrowserProtocol, EncodesMediaListAndMediaRules)
 {
     const auto list = nlohmann::json::parse(ldm::browser::EncodeMediaList(9, true));

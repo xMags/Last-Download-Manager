@@ -406,6 +406,38 @@ export function parseMediaList(message) {
   return { tabId: message.tabId, hasMedia: message.hasMedia };
 }
 
+const MAX_REQUEST_ID = 64;
+
+/**
+ * LDM's request for the cookies the browser sends to an address (the Site Grabber), or null when
+ * the message is not a valid one.
+ * @returns {{requestId: string, url: string} | null}
+ */
+export function parseCookiesRequest(message) {
+  if (message === null || typeof message !== 'object' || message.v !== PROTOCOL_VERSION ||
+      message.type !== 'cookies-request' || typeof message.id !== 'string' || message.id.length === 0 ||
+      message.id.length > MAX_REQUEST_ID || !/^[\x20-\x7e]+$/.test(message.id) || !isDownloadAddress(message.url) ||
+      !/^https?:/i.test(message.url)) {
+    return null;
+  }
+  return { requestId: message.id, url: message.url };
+}
+
+/** The answer to a cookies request: the browser's cookies for its address, as LDM accepts them. */
+export function makeCookies(requestId, browserCookies) {
+  const seen = new Set();
+  const cookies = [];
+  for (const cookie of browserCookies) {
+    const converted = toLdmCookie(cookie);
+    const key = converted && `${converted.domain}\t${converted.path}\t${converted.name}`;
+    if (converted && !seen.has(key) && cookies.length < MAX_COOKIES) {
+      seen.add(key);
+      cookies.push(converted);
+    }
+  }
+  return { v: PROTOCOL_VERSION, id: nextId(), type: 'cookies', requestId, cookies };
+}
+
 /**
  * What was found out about some links, for the open Download All Links dialog.
  * @param {{index: number, failed?: boolean, fileSize?: number, mimeType?: string,

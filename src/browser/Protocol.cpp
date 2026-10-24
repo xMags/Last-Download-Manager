@@ -492,6 +492,20 @@ std::optional<MediaFound> ParseMediaFound(const nlohmann::json& object)
     return media;
 }
 
+std::optional<Cookies> ParseCookiesAnswer(const nlohmann::json& object)
+{
+    const auto requestId = object.find("requestId");
+    if (requestId == object.end() || !requestId->is_string() || !IsValidId(requestId->get_ref<const std::string&>())) {
+        return std::nullopt;
+    }
+    Cookies answer;
+    answer.requestId = requestId->get<std::string>();
+    if (!ParseCookies(object, kMaxCookies, answer.cookies)) {
+        return std::nullopt;
+    }
+    return answer;
+}
+
 std::optional<MediaReset> ParseMediaReset(const nlohmann::json& object)
 {
     const auto tabId = BrowserId(object, "tabId");
@@ -619,6 +633,10 @@ std::optional<ParsedMessage> ParseMessage(std::string_view json)
         if (const auto position = ParseVideoPosition(message)) {
             return ParsedMessage{std::move(id), *position};
         }
+    } else if (type == "cookies") {
+        if (auto cookies = ParseCookiesAnswer(message)) {
+            return ParsedMessage{std::move(id), std::move(*cookies)};
+        }
     }
     return std::nullopt;
 }
@@ -700,6 +718,13 @@ std::string EncodeLinksDone(std::string_view replyTo)
 std::string EncodeOpenPage(std::string_view url)
 {
     nlohmann::json message = Envelope("open-page", "open-page");
+    message["url"] = url;
+    return message.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
+}
+
+std::string EncodeCookiesRequest(std::string_view requestId, std::string_view url)
+{
+    nlohmann::json message = Envelope(requestId, "cookies-request");
     message["url"] = url;
     return message.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
 }

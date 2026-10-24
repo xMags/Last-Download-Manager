@@ -4,6 +4,8 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
+#include <chrono>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -49,6 +51,54 @@ TEST(BrowserSessions, HelloIsAnsweredWithTheCaptureRules)
     EXPECT_EQ(config["keys"]["force"]["insert"], true);
     EXPECT_EQ(config["keys"]["forceNeedsLinkClick"], true);
     EXPECT_EQ(config["keys"]["skipWebContent"], true);
+}
+
+TEST(BrowserSessions, AsksTheBrowserForCookiesAndTakesOnlyItsAnswer)
+{
+    RecordingLink link;
+    ldm::ui::BrowserSessions sessions(link, "5.0.0", {});
+    const ldm::model::Settings settings;
+    const auto now = std::chrono::steady_clock::now();
+    EXPECT_FALSE(sessions.RequestCookies("https://a.test/", [](auto) { ADD_FAILURE(); }, now)) << "no browser yet";
+
+    sessions.OnEvent(Event(1, ldm::browser::HostInfo{}), settings);
+    sessions.OnEvent(Event(1, SampleHello()), settings);
+    sessions.OnEvent(Event(2, ldm::browser::HostInfo{}), settings);
+    sessions.OnEvent(Event(2, SampleHello()), settings);
+    link.sent.clear();
+    EXPECT_FALSE(sessions.RequestCookies("ftp://a.test/", [](auto) { ADD_FAILURE(); }, now));
+
+    std::vector<std::optional<std::vector<ldm::model::Cookie>>> answers;
+    ASSERT_TRUE(sessions.RequestCookies("https://a.test/", [&](auto cookies) { answers.push_back(cookies); },
+                                        now + std::chrono::seconds(10)));
+    ASSERT_EQ(link.sent.size(), 1u);
+    EXPECT_EQ(link.sent[0].first, 2u) << "the newest browser";
+    const auto request = nlohmann::json::parse(link.sent[0].second);
+    const std::string requestId = request["id"];
+
+    ldm::model::Cookie cookie{"a.test", true, "/", false, 0, "sid", "x"};
+    sessions.OnEvent(Event(1, ldm::browser::Cookies{requestId, {cookie}}), settings);
+    EXPECT_TRUE(answers.empty()) << "another browser cannot answer";
+    sessions.OnEvent(Event(2, ldm::browser::Cookies{requestId, {cookie}}), settings);
+    ASSERT_EQ(answers.size(), 1u);
+    ASSERT_TRUE(answers[0]);
+    EXPECT_EQ(answers[0]->size(), 1u);
+    sessions.OnEvent(Event(2, ldm::browser::Cookies{requestId, {cookie}}), settings);
+    EXPECT_EQ(answers.size(), 1u) << "answered once";
+
+    // A request whose browser leaves, and one that expires, are answered with nothing.
+    ASSERT_TRUE(sessions.RequestCookies("https://a.test/", [&](auto cookies) { answers.push_back(cookies); },
+                                        now + std::chrono::seconds(10)));
+    sessions.OnEvent(ldm::ui::BrowserEvent{2, std::nullopt}, settings);
+    ASSERT_EQ(answers.size(), 2u);
+    EXPECT_FALSE(answers[1]);
+    ASSERT_TRUE(sessions.RequestCookies("https://a.test/", [&](auto cookies) { answers.push_back(cookies); },
+                                        now + std::chrono::seconds(10)));
+    sessions.ExpireCookieRequests(now + std::chrono::seconds(5));
+    EXPECT_EQ(answers.size(), 2u);
+    sessions.ExpireCookieRequests(now + std::chrono::seconds(10));
+    ASSERT_EQ(answers.size(), 3u);
+    EXPECT_FALSE(answers[2]);
 }
 
 TEST(BrowserSessions, ChangedKeysArePushed)

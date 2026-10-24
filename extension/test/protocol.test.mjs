@@ -1,7 +1,28 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { cleanText, makeHello, parseConfig } from '../src/protocol.js';
+import { cleanText, makeCookies, makeHello, parseConfig, parseCookiesRequest } from '../src/protocol.js';
+
+test('cookies requests are read strictly and answered with the cookies LDM accepts', () => {
+  assert.deepEqual(parseCookiesRequest({ v: 1, id: 'cookies-1', type: 'cookies-request', url: 'https://a.test/x' }),
+    { requestId: 'cookies-1', url: 'https://a.test/x' });
+  assert.equal(parseCookiesRequest({ v: 1, id: 'cookies-1', type: 'cookies-request', url: 'ftp://a.test/x' }), null);
+  assert.equal(parseCookiesRequest({ v: 1, id: '', type: 'cookies-request', url: 'https://a.test/' }), null);
+  assert.equal(parseCookiesRequest({ v: 2, id: 'c', type: 'cookies-request', url: 'https://a.test/' }), null);
+  assert.equal(parseCookiesRequest({ v: 1, id: 'c', type: 'open-page', url: 'https://a.test/' }), null);
+
+  const answer = makeCookies('cookies-1', [
+    { domain: '.a.test', hostOnly: false, path: '/', secure: true, session: true, name: 'sid', value: 'x' },
+    { domain: '.a.test', hostOnly: false, path: '/', secure: true, session: true, name: 'sid', value: 'again' },
+    { domain: 'bad host', path: '/', name: 'n', value: 'v' },
+  ]);
+  assert.equal(answer.type, 'cookies');
+  assert.equal(answer.requestId, 'cookies-1');
+  assert.match(answer.id, /^m\d+$/);
+  assert.deepEqual(answer.cookies, [
+    { domain: 'a.test', hostOnly: false, path: '/', secure: true, expires: 0, name: 'sid', value: 'x' },
+  ]);
+});
 
 test('hello carries every field LDM requires', () => {
   const hello = makeHello({
