@@ -256,6 +256,14 @@ struct MuxFinished {
     std::string mediaInfo;
 };
 
+// The media tools' answer to a DescribeRequest, sent like MuxFinished.
+struct DescribeFinished {
+    bool stopped = false;  // MediaTools::Cancel ended it
+    // As MuxFinished::mediaInfo: "1280x720, 30 fps, H.264; AAC, stereo, 48 kHz; 4:05". Empty when
+    // ffprobe could not say, which is no failure: the file is fine without it.
+    std::string mediaInfo;
+};
+
 // A small download into memory: a streaming manifest LDM reads itself (M3 design section 6).
 // Not a download of the list, so it has no DownloadId; its answer carries `fetchId`.
 struct FetchRequest {
@@ -282,7 +290,7 @@ struct FetchFinished {
 };
 
 using EnginePayload = std::variant<ResponseInfo, ProgressInfo, TransferFinished, FinalizeFinished, ProxyResolved,
-                                   FetchFinished, MediaProgress, MediaFinished, MuxFinished>;
+                                   FetchFinished, MediaProgress, MediaFinished, MuxFinished, DescribeFinished>;
 
 struct EngineEvent {
     model::DownloadId id;

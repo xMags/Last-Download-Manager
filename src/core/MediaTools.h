@@ -43,14 +43,23 @@ struct MuxRequest {
     std::string preferredExtension;
 };
 
+// A finished plain media file to describe for the list (checklist C-04).
+struct DescribeRequest {
+    model::DownloadId id;
+    std::int64_t epoch = 0;
+    std::filesystem::path file;  // the complete partial file, before it is moved
+};
+
 // Joins and describes. Every method is thread-safe and returns at once; each Mux is answered by
-// exactly one MuxFinished event through the engine listener, with the request's id and epoch.
+// exactly one MuxFinished event, and each Describe by one DescribeFinished, through the engine
+// listener with the request's id and epoch. One job runs at a time, in the order asked.
 class MediaTools {
 public:
     virtual ~MediaTools() = default;
     virtual void Mux(MuxRequest request) = 0;
-    // Stops a running Mux; it is then answered with `stopped` set. Nothing happens when it
-    // already answered.
+    virtual void Describe(DescribeRequest request) = 0;
+    // Stops a running or queued Mux or Describe; it is then answered with `stopped` set. Nothing
+    // happens when it already answered.
     virtual void Cancel(model::DownloadId id, std::int64_t epoch) = 0;
 };
 

@@ -114,6 +114,7 @@ private:
         std::optional<TransferFailure> playlistFailure;
         std::vector<MediaPieceDone> unsavedPieces;  // done since the last checkpoint
         bool muxing = false;              // a Mux for download.epoch has not answered
+        bool describing = false;          // a Describe for download.epoch has not answered
         std::optional<std::filesystem::path> muxOutput;  // the joined file, until it is moved
 
         // Live recordings: the playlists are read again while the run lasts.
@@ -165,6 +166,7 @@ private:
     void OnMediaProgress(Entry& entry, const MediaProgress& progress);
     void OnMediaFinished(Entry& entry, const MediaFinished& finished);
     void OnMuxFinished(Entry& entry, const MuxFinished& finished);
+    void OnDescribeFinished(Entry& entry, const DescribeFinished& finished);
     void OnPlaylistFetched(const FetchFinished& fetched);
     void OnPlaylistReloaded(Entry& entry, std::uint32_t track, const FetchFinished& fetched);
     // What follows the end of any run, file or stream, once its own results are applied.
@@ -183,7 +185,10 @@ private:
     // A finished run's next step: the final move, or joining a stream's pieces first.
     void CompleteRun(Entry& entry);
     void BeginMux(Entry& entry);
-    void CancelMux(Entry& entry);
+    // Describes a finished video or audio file with the media tools before it is moved (C-04).
+    void BeginDescribe(Entry& entry);
+    // Stops the join or description of `entry`, if one runs.
+    void CancelMediaTools(Entry& entry);
     // Stores tracks whose lists or progress changed as a whole.
     void StoreTracks(Entry& entry, const std::vector<std::uint32_t>& tracks);
     [[nodiscard]] std::optional<std::string> ValidateMedia(const MediaChoice& media, model::Download& download);

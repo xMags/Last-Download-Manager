@@ -703,6 +703,29 @@ TEST_F(MediaJoinTest, ALiveStreamIsRecordedUntilItEndsAndJoined)
     EXPECT_EQ(probed.video, 1);
 }
 
+TEST_F(MediaJoinTest, AFinishedMediaFileIsDescribed)
+{
+    ldm::model::Download download;
+    download.kind = ldm::model::DownloadKind::Hls;
+    download.tracks = {HlsTrack(fixtures_->hlsTs, ldm::model::TrackRole::Video)};
+    const auto muxed = DownloadAndJoin(download);
+    ASSERT_TRUE(muxed && !muxed->failure);
+    // The joined MP4 stands in for a plain MP4 download; its name does not matter to ffprobe.
+    const fs::path file = parts_ / L"clip.ldmpart";
+    fs::rename(muxed->output, file);
+    tools_->Describe(ldm::core::DescribeRequest{DownloadId{1}, 5, file});
+    const auto described = listener_.WaitFor<ldm::core::DescribeFinished>(DownloadId{1}, 5, 60s);
+    ASSERT_TRUE(described);
+    EXPECT_FALSE(described->stopped);
+    EXPECT_NE(described->mediaInfo.find("320x240, 25 fps, MPEG-4; AAC, stereo, 48 kHz"), std::string::npos)
+        << described->mediaInfo;
+
+    tools_->Describe(ldm::core::DescribeRequest{DownloadId{1}, 6, parts_ / L"missing.mp4"});
+    const auto missing = listener_.WaitFor<ldm::core::DescribeFinished>(DownloadId{1}, 6, 60s);
+    ASSERT_TRUE(missing);
+    EXPECT_TRUE(missing->mediaInfo.empty()) << "nothing to say is not a failure";
+}
+
 TEST_F(MediaJoinTest, ACancelledJoinAnswersStopped)
 {
     ldm::core::MuxRequest request;

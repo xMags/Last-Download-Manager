@@ -60,9 +60,11 @@ public:
 class FakeMediaTools final : public ldm::core::MediaTools {
 public:
     void Mux(ldm::core::MuxRequest request) override { muxes.push_back(std::move(request)); }
+    void Describe(ldm::core::DescribeRequest request) override { describes.push_back(std::move(request)); }
     void Cancel(DownloadId id, std::int64_t epoch) override { cancels.emplace_back(id, epoch); }
 
     std::vector<ldm::core::MuxRequest> muxes;
+    std::vector<ldm::core::DescribeRequest> describes;
     std::vector<std::pair<DownloadId, std::int64_t>> cancels;
 };
 
@@ -642,9 +644,60 @@ TEST_F(CoordinatorTest, SpeculativeAddFollowsServerNameUntilConfirmed)
     confirm.saveDir = ldm::base::ToUtf8((kRoot / L"Elsewhere").wstring());
     confirm.description = "note";
     coordinator_->Handle(confirm);
+    // A video is described before it is moved (C-04).
+    ASSERT_EQ(media_.describes.size(), 1u);
+    EXPECT_TRUE(engine_.finalizes.empty());
+    ldm::core::DescribeFinished described;
+    described.mediaInfo = "1280x720, 25 fps, MPEG-4; 0:04";
+    Send(id, 1, described);
     ASSERT_EQ(engine_.finalizes.size(), 1u);
     EXPECT_EQ(engine_.finalizes.back().finalPath, kRoot / L"Elsewhere" / L"renamed.mkv");
     EXPECT_FALSE(View(id).awaitingConfirmation);
+    EXPECT_EQ(View(id).download.description, "note; 1280x720, 25 fps, MPEG-4; 0:04");
+}
+
+TEST_F(CoordinatorTest, AFinishedVideoIsDescribedBeforeItIsMovedAndOtherFilesAreNot)
+{
+    const DownloadId video = *Add("http://x.test/clip.mp4").id;
+    Finish(video, 1, TransferOutcome::Completed, {{0, 10, 10}}, std::nullopt, 10);
+    ASSERT_EQ(media_.describes.size(), 1u);
+    EXPECT_EQ(media_.describes[0].file, ldm::base::ToUtf16(*View(video).download.partialPath))
+        << "the complete file before its move";
+    EXPECT_EQ(View(video).download.status, DownloadStatus::Finalizing);
+    ldm::core::DescribeFinished nothing;  // ffprobe could not say: the file is still fine
+    Send(video, 1, nothing);
+    ASSERT_EQ(engine_.finalizes.size(), 1u);
+    EXPECT_EQ(View(video).download.description, "");
+
+    const DownloadId archive = *Add("http://x.test/files.zip").id;
+    Finish(archive, 1, TransferOutcome::Completed, {{0, 10, 10}}, std::nullopt, 10);
+    EXPECT_EQ(media_.describes.size(), 1u);
+    EXPECT_EQ(engine_.finalizes.size(), 2u);
+    const DownloadId subtitles = *Add("http://x.test/film.srt").id;
+    Finish(subtitles, 1, TransferOutcome::Completed, {{0, 10, 10}}, std::nullopt, 10);
+    EXPECT_EQ(media_.describes.size(), 1u) << "subtitles have nothing to describe";
+}
+
+TEST_F(CoordinatorTest, StoppingOrDeletingWhileDescribingKeepsOrRemovesTheFile)
+{
+    const DownloadId stopped = *Add("http://x.test/a.mp3").id;
+    Finish(stopped, 1, TransferOutcome::Completed, {{0, 10, 10}}, std::nullopt, 10);
+    coordinator_->Handle(ldm::core::StopCommand{{stopped}});
+    ASSERT_EQ(media_.cancels.size(), 1u);
+    ldm::core::DescribeFinished cancelled;
+    cancelled.stopped = true;
+    Send(stopped, 1, cancelled);
+    EXPECT_EQ(View(stopped).download.status, DownloadStatus::Paused);
+    EXPECT_TRUE(engine_.finalizes.empty());
+    coordinator_->Handle(ldm::core::ResumeCommand{{stopped}});
+    EXPECT_EQ(engine_.starts.size(), 2u) << "Resume finishes it again";
+
+    const DownloadId deleted = *Add("http://x.test/b.mp3").id;
+    Finish(deleted, 1, TransferOutcome::Completed, {{0, 10, 10}}, std::nullopt, 10);
+    coordinator_->Handle(ldm::core::DeleteCommand{{deleted}, false});
+    EXPECT_TRUE(InSnapshot(deleted)) << "the file is still being read";
+    Send(deleted, 1, cancelled);
+    EXPECT_FALSE(InSnapshot(deleted));
 }
 
 TEST_F(CoordinatorTest, SpeculativeAddKeepsAGivenFolderWhenTheServerNamesTheFile)

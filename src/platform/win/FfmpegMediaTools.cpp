@@ -103,45 +103,69 @@ FfmpegMediaTools::~FfmpegMediaTools()
     }
 }
 
-void FfmpegMediaTools::Mux(core::MuxRequest request)
+FfmpegMediaTools::JobKey FfmpegMediaTools::KeyOf(const Job& job)
+{
+    return std::visit([](const auto& request) { return JobKey{request.id, request.epoch}; }, job);
+}
+
+core::EnginePayload FfmpegMediaTools::StoppedAnswer(const Job& job)
+{
+    if (std::holds_alternative<core::DescribeRequest>(job)) {
+        core::DescribeFinished stopped;
+        stopped.stopped = true;
+        return stopped;
+    }
+    core::MuxFinished stopped;
+    stopped.stopped = true;
+    return stopped;
+}
+
+void FfmpegMediaTools::Enqueue(Job job)
 {
     {
         std::lock_guard lock(mutex_);
         if (stopping_) {
             return;
         }
-        jobs_.push_back(std::move(request));
+        jobs_.push_back(std::move(job));
     }
     wake_.notify_one();
 }
 
+void FfmpegMediaTools::Mux(core::MuxRequest request)
+{
+    Enqueue(std::move(request));
+}
+
+void FfmpegMediaTools::Describe(core::DescribeRequest request)
+{
+    Enqueue(std::move(request));
+}
+
 void FfmpegMediaTools::Cancel(model::DownloadId id, std::int64_t epoch)
 {
-    std::optional<core::MuxRequest> dropped;
+    std::optional<Job> dropped;
     {
         std::lock_guard lock(mutex_);
         if (current_ && *current_ == JobKey{id, epoch}) {
             ::SetEvent(currentStop_);
             return;
         }
-        const auto queued = std::find_if(jobs_.begin(), jobs_.end(), [&](const core::MuxRequest& job) {
-            return job.id == id && job.epoch == epoch;
-        });
+        const auto queued =
+            std::find_if(jobs_.begin(), jobs_.end(), [&](const Job& job) { return KeyOf(job) == JobKey{id, epoch}; });
         if (queued == jobs_.end()) {
             return;
         }
         dropped = std::move(*queued);
         jobs_.erase(queued);
     }
-    core::MuxFinished stopped;
-    stopped.stopped = true;
-    listener_.OnEngineEvent(core::EngineEvent{dropped->id, dropped->epoch, std::move(stopped)});
+    listener_.OnEngineEvent(core::EngineEvent{id, epoch, StoppedAnswer(*dropped)});
 }
 
 void FfmpegMediaTools::RunWorker()
 {
     while (true) {
-        core::MuxRequest job;
+        std::optional<Job> job;
         EventHandle stop;
         {
             std::unique_lock lock(mutex_);
@@ -151,10 +175,17 @@ void FfmpegMediaTools::RunWorker()
             }
             job = std::move(jobs_.front());
             jobs_.pop_front();
-            current_ = JobKey{job.id, job.epoch};
+            current_ = KeyOf(*job);
             currentStop_ = stop.Get();
         }
-        core::MuxFinished finished = Process(job, stop.Get());
+        core::EnginePayload answer;
+        if (const auto* mux = std::get_if<core::MuxRequest>(&*job)) {
+            answer = Process(*mux, stop.Get());
+        } else {
+            core::DescribeFinished described;
+            described.mediaInfo = DescribeFile(std::get<core::DescribeRequest>(*job).file, stop.Get());
+            answer = std::move(described);
+        }
         {
             std::lock_guard lock(mutex_);
             current_.reset();
@@ -164,10 +195,10 @@ void FfmpegMediaTools::RunWorker()
             }
         }
         if (::WaitForSingleObject(stop.Get(), 0) == WAIT_OBJECT_0) {
-            finished = core::MuxFinished{};
-            finished.stopped = true;
+            answer = StoppedAnswer(*job);
         }
-        listener_.OnEngineEvent(core::EngineEvent{job.id, job.epoch, std::move(finished)});
+        const JobKey key = KeyOf(*job);
+        listener_.OnEngineEvent(core::EngineEvent{key.first, key.second, std::move(answer)});
     }
 }
 
@@ -244,7 +275,7 @@ core::MuxFinished FfmpegMediaTools::JoinStreams(const core::MuxRequest& request,
             result.output = output;
             result.extension = extension;
             result.bytes = *size;
-            result.mediaInfo = Describe(output, stop);
+            result.mediaInfo = DescribeFile(output, stop);
             return result;
         }
         lastError = FirstLine(ran.Value().output);
@@ -314,7 +345,7 @@ core::MuxFinished FfmpegMediaTools::ConvertSubtitles(const core::MuxRequest& req
     return result;
 }
 
-std::string FfmpegMediaTools::Describe(const std::filesystem::path& file, HANDLE stop) const
+std::string FfmpegMediaTools::DescribeFile(const std::filesystem::path& file, HANDLE stop) const
 {
     ChildProcessRequest run;
     run.program = ffprobe_;
