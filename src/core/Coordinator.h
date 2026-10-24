@@ -133,6 +133,18 @@ private:
         std::optional<TransferFailure> recordingFailure;  // the run stops, then the download fails
         bool finishRecording = false;     // join what is on disk once the run stopped
 
+        // Synchronization (checklist Q-05): what the completed download was before its check, put
+        // back when the server's file did not change or nothing of a new one arrived.
+        struct SyncCheck {
+            std::vector<model::Segment> segments;
+            std::optional<std::int64_t> totalSize;
+            std::optional<bool> resumable;
+            model::Validators validators;
+            std::optional<std::string> finalUrl;
+            std::optional<std::int64_t> completedAtMs;
+        };
+        std::optional<SyncCheck> syncCheck;
+
         std::shared_ptr<const DownloadView> view;  // rebuilt when `viewDirty`
         bool viewDirty = true;
     };
@@ -190,6 +202,12 @@ private:
     // failed member of a running queue counts the failure and moves behind the others.
     void LeaveQueueOnCompletion(Entry& entry);
     void CountQueueFailure(Entry& entry);
+    // Downloads a completed member of the synchronization queue again only when the server's file
+    // changed: a conditional first request (M4 design section 5).
+    void StartSyncCheck(Entry& entry);
+    // The end of a check's run. Returns true when it put the completed download back: the file did
+    // not change, or the check ended before anything of a new file arrived.
+    [[nodiscard]] bool EndSyncCheck(Entry& entry, TransferOutcome outcome, const std::optional<TransferFailure>& failure);
 
     // Engine event handlers.
     void OnResponseInfo(Entry& entry, const ResponseInfo& info);
@@ -277,6 +295,8 @@ private:
     // stopped when LDM starts.
     struct QueueRun {
         std::set<model::DownloadId> stoppedByUser;  // not started again in this run
+        // Synchronization queue: members started in this run, so each is checked once per run.
+        std::set<model::DownloadId> started;
         bool startedAny = false;  // the completion action runs only after the queue downloaded something
     };
     std::map<model::QueueId, QueueRun> queueRuns_;

@@ -18,11 +18,10 @@ bool IsStartable(const model::Queue& queue, const QueueMember& member) noexcept
     switch (member.status) {
     case model::DownloadStatus::Queued:
     case model::DownloadStatus::Paused:
+    case model::DownloadStatus::Completed:
         return true;
     case model::DownloadStatus::Failed:
         return HasRetriesLeft(queue, member.failures);
-    case model::DownloadStatus::Completed:
-        return queue.kind != model::QueueKind::Sync;
     default:
         return false;
     }

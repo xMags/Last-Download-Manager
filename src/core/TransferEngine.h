@@ -55,6 +55,11 @@ struct TransferRequest {
     // Refuse connections to loopback and private addresses (core::IsPrivateIpv4): a stream from a
     // public host. Not checked through a proxy, which connects on the user's behalf.
     bool refusePrivateAddresses = false;
+    // Synchronization (checklist Q-05): a fresh run that downloads only when the file on the server
+    // differs from the one described by `validators` and `knownSize`. The first request asks with
+    // If-None-Match or If-Modified-Since; a 304 answer, or without validators the same size, ends
+    // the run as TransferOutcome::Unchanged with nothing written to the partial file.
+    bool skipIfUnchanged = false;
 };
 
 // One piece of a stream's track to fetch into its own file (M3 design section 6).
@@ -189,6 +194,7 @@ enum class TransferOutcome {
     Completed,  // every byte is flushed and the partial file is closed
     Stopped,    // acknowledged Stop(); the partial file is closed
     Failed,     // the partial file is closed
+    Unchanged,  // TransferRequest::skipIfUnchanged: the server's file is the known one; the empty partial file is closed
 };
 
 struct TransferFinished {

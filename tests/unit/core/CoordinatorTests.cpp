@@ -2081,6 +2081,111 @@ TEST_F(QueueTest, AQueueWaitsForTheQuotaInsteadOfFinishing)
 
 
 // ---------------------------------------------------------------------------------------------
+// Synchronization queue (M4 design section 5)
+
+class SyncTest : public QueueTest {
+protected:
+    // A completed download of 4 bytes with an ETag, now a member of the synchronization queue.
+    DownloadId CompletedMember()
+    {
+        const DownloadId id = *Add("http://x.test/a.dat").id;
+        ResponseInfo info;
+        info.finalUrl = "http://x.test/a.dat";
+        info.totalSize = 4;
+        info.resumable = true;
+        info.validators.etag = "\"v1\"";
+        Send(id, 1, info);
+        Complete(id, 1);
+        files_.Put(kRoot / L"a.dat", 4);
+        coordinator_->Handle(ldm::core::SetQueueCommand{{id}, SyncQueue()});
+        return id;
+    }
+};
+
+TEST_F(SyncTest, AnUnchangedFileIsLeftAlone)
+{
+    const DownloadId id = CompletedMember();
+    coordinator_->Handle(ldm::core::StartQueueCommand{SyncQueue()});
+    ASSERT_EQ(engine_.starts.size(), 2u);
+    const auto& check = engine_.starts.back();
+    EXPECT_TRUE(check.skipIfUnchanged);
+    EXPECT_EQ(check.validators.etag, "\"v1\"");
+    EXPECT_EQ(check.knownSize, 4);
+    EXPECT_TRUE(check.segments.empty());
+    EXPECT_NE(check.partialPath, kRoot / L"a.dat");
+    files_.Put(check.partialPath, 0);
+
+    Finish(id, 2, TransferOutcome::Unchanged);
+    Publish();
+    const auto& view = View(id);
+    EXPECT_EQ(view.download.status, DownloadStatus::Completed);
+    EXPECT_EQ(view.download.lastResult, "Unchanged on the server");
+    EXPECT_EQ(view.download.DownloadedBytes(), 4);
+    EXPECT_EQ(view.download.validators.etag, "\"v1\"");
+    EXPECT_FALSE(view.download.partialPath);
+    EXPECT_FALSE(files_.Exists(check.partialPath)) << "the empty partial file goes";
+    EXPECT_TRUE(files_.Exists(kRoot / L"a.dat"));
+    EXPECT_EQ(engine_.finalizes.size(), 1u);
+    EXPECT_EQ(observer_.All<ldm::core::DownloadCompleted>().size(), 1u);
+    EXPECT_EQ(view.download.queueId, SyncQueue());
+    EXPECT_EQ(observer_.All<ldm::core::QueueFinished>().size(), 1u) << "checked once per run";
+    EXPECT_EQ(Stored(id)->status, DownloadStatus::Completed);
+
+    coordinator_->Handle(ldm::core::StartQueueCommand{SyncQueue()});
+    EXPECT_EQ(engine_.starts.size(), 3u) << "and again on the next run";
+}
+
+TEST_F(SyncTest, AChangedFileReplacesTheOldOneAndStaysInTheQueue)
+{
+    const DownloadId id = CompletedMember();
+    coordinator_->Handle(ldm::core::StartQueueCommand{SyncQueue()});
+    Finish(id, 2, TransferOutcome::Completed, {{0, 6, 6}}, std::nullopt, 6);
+    EXPECT_FALSE(files_.Exists(kRoot / L"a.dat")) << "replaced once the new copy is complete";
+    EXPECT_EQ(engine_.finalizes.back().finalPath, kRoot / L"a.dat");
+    Send(id, 2, ldm::core::FinalizeFinished{});
+    Publish();
+    EXPECT_EQ(View(id).download.status, DownloadStatus::Completed);
+    EXPECT_EQ(View(id).download.totalSize, 6);
+    EXPECT_EQ(View(id).download.queueId, SyncQueue());
+    EXPECT_EQ(observer_.All<ldm::core::DownloadCompleted>().size(), 2u);
+    EXPECT_EQ(engine_.starts.size(), 2u);
+    EXPECT_EQ(observer_.All<ldm::core::QueueFinished>().size(), 1u);
+}
+
+TEST_F(SyncTest, ACheckThatEndsBeforeAnythingArrivedKeepsTheCompletedDownload)
+{
+    const DownloadId id = CompletedMember();
+    coordinator_->Handle(ldm::core::StartQueueCommand{SyncQueue()});
+    Finish(id, 2, TransferOutcome::Failed, {}, notFound);
+    EXPECT_EQ(View(id).download.status, DownloadStatus::Completed);
+    EXPECT_EQ(View(id).download.DownloadedBytes(), 4);
+    ASSERT_TRUE(View(id).download.lastResult);
+    EXPECT_TRUE(View(id).download.lastResult->starts_with("Could not check the server for changes"));
+    EXPECT_TRUE(observer_.All<ldm::core::DownloadFailed>().empty()) << "a failed check is no failed download";
+
+    coordinator_->Handle(ldm::core::StartQueueCommand{SyncQueue()});
+    coordinator_->Handle(ldm::core::StopQueueCommand{SyncQueue()});
+    Finish(id, 3, TransferOutcome::Stopped);
+    EXPECT_EQ(View(id).download.status, DownloadStatus::Completed);
+    EXPECT_EQ(View(id).download.lastResult, "The check for changes was stopped");
+}
+
+TEST_F(SyncTest, ACheckStoppedWithPartOfANewFileContinuesLikeARedownload)
+{
+    const DownloadId id = CompletedMember();
+    coordinator_->Handle(ldm::core::StartQueueCommand{SyncQueue()});
+    coordinator_->Handle(ldm::core::StopQueueCommand{SyncQueue()});
+    Finish(id, 2, TransferOutcome::Stopped, {{0, 6, 3}}, std::nullopt, 6);
+    EXPECT_EQ(View(id).download.status, DownloadStatus::Paused);
+    EXPECT_EQ(View(id).download.DownloadedBytes(), 3);
+    EXPECT_TRUE(files_.Exists(kRoot / L"a.dat")) << "the old file stays until the new one is complete";
+
+    coordinator_->Handle(ldm::core::ResumeCommand{{id}});
+    EXPECT_FALSE(engine_.starts.back().skipIfUnchanged);
+    EXPECT_EQ(engine_.starts.back().segments.size(), 1u);
+}
+
+// ---------------------------------------------------------------------------------------------
 // Queue schedules (M4 design section 4). The fake clock starts on a Friday at 08:00 UTC.
 
 constexpr std::int64_t kMinuteMs = 60'000;

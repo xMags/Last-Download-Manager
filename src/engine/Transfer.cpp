@@ -292,6 +292,16 @@ void Transfer::StartConnection(Segment& segment, bool probe, Clock::time_point n
             headers = curl_slist_append(headers, ("If-Range: " + *ifRange).c_str());
         }
     }
+    if (probe && !resumeRun_ && http_ && request_.skipIfUnchanged && !request_.post) {
+        // Synchronization asks the server whether its file is still the known one (RFC 9110 13.1).
+        if (request_.validators.etag) {
+            headers = curl_slist_append(headers, ("If-None-Match: " + *request_.validators.etag).c_str());
+            conditionalRequest_ = true;
+        } else if (request_.validators.lastModified && !request_.ignoreLastModified) {
+            headers = curl_slist_append(headers, ("If-Modified-Since: " + *request_.validators.lastModified).c_str());
+            conditionalRequest_ = true;
+        }
+    }
     if (request_.post) {
         // The form is sent again as the browser sent it. A redirect after it continues with GET, as
         // browsers do.
@@ -466,6 +476,10 @@ bool Transfer::AcceptResponse(Connection& connection)
     }
     if (http_) {
         const int status = connection.headers.status;
+        if (status == 304 && connection.probe && conditionalRequest_) {
+            unchangedOnServer_ = true;  // OnConnectionDone ends the run
+            return false;
+        }
         if (status == 200 && connection.ranged && !connection.probe) {
             connection.rangeRejected = true;
             return false;
@@ -511,6 +525,11 @@ bool Transfer::AcceptFirstResponse(Connection& connection, Segment& segment)
             size = CurlContentLength(easy);
             rangesPossible = size.has_value();
             resumable = rangesPossible;
+        }
+        if (request_.skipIfUnchanged && !conditionalRequest_ && size && size == request_.knownSize) {
+            // Nothing to ask the server with: the same size counts as the same file.
+            unchangedOnServer_ = true;
+            return false;
         }
         totalSize_ = size;
         rangesPossible_ = rangesPossible;
@@ -607,6 +626,10 @@ void Transfer::OnConnectionDone(CURL* easy, CURLcode result, Clock::time_point n
     RemoveConnection(*connection);  // `connection` is destroyed here
 
     if (phase_ == Phase::Closing || phase_ == Phase::Done || closeRequested_) {
+        return;
+    }
+    if (unchangedOnServer_) {
+        BeginClosing(core::TransferOutcome::Unchanged);
         return;
     }
     Segment* segment = FindSegment(segmentKey);
