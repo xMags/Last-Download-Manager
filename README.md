@@ -88,6 +88,7 @@
 - Download queues that run a set number of files at a time, retry failed ones, and start and stop at the times you set, once or on chosen weekdays.
 - A synchronization queue that checks finished files for changes on the server and downloads only what changed.
 - After a queue finishes: exit LDM, sleep, hibernate or shut down, with a countdown you can cancel.
+- How it works: [Queues and the Scheduler](docs/help/queues.md).
 
 ### Site Grabber
 
@@ -95,6 +96,7 @@
 - Filters by file type, size, folder and site, then downloads the files you check, keeping the site's folders if you like.
 - Saves whole pages for offline browsing, with their links pointing at the saved copies.
 - Signs in with a user name and password, or with the cookies of your browser, and runs on a schedule.
+- How it works: [Site Grabber](docs/help/site-grabber.md).
 
 ### Windows app
 
