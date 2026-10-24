@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static" mediaPresentationDuration="PT0H0M10.000S">
+  <Period duration="PT10S">
+    <AdaptationSet mimeType="video/mp4" codecs="avc1.640028" width="1920" height="1080">
+      <SegmentTemplate timescale="90000" presentationTimeOffset="900000"
+                       initialization="init-$Bandwidth$.mp4" media="v-$Bandwidth$-$Time$.m4s">
+        <SegmentTimeline>
+          <S t="900000" d="180000" r="2"/>
+          <S d="90000"/>
+          <S d="90000" r="-1"/>
+        </SegmentTimeline>
+      </SegmentTemplate>
+      <Representation id="v" bandwidth="5000000"/>
+    </AdaptationSet>
+  </Period>
+</MPD>
