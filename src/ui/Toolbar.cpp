@@ -31,8 +31,8 @@ constexpr wchar_t kCalendar = 0xE787;
 constexpr wchar_t kList = 0xE8FD;
 constexpr wchar_t kPlay = 0xE768;
 
-// LDM's buttons in their default order (gap G-1), as thin gradient outlines. Five download
-// actions use embedded icons (src/resources/toolbar); other icons use local drawings. "Tell a
+// LDM's buttons in their default order (gap G-1), as thin gradient outlines. Nine toolbar
+// actions use embedded icons (src/resources/toolbar); Add URL uses a local drawing. "Tell a
 // Friend" is excluded by the checklist.
 constexpr std::array<ButtonInfo, 10> kButtons{{
     {ID_TASKS_ADD_URL, {{}, RGB(0x4C, 0xB8, 0x6E), RGB(0x2F, 0x8C, 0xC4), IconShape::OutlinePlus}, L"Add URL"},
@@ -69,12 +69,16 @@ struct ResourceIcon {
     int disabled;
 };
 
-constexpr std::array<ResourceIcon, 5> kResourceIcons{{
+constexpr std::array<ResourceIcon, 9> kResourceIcons{{
     {ID_FILE_DOWNLOAD_NOW, IDI_TOOLBAR_RESUME, IDI_TOOLBAR_RESUME_DISABLED},
     {ID_FILE_STOP, IDI_TOOLBAR_STOP, IDI_TOOLBAR_STOP_DISABLED},
     {ID_DOWNLOADS_STOP_ALL, IDI_TOOLBAR_STOP_ALL, IDI_TOOLBAR_STOP_ALL_DISABLED},
     {ID_FILE_REMOVE, IDI_TOOLBAR_DELETE, IDI_TOOLBAR_DELETE_DISABLED},
     {ID_DOWNLOADS_DELETE_COMPLETED, IDI_TOOLBAR_DELETE_COMPLETED, IDI_TOOLBAR_DELETE_COMPLETED_DISABLED},
+    {ID_DOWNLOADS_OPTIONS, IDI_TOOLBAR_OPTIONS, IDI_TOOLBAR_OPTIONS_DISABLED},
+    {ID_DOWNLOADS_SCHEDULER, IDI_TOOLBAR_SCHEDULER, IDI_TOOLBAR_SCHEDULER_DISABLED},
+    {ID_DOWNLOADS_START_QUEUE, IDI_TOOLBAR_START_QUEUE, IDI_TOOLBAR_START_QUEUE_DISABLED},
+    {ID_DOWNLOADS_STOP_QUEUE, IDI_TOOLBAR_STOP_QUEUE, IDI_TOOLBAR_STOP_QUEUE_DISABLED},
 }};
 
 void ApplyResourceIcons(HIMAGELIST images, int size, bool disabled)
