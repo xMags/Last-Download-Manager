@@ -18,6 +18,8 @@ namespace ldm::ui {
 // "45 sec", "3 min 05 sec", "2 hour(s) 10 min", "3 day(s) 4 hour(s)"; empty when unknown.
 [[nodiscard]] std::wstring FormatTimeLeft(std::optional<std::int64_t> seconds);
 // Status column: "45.23%" while downloading with a known size, otherwise the state in words.
+// A recording's length: "4:05", or "1:02:03" from an hour on.
+[[nodiscard]] std::wstring FormatRecordedLength(std::int64_t microseconds);
 [[nodiscard]] std::wstring FormatStatus(const core::DownloadView& view);
 // Percentage done, when the size is known.
 [[nodiscard]] std::optional<double> ProgressFraction(const core::DownloadView& view);

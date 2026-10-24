@@ -37,6 +37,8 @@ private:
     void ShowPage(int page);
     void SetDetailsVisible(bool visible);
     void ApplySpeedLimit();
+    // Stop, asking first for a live recording. False when the user cancelled.
+    bool StopThis();
     void DrawSegments(const DRAWITEMSTRUCT& item) const;
     void UpdateConnections(const core::DownloadView& view);
 

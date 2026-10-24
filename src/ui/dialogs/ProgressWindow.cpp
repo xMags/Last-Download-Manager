@@ -4,6 +4,7 @@
 #include "resource.h"
 #include "ui/Format.h"
 #include "ui/Handles.h"
+#include "ui/StopChoice.h"
 
 #include <commctrl.h>
 #include <uxtheme.h>
@@ -173,12 +174,14 @@ void ProgressWindow::Update(const core::DownloadView& view, const model::Setting
         status = L"Retrying: " + base::ToUtf16(view.retrying->message);
     } else if (d.status == model::DownloadStatus::Failed && d.lastResult) {
         status = base::ToUtf16(*d.lastResult);
-    } else if (d.status == model::DownloadStatus::Downloading) {
+    } else if (d.status == model::DownloadStatus::Downloading && !(view.stream && view.stream->live)) {
         status = view.receivedBytes > 0 ? L"Receiving data..." : L"Connecting...";
     }
     SetText(IDC_PROG_STATUS, status);
     if (d.totalSize) {
         SetText(IDC_PROG_SIZE, FormatSize(*d.totalSize));
+    } else if (view.stream && view.stream->live) {
+        SetText(IDC_PROG_SIZE, L"Live recording, " + FormatRecordedLength(view.stream->recordedUs) + L" so far");
     } else if (view.stream && view.stream->estimatedBytes) {
         SetText(IDC_PROG_SIZE, L"about " + FormatSize(*view.stream->estimatedBytes));
     } else {
@@ -193,7 +196,8 @@ void ProgressWindow::Update(const core::DownloadView& view, const model::Setting
     SetText(IDC_PROG_DOWNLOADED, downloaded);
     SetText(IDC_PROG_RATE, FormatSpeed(view.bytesPerSecond));
     SetText(IDC_PROG_LEFT, FormatTimeLeft(view.secondsLeft));
-    SetText(IDC_PROG_RESUME, FormatResumable(d.resumable));
+    // A stream continues piece by piece whatever its server says about ranges.
+    SetText(IDC_PROG_RESUME, view.stream ? std::wstring(L"Yes") : FormatResumable(d.resumable));
     ::SendMessageW(Item(IDC_PROG_BAR), PBM_SETPOS, fraction ? static_cast<WPARAM>(*fraction * 1000.0) : 0, 0);
     SetText(IDC_PROG_PAUSE, IsRunning(d.status) ? L"&Pause" : L"&Start");
     Enable(IDC_PROG_PAUSE, d.status != model::DownloadStatus::Stopping && d.status != model::DownloadStatus::Finalizing);
@@ -283,6 +287,17 @@ void ProgressWindow::ApplySpeedLimit()
         id_, enabled ? std::optional<std::int64_t>(std::int64_t{*kilobytes} * 1024) : std::nullopt});
 }
 
+bool ProgressWindow::StopThis()
+{
+    const core::DownloadView* selected[] = {latest_.get()};
+    const auto ask = [this](const std::wstring& question) { return AskRecordingStop(Handle(), CurrentTheme(), question); };
+    std::vector<core::Command> commands = StopCommands(selected, ask);
+    for (core::Command& command : commands) {
+        callbacks_.post(std::move(command));
+    }
+    return !commands.empty();
+}
+
 bool ProgressWindow::OnCommand(int id, int code, HWND control)
 {
     switch (id) {
@@ -291,15 +306,16 @@ bool ProgressWindow::OnCommand(int id, int code, HWND control)
         return true;
     case IDC_PROG_PAUSE:
         if (latest_ && IsRunning(latest_->download.status)) {
-            callbacks_.post(core::StopCommand{{id_}});
+            (void)StopThis();
         } else {
             callbacks_.post(core::ResumeCommand{{id_}});
         }
         return true;
     case IDCANCEL:
-        // Cancel stops the transfer and closes the window; the download stays in the list.
-        if (latest_ && IsRunning(latest_->download.status)) {
-            callbacks_.post(core::StopCommand{{id_}});
+        // Cancel stops the transfer and closes the window; the download stays in the list. A
+        // live recording asks first, and its Cancel keeps the window open.
+        if (latest_ && IsRunning(latest_->download.status) && !StopThis()) {
+            return true;
         }
         Close(IDCANCEL);
         return true;

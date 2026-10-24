@@ -87,6 +87,24 @@ TEST(MediaPanelMenu, SeveralStreamsGetOneSubmenuEachAndFilesOneLine)
     EXPECT_NE(Named(menu, L"Make the panel bigger"), nullptr) << "in mini mode";
 }
 
+TEST(MediaPanelMenu, LiveQualitiesSayTheyRecordAndLiveDashIsANotice)
+{
+    MediaItem stream = Stream(7);
+    stream.kind = ldm::browser::MediaKind::Hls;
+    stream.offer->live = true;
+    const auto menu = BuildPanelMenu({&stream}, false);
+    ASSERT_FALSE(menu.empty());
+    EXPECT_EQ(menu[0].text, L"1080p H.264 (live)") << "no size: a recording grows while it runs";
+    EXPECT_TRUE(menu[0].action);
+
+    stream.kind = ldm::browser::MediaKind::Dash;
+    const auto dash = BuildPanelMenu({&stream}, false);
+    ASSERT_FALSE(dash.empty());
+    EXPECT_FALSE(dash[0].enabled);
+    EXPECT_FALSE(dash[0].action);
+    EXPECT_NE(dash[0].text.find(L"live DASH"), std::wstring::npos);
+}
+
 TEST(MediaPanelMenu, AProtectedStreamIsANoticeOnly)
 {
     MediaItem stream = Stream(4);

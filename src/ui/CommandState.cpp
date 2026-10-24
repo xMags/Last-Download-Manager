@@ -1,5 +1,7 @@
 #include "ui/CommandState.h"
 
+#include "ui/StopChoice.h"
+
 #include <algorithm>
 
 namespace ldm::ui {
@@ -27,7 +29,9 @@ CommandState ComputeCommandState(std::span<const core::DownloadView* const> sele
     const bool single = selected.size() == 1;
     const core::DownloadView* only = single ? selected.front() : nullptr;
     state.resume = std::any_of(selected.begin(), selected.end(), [](const auto* v) { return Startable(*v); });
-    state.stop = std::any_of(selected.begin(), selected.end(), [](const auto* v) { return Running(*v); });
+    // A paused live recording can be stopped too: Stop is where it is finished (checklist P-07).
+    state.stop = std::any_of(selected.begin(), selected.end(),
+                             [](const auto* v) { return Running(*v) || IsLiveRecording(*v); });
     state.remove = std::any_of(selected.begin(), selected.end(),
                                [](const auto* v) { return v->download.status != DownloadStatus::Deleting; });
     if (only != nullptr) {

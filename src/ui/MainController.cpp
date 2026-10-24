@@ -5,6 +5,7 @@
 #include "ui/CommandState.h"
 #include "ui/Format.h"
 #include "ui/History.h"
+#include "ui/StopChoice.h"
 #include "ui/dialogs/CategoryDialog.h"
 #include "ui/dialogs/ConfirmDialogs.h"
 #include "core/Url.h"
@@ -154,9 +155,15 @@ bool MainController::OnCommand(int id)
         }
         return true;
     }
-    case ID_FILE_STOP:
-        Post(core::StopCommand{selectedIds()});
+    case ID_FILE_STOP: {
+        const auto ask = [this](const std::wstring& question) {
+            return AskRecordingStop(context_.owner, *context_.theme, question);
+        };
+        for (core::Command& command : StopCommands(Selection(), ask)) {
+            Post(std::move(command));
+        }
         return true;
+    }
     case ID_FILE_REMOVE:
         RemoveSelected();
         return true;

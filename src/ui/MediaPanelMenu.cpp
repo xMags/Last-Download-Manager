@@ -76,6 +76,11 @@ std::vector<PanelMenuItem> StreamLines(const MediaItem& item)
         lines.push_back(Notice(DrmText(*item.qualities.drm)));
         return lines;
     }
+    const bool live = item.offer && item.offer->live;
+    if (live && item.kind == browser::MediaKind::Dash) {
+        lines.push_back(Notice(L"This is a live DASH stream, which LDM cannot record"));
+        return lines;
+    }
     PanelMenuItem videoOnly;
     videoOnly.text = L"Video only";
     PanelMenuItem audioOnly;
@@ -83,7 +88,9 @@ std::vector<PanelMenuItem> StreamLines(const MediaItem& item)
     const auto& entries = item.qualities.entries;
     for (size_t i = 0; i < entries.size(); ++i) {
         const media::QualityEntry& entry = entries[i];
-        PanelMenuItem line = Command(WithSize(base::ToUtf16(media::QualityLabel(entry)), entry.approximateBytes, true),
+        // A live quality starts a recording, whose size depends on how long it runs.
+        const std::wstring label = base::ToUtf16(media::QualityLabel(entry));
+        PanelMenuItem line = Command(live ? label + L" (live)" : WithSize(label, entry.approximateBytes, true),
                                      PanelAction{PanelAction::Kind::DownloadStream, item.key, i});
         if (entry.kind == media::QualityKind::Video) {
             lines.push_back(std::move(line));
