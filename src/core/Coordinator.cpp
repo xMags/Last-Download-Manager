@@ -2424,11 +2424,10 @@ void Coordinator::PublishSnapshot()
                 stream.recordedUs = summary.recordedUs;
                 // From what arrived once there is enough of it; the panel's estimate before that.
                 // A recording has no end to estimate towards: it is as large as what it recorded.
-                constexpr double kEnoughToEstimate = 0.02;
                 if (summary.live) {
                     stream.estimatedBytes = summary.bytesDone;
-                } else if (summary.fraction >= kEnoughToEstimate && summary.bytesDone > 0) {
-                    stream.estimatedBytes = static_cast<std::int64_t>(static_cast<double>(summary.bytesDone) / summary.fraction);
+                } else if (summary.estimatedBytes) {
+                    stream.estimatedBytes = summary.estimatedBytes;
                 } else {
                     stream.estimatedBytes = entry->approximateBytes;
                 }

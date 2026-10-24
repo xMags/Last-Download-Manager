@@ -374,8 +374,19 @@ StreamSummary SummarizeStream(const model::Download& download)
     const model::MediaTrack* measured = video != download.tracks.end() ? &*video
                                         : download.tracks.empty()     ? nullptr
                                                                       : &download.tracks.front();
+    // Below this much of a track on disk, its bytes say too little about its size.
+    constexpr double kEnoughToEstimate = 0.02;
     double fractions = 0;
     bool allListed = true;
+    double estimatedTotal = 0;  // of every track, while each one can be estimated
+    bool allEstimated = !download.tracks.empty();
+    const auto estimate = [&](std::int64_t bytes, double fraction) {
+        if (fraction >= kEnoughToEstimate && bytes > 0) {
+            estimatedTotal += static_cast<double>(bytes) / std::min(fraction, 1.0);
+        } else {
+            allEstimated = false;
+        }
+    };
     for (const model::MediaTrack& track : download.tracks) {
         if (track.wholeFile) {
             const std::int64_t end = RangesEnd(track.ranges);
@@ -384,15 +395,23 @@ StreamSummary SummarizeStream(const model::Download& download)
             summary.bytesDone += done;
             const bool complete = end > 0 && done >= end;
             summary.piecesDone += complete ? 1 : 0;
-            fractions += end > 0 ? static_cast<double>(done) / static_cast<double>(end) : 0.0;
+            const double fraction = end > 0 ? static_cast<double>(done) / static_cast<double>(end) : 0.0;
+            fractions += fraction;
+            if (end > 0) {
+                estimatedTotal += static_cast<double>(end);  // its size is known
+            } else {
+                allEstimated = false;
+            }
             continue;
         }
         if (!track.Listed()) {
             allListed = false;
+            allEstimated = false;
             continue;
         }
         std::int64_t totalUs = 0;
         std::int64_t doneUs = 0;
+        std::int64_t trackBytes = 0;
         int done = 0;
         int wanted = 0;
         for (const model::MediaPiece& piece : track.pieces) {
@@ -404,23 +423,31 @@ StreamSummary SummarizeStream(const model::Download& download)
             if (piece.done) {
                 ++done;
                 doneUs += piece.durationUs;
-                summary.bytesDone += piece.bytes.value_or(0);
+                trackBytes += piece.bytes.value_or(0);
             }
         }
         if (&track == measured) {
             summary.recordedUs = doneUs;
         }
+        summary.bytesDone += trackBytes;
         summary.piecesDone += done;
         summary.piecesTotal += wanted;
-        if (wanted > 0) {
-            fractions += totalUs > 0 ? static_cast<double>(doneUs) / static_cast<double>(totalUs)
-                                     : static_cast<double>(done) / static_cast<double>(wanted);
-        }
+        const double fraction = wanted == 0 ? 0.0
+                                : totalUs > 0 ? static_cast<double>(doneUs) / static_cast<double>(totalUs)
+                                              : static_cast<double>(done) / static_cast<double>(wanted);
+        fractions += fraction;
+        estimate(trackBytes, fraction);
     }
     if (!allListed) {
         summary.piecesTotal = 0;
     }
-    summary.fraction = download.tracks.empty() ? 0.0 : std::clamp(fractions / static_cast<double>(download.tracks.size()), 0.0, 1.0);
+    if (allEstimated && estimatedTotal > 0) {
+        summary.estimatedBytes = static_cast<std::int64_t>(estimatedTotal);
+        summary.fraction = std::clamp(static_cast<double>(summary.bytesDone) / estimatedTotal, 0.0, 1.0);
+    } else {
+        summary.fraction = download.tracks.empty() ? 0.0
+                                                   : std::clamp(fractions / static_cast<double>(download.tracks.size()), 0.0, 1.0);
+    }
     return summary;
 }
 
