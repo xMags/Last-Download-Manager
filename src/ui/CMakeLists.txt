@@ -47,6 +47,8 @@ add_library(ldm_ui STATIC
     ListModel.h
     MainController.cpp
     MainController.h
+    MediaCatalog.cpp
+    MediaCatalog.h
     MainWindow.cpp
     MainWindow.h
     PageLinks.cpp
@@ -96,7 +98,7 @@ add_library(ldm_ui STATIC
     dialogs/PropertiesDialog.cpp
     dialogs/PropertiesDialog.h)
 target_link_libraries(ldm_ui
-    PUBLIC ldm_browser ldm_core
+    PUBLIC ldm_browser ldm_core ldm_media
     PRIVATE nlohmann_json::nlohmann_json comctl32 uxtheme dwmapi shell32 comdlg32 ole32 shcore)
 target_include_directories(ldm_ui PRIVATE ${PROJECT_SOURCE_DIR}/resources)
 target_compile_definitions(ldm_ui PRIVATE "LDM_VERSION_WIDE=L\"${PROJECT_VERSION}\"")
