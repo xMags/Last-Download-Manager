@@ -598,6 +598,7 @@ void Coordinator::Add(const AddDownloadCommand& command)
     }
     download.projectId = command.projectId;
     download.listed = command.listed || !command.projectId;  // only a Grabber download starts hidden
+    download.replaceFinalFile = replaceFinal;
 
     auto inserted = ports_.store->InsertDownload(download);
     if (!inserted) {
@@ -610,7 +611,6 @@ void Coordinator::Add(const AddDownloadCommand& command)
     entry.userNamed = command.fileName.has_value() || overwriteName.has_value();
     entry.userChoseCategory = command.categoryId.has_value();
     entry.userChoseFolder = command.saveDir.has_value();
-    entry.replaceFinalFile = replaceFinal;
     entry.lastCheckpoint = ports_.clock->Steady();
     if (command.media && command.media->approximateBytes && *command.media->approximateBytes > 0) {
         entry.approximateBytes = command.media->approximateBytes;
@@ -839,7 +839,7 @@ void Coordinator::Redownload(model::DownloadId id)
     }
     entry->syncCheck.reset();  // the user wants the file again, whether it changed or not
     if (entry->download.status == DownloadStatus::Completed) {
-        entry->replaceFinalFile = true;
+        entry->download.replaceFinalFile = true;
         entry->download.completedAtMs.reset();
     }
     ResetProgress(*entry);
@@ -1481,10 +1481,11 @@ void Coordinator::OnFinalized(Entry& entry, const FinalizeFinished& finalized)
     d.cookieSecret.clear();  // design decision 3: browser cookies and form data are kept only until completion
     d.postSecret.clear();
     d.postContentType.reset();
-    entry.replaceFinalFile = false;
+    entry.download.replaceFinalFile = false;
     entry.finalizeAttempts = 0;
     entry.automaticRestarts = 0;
     entry.forcedMaxConnections.reset();
+    NoteQueueWorkDone(entry);
     LeaveQueueOnCompletion(entry);
     Save(entry);
     MarkChanged(entry);
@@ -1760,7 +1761,7 @@ void Coordinator::BeginFinalize(Entry& entry)
     model::Download& d = entry.download;
     d.status = DownloadStatus::Finalizing;
     const std::filesystem::path target = FinalPath(d);
-    if (entry.replaceFinalFile && ports_.fileSystem->Exists(target)) {
+    if (entry.download.replaceFinalFile && ports_.fileSystem->Exists(target)) {
         if (base::Status removed = ports_.fileSystem->Remove(target); !removed) {
             Fail(entry, TransferFailure{FailureReason::PermissionDenied, FailureClass::NeedsUser, 0,
                                         "the existing file could not be replaced: " + removed.GetError().message});
@@ -1788,6 +1789,11 @@ void Coordinator::BeginFinalize(Entry& entry)
 
 void Coordinator::Fail(Entry& entry, const TransferFailure& failure)
 {
+    // A synchronization check that failed before anything of a new file arrived leaves the
+    // completed download as it was, with the reason in Properties: no failure to report or count.
+    if (entry.syncCheck && EndSyncCheck(entry, TransferOutcome::Failed, failure)) {
+        return;
+    }
     model::Download& d = entry.download;
     d.status = DownloadStatus::Failed;
     d.lastResult = DescribeFailure(failure);
@@ -2345,6 +2351,25 @@ void Coordinator::Save(Entry& entry)
             ReportError("Download state could not be saved: " + saved.GetError().message);
         }
         entry.unsavedPieces.clear();
+    }
+    if (entry.syncCheck && entry.download.DownloadedBytes() == 0) {
+        // A synchronization check that received nothing yet is stored as the completed download it
+        // checks, so a crash during the check leaves that download complete (M4 design section 5).
+        model::Download stored = entry.download;
+        const Entry::SyncCheck& check = *entry.syncCheck;
+        stored.segments = check.segments;
+        stored.totalSize = check.totalSize;
+        stored.resumable = check.resumable;
+        stored.validators = check.validators;
+        stored.finalUrl = check.finalUrl;
+        stored.completedAtMs = check.completedAtMs;
+        stored.status = DownloadStatus::Completed;
+        stored.partialPath.reset();
+        stored.replaceFinalFile = false;
+        if (base::Status saved = ports_.store->SaveDownload(stored); !saved) {
+            ReportError("Download state could not be saved: " + saved.GetError().message);
+        }
+        return;
     }
     if (base::Status saved = ports_.store->SaveDownload(entry.download); !saved) {
         ReportError("Download state could not be saved: " + saved.GetError().message);

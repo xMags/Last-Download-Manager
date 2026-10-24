@@ -256,6 +256,11 @@ CREATE INDEX grabber_items_download ON grabber_items(download_id) WHERE download
 ALTER TABLE downloads ADD COLUMN project_id INTEGER REFERENCES grabber_projects(id) ON DELETE SET NULL;
 ALTER TABLE downloads ADD COLUMN listed INTEGER NOT NULL DEFAULT 1 CHECK (listed IN (0, 1));
 )sql"},
+    // Whether a download replaces the file at its destination when it completes, kept across
+    // restarts (it was only in memory before).
+    Migration{10, R"sql(
+ALTER TABLE downloads ADD COLUMN replace_final INTEGER NOT NULL DEFAULT 0 CHECK (replace_final IN (0, 1));
+)sql"},
 };
 
 base::Result<int> CurrentVersion(Connection& connection)

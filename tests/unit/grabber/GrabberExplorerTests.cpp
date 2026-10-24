@@ -780,6 +780,29 @@ TEST_F(GrabberExplorerTest, RunsProjectSchedules)
     EXPECT_TRUE(finished[0].scheduled);
 }
 
+TEST_F(GrabberExplorerTest, AScheduleWhoseStopMeetsItsStartStillRuns)
+{
+    Start();
+    Page("https://example.com/", R"(<a href="a.zip">a</a>)");
+    const GrabberProjectId id = Save(Definition("https://example.com/"));
+    ldm::core::GrabberSaveProjectCommand scheduled;
+    scheduled.token = 50;
+    scheduled.project.id = id;
+    scheduled.project.name = "Site";
+    scheduled.project.definition = Definition("https://example.com/");
+    scheduled.project.scheduleMode = ldm::model::GrabberScheduleMode::Explore;
+    scheduled.project.schedule.enabled = true;
+    scheduled.project.schedule.mode = ldm::model::ScheduleMode::Daily;
+    const std::int64_t minuteOfDay = (clock_.unixMs % (24 * 3'600'000)) / 60'000;
+    scheduled.project.schedule.startMinutes = static_cast<int>((minuteOfDay + 2) % (24 * 60));
+    scheduled.project.schedule.stopEnabled = true;
+    scheduled.project.schedule.stopMinutes = scheduled.project.schedule.startMinutes;
+    explorer_->Handle(scheduled);
+    clock_.Advance(std::chrono::minutes(3));
+    explorer_->Tick();
+    EXPECT_EQ(engine_.fetches.size(), 1u) << "the stop ends the next day's run, not this one";
+}
+
 TEST_F(GrabberExplorerTest, DeletingAProjectRemovesItsHiddenDownloads)
 {
     Start();

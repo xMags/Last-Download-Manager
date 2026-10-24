@@ -100,7 +100,6 @@ private:
         bool deleteFilesWhenStopped = false;
         bool restartWhenStopped = false;
         bool resumeWhenStopped = false;  // a new address arrived while the old run was stopping
-        bool replaceFinalFile = false;  // an existing final file may be replaced at finalize
         bool holdFinalize = false;      // completed while the info dialog was still open
         int finalizeAttempts = 0;
         int automaticRestarts = 0;
@@ -208,6 +207,8 @@ private:
     // Membership consequences of a member's end: a completed member leaves an ordinary queue; a
     // failed member of a running queue counts the failure and moves behind the others.
     void LeaveQueueOnCompletion(Entry& entry);
+    // Records that the running queue of `entry` finished some work (see QueueRun::completedAny).
+    void NoteQueueWorkDone(const Entry& entry);
     void CountQueueFailure(Entry& entry);
     // Downloads a completed member of the synchronization queue again only when the server's file
     // changed: a conditional first request (M4 design section 5).
@@ -304,7 +305,11 @@ private:
         std::set<model::DownloadId> stoppedByUser;  // not started again in this run
         // Synchronization queue: members started in this run, so each is checked once per run.
         std::set<model::DownloadId> started;
-        bool startedAny = false;  // the completion action runs only after the queue downloaded something
+        bool startedAny = false;
+        // A member completed (or, in the synchronization queue, was found unchanged) in this run.
+        // The completion action runs only then, and only when the user stopped no member that is
+        // still unfinished: a queue the user halted by hand never shuts the computer down.
+        bool completedAny = false;
     };
     std::map<model::QueueId, QueueRun> queueRuns_;
     // Schedules: starts and stops after the last check are due; the next of them, if any.

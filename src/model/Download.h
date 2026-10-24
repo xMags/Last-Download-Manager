@@ -110,6 +110,11 @@ struct Download {
     std::optional<GrabberProjectId> projectId;
     bool listed = true;
 
+    // A file already at the destination is replaced when this download completes: a Redownload, a
+    // changed file of the synchronization queue, or the user's choice when it was added. Stored, so
+    // a download continued after a crash still replaces the old file instead of taking a new name.
+    bool replaceFinalFile = false;
+
     // A file's byte ranges. Empty for a stream, whose progress is in `tracks`.
     std::vector<Segment> segments;
 

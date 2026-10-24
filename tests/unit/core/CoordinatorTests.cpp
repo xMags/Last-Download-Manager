@@ -1,4 +1,5 @@
 #include "base/Paths.h"
+#include "base/Result.h"
 #include "base/Utf.h"
 #include "core/Coordinator.h"
 #include "storage/SqliteStore.h"
@@ -88,7 +89,13 @@ public:
         recycled.push_back(path);
         return {};
     }
-    ldm::base::Status CreateDirectories(const fs::path&) override { return {}; }
+    ldm::base::Status CreateDirectories(const fs::path&) override
+    {
+        if (failDirectories) {
+            return ldm::base::MakeError(ldm::base::ErrorCode::Io, "access denied");
+        }
+        return {};
+    }
     ldm::base::Status RemoveFolder(const fs::path& path) override
     {
         const std::wstring prefix = ldm::base::PathComparisonKey(path) + L"\\";
@@ -108,6 +115,7 @@ public:
     std::vector<fs::path> removed;
     std::vector<fs::path> recycled;
     std::vector<fs::path> removedFolders;
+    bool failDirectories = false;
 };
 
 class FakeClock final : public ldm::core::Clock {
@@ -1870,6 +1878,37 @@ TEST_F(QueueTest, AQueueThatStartsNothingFinishesWithoutItsAction)
     EXPECT_FALSE(QueueOf(queue).running);
 }
 
+TEST_F(QueueTest, AQueueWhoseMembersTheUserStoppedFinishesWithoutItsAction)
+{
+    const auto queue = NewQueue("Nightly", 2, 3, ldm::model::CompletionAction::Shutdown);
+    const DownloadId a = AddTo(queue, "http://x.test/a.dat");
+    const DownloadId b = AddTo(queue, "http://x.test/b.dat");
+    coordinator_->Handle(ldm::core::StartQueueCommand{queue});
+    coordinator_->Handle(ldm::core::StopCommand{{a, b}});
+    Finish(a, 1, TransferOutcome::Stopped, {{0, 100, 30}}, std::nullopt, 100);
+    Finish(b, 1, TransferOutcome::Stopped, {{0, 100, 30}}, std::nullopt, 100);
+    Publish();
+    const auto finished = observer_.All<ldm::core::QueueFinished>();
+    ASSERT_EQ(finished.size(), 1u);
+    EXPECT_EQ(finished[0].completionAction, ldm::model::CompletionAction::None) << "nothing was completed";
+}
+
+TEST_F(QueueTest, AQueueWithAMemberTheUserStoppedFinishesWithoutItsAction)
+{
+    const auto queue = NewQueue("Nightly", 2, 3, ldm::model::CompletionAction::Shutdown);
+    const DownloadId a = AddTo(queue, "http://x.test/a.dat");
+    const DownloadId b = AddTo(queue, "http://x.test/b.dat");
+    coordinator_->Handle(ldm::core::StartQueueCommand{queue});
+    coordinator_->Handle(ldm::core::StopCommand{{b}});
+    Finish(b, 1, TransferOutcome::Stopped, {{0, 100, 30}}, std::nullopt, 100);
+    Complete(a, 1);
+    Publish();
+    const auto finished = observer_.All<ldm::core::QueueFinished>();
+    ASSERT_EQ(finished.size(), 1u);
+    EXPECT_EQ(finished[0].completionAction, ldm::model::CompletionAction::None)
+        << "the user held back work: the computer stays on";
+}
+
 TEST_F(QueueTest, StartingARunningQueueAgainChangesNothing)
 {
     const auto queue = NewQueue("Nightly", 1);
@@ -2231,6 +2270,70 @@ TEST_F(SyncTest, ACheckThatEndsBeforeAnythingArrivedKeepsTheCompletedDownload)
     EXPECT_EQ(View(id).download.lastResult, "The check for changes was stopped");
 }
 
+TEST_F(SyncTest, ACheckInProgressIsStoredAsTheCompletedDownload)
+{
+    const DownloadId id = CompletedMember();
+    coordinator_->Handle(ldm::core::StartQueueCommand{SyncQueue()});
+    ASSERT_EQ(engine_.starts.size(), 2u);
+    const auto stored = Stored(id);
+    ASSERT_TRUE(stored);
+    EXPECT_EQ(stored->status, DownloadStatus::Completed) << "a crash now leaves the download complete";
+    EXPECT_EQ(stored->DownloadedBytes(), 4);
+    EXPECT_FALSE(stored->partialPath);
+
+    coordinator_.reset();
+    Recreate();
+    Publish();
+    EXPECT_EQ(View(id).download.status, DownloadStatus::Completed);
+    EXPECT_EQ(View(id).download.totalSize, 4);
+}
+
+TEST_F(SyncTest, ANewFileFoundByACheckReplacesTheOldOneAfterARestart)
+{
+    const DownloadId id = CompletedMember();
+    coordinator_->Handle(ldm::core::StartQueueCommand{SyncQueue()});
+    coordinator_->Handle(ldm::core::StopQueueCommand{SyncQueue()});
+    Finish(id, 2, TransferOutcome::Stopped, {{0, 6, 3}}, std::nullopt, 6);
+    ASSERT_EQ(Stored(id)->status, DownloadStatus::Paused);
+    EXPECT_TRUE(Stored(id)->replaceFinalFile) << "stored, so a restart still replaces the old file";
+
+    coordinator_.reset();
+    Recreate();
+    coordinator_->Handle(ldm::core::ResumeCommand{{id}});
+    const std::int64_t epoch = engine_.starts.back().epoch;
+    Finish(id, epoch, TransferOutcome::Completed, {{0, 6, 6}}, std::nullopt, 6);
+    ASSERT_FALSE(engine_.finalizes.empty());
+    EXPECT_EQ(engine_.finalizes.back().finalPath, kRoot / L"a.dat") << "no numbered copy beside the old file";
+}
+
+TEST_F(SyncTest, AMemberMovedToAnotherQueueDuringACheckLeavesIt)
+{
+    const DownloadId id = CompletedMember();
+    const auto other = NewQueue("Other", 1);
+    coordinator_->Handle(ldm::core::StartQueueCommand{SyncQueue()});
+    coordinator_->Handle(ldm::core::SetQueueCommand{{id}, other});
+    Finish(id, 2, TransferOutcome::Unchanged);
+    Publish();
+    EXPECT_EQ(View(id).download.status, DownloadStatus::Completed);
+    EXPECT_FALSE(View(id).download.queueId) << "a completed download leaves an ordinary queue";
+    coordinator_->Handle(ldm::core::StartQueueCommand{other});
+    EXPECT_EQ(engine_.starts.size(), 2u) << "and is not downloaded again";
+}
+
+TEST_F(SyncTest, ACheckThatCannotBeginIsNoFailure)
+{
+    const DownloadId id = CompletedMember();
+    files_.failDirectories = true;
+    coordinator_->Handle(ldm::core::StartQueueCommand{SyncQueue()});
+    Publish();
+    EXPECT_EQ(engine_.starts.size(), 1u);
+    EXPECT_EQ(View(id).download.status, DownloadStatus::Completed);
+    ASSERT_TRUE(View(id).download.lastResult);
+    EXPECT_TRUE(View(id).download.lastResult->starts_with("Could not check the server for changes"));
+    EXPECT_TRUE(observer_.All<ldm::core::DownloadFailed>().empty());
+    EXPECT_EQ(View(id).download.queueId, SyncQueue());
+}
+
 TEST_F(SyncTest, ACheckStoppedWithPartOfANewFileContinuesLikeARedownload)
 {
     const DownloadId id = CompletedMember();
@@ -2325,6 +2428,29 @@ TEST_F(ScheduleTest, AQueueStopsAtItsStopTime)
     EXPECT_EQ(observer_.All<ldm::core::QueueStopped>().size(), 1u);
     EXPECT_EQ(engine_.stops.size(), 1u);
     EXPECT_TRUE(observer_.All<ldm::core::QueueFinished>().empty()) << "no completion action at the stop time";
+}
+
+TEST_F(ScheduleTest, AStopAtTheStartTimeEndsTheRunOnTheNextDay)
+{
+    ldm::model::Schedule schedule = DailyAt(8, 30);
+    schedule.stopEnabled = true;
+    schedule.stopMinutes = 8 * 60 + 30;
+    const auto queue = Scheduled(schedule);
+    Wait(std::chrono::minutes(31));
+    EXPECT_TRUE(QueueOf(queue).running) << "the stop belongs to the previous day's run";
+    EXPECT_EQ(observer_.All<ldm::core::QueueStarted>().size(), 1u);
+}
+
+TEST_F(ScheduleTest, AStopThatPassedAfterAStartWhileAsleepLeavesTheQueueStopped)
+{
+    ldm::model::Schedule schedule = DailyAt(8, 30);
+    schedule.stopEnabled = true;
+    schedule.stopMinutes = 8 * 60 + 35;
+    const auto queue = Scheduled(schedule);
+    clock_.Advance(std::chrono::minutes(40));  // asleep through both
+    coordinator_->Handle(ldm::core::ClockChangedCommand{});
+    EXPECT_FALSE(QueueOf(queue).running);
+    EXPECT_TRUE(engine_.starts.empty());
 }
 
 TEST_F(ScheduleTest, AStartMissedWhileLdmWasClosedIsNotCaughtUp)

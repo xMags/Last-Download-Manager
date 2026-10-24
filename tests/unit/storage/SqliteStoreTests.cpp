@@ -452,6 +452,20 @@ TEST(SqliteStore, ProjectAndListedRoundTripOnDownloads)
     EXPECT_TRUE(store.LoadDownloads().Value()[0].listed);
 }
 
+TEST(SqliteStore, ReplaceFinalFileRoundTrips)
+{
+    SqliteStore store = OpenMemoryStore();
+    auto download = SampleDownload("r");
+    download.replaceFinalFile = true;
+    auto id = store.InsertDownload(download);
+    ASSERT_TRUE(id.Ok());
+    EXPECT_TRUE(store.LoadDownloads().Value()[0].replaceFinalFile);
+    download.id = id.Value();
+    download.replaceFinalFile = false;
+    ASSERT_TRUE(store.SaveDownload(download).Ok());
+    EXPECT_FALSE(store.LoadDownloads().Value()[0].replaceFinalFile);
+}
+
 TEST(SqliteStore, QueueMembershipRoundTrips)
 {
     SqliteStore store = OpenMemoryStore();
@@ -836,6 +850,24 @@ TEST(Migrations, SchemaNineListsEarlierDownloads)
     ASSERT_TRUE(query.Value().Step().Value());
     EXPECT_FALSE(query.Value().OptionalInt64(0).has_value());
     EXPECT_EQ(query.Value().Int64(1), 1);
+}
+
+TEST(Migrations, SchemaTenReplacesNoEarlierFile)
+{
+    auto connection = ldm::storage::Connection::Open(":memory:");
+    ASSERT_TRUE(connection.Ok());
+    ASSERT_TRUE(connection.Value().Execute("PRAGMA foreign_keys = ON").Ok());
+    ASSERT_TRUE(ldm::storage::MigrateTo(connection.Value(), 9).Ok());
+    ASSERT_TRUE(connection.Value()
+                    .Execute("INSERT INTO downloads (id, public_id, url, file_name, save_dir, status, created_at, "
+                             "sort_order) VALUES (7, 'p', 'https://x.test/f', 'f', 'C:\\\\D', 'paused', 1, 1);")
+                    .Ok());
+    const auto migrated = ldm::storage::Migrate(connection.Value());
+    ASSERT_TRUE(migrated.Ok()) << migrated.GetError().message;
+    auto query = connection.Value().Prepare("SELECT replace_final FROM downloads");
+    ASSERT_TRUE(query.Ok());
+    ASSERT_TRUE(query.Value().Step().Value());
+    EXPECT_EQ(query.Value().Int64(0), 0);
 }
 
 TEST(Migrations, RefusesNewerSchema)

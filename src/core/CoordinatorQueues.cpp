@@ -356,7 +356,13 @@ void Coordinator::RunQueues()
         QueueFinished finished;
         finished.id = id;
         finished.name = queue->name;
-        if (run->second.startedAny) {
+        const bool userHeldWork = std::any_of(run->second.stoppedByUser.begin(), run->second.stoppedByUser.end(),
+                                              [this](model::DownloadId member) {
+                                                  const Entry* entry = Find(member);
+                                                  return entry != nullptr &&
+                                                         entry->download.status != DownloadStatus::Completed;
+                                              });
+        if (run->second.startedAny && run->second.completedAny && !userHeldWork) {
             finished.completionAction = queue->completionAction;
             finished.forceTerminate = queue->forceTerminate;
             finished.openFileWhenDone = queue->openFileWhenDone;
@@ -373,22 +379,16 @@ void Coordinator::StartSyncCheck(Entry& entry)
     Entry::SyncCheck check{d.segments, d.totalSize, d.resumable, d.validators, d.finalUrl, d.completedAtMs};
     ResetProgress(entry);
     entry.syncCheck = std::move(check);
-    entry.replaceFinalFile = true;  // a changed file replaces the old one once it is complete
+    entry.download.replaceFinalFile = true;  // a changed file replaces the old one once it is complete
     entry.automaticRestarts = 0;
     entry.forcedMaxConnections.reset();
     d.status = DownloadStatus::Queued;
     Start(entry);
     if (!entry.running && entry.syncCheck) {
-        // The run could not begin (its folder could not be made, or the quota holds it): the
-        // completed download stays as it was.
-        const std::optional<std::string> reason =
-            d.status == DownloadStatus::Failed ? d.lastResult : std::optional<std::string>();
+        // The quota holds the run: the completed download stays as it was. (A run that could not
+        // begin at all was put back by Fail.)
         entry.quotaHeld = false;
         (void)EndSyncCheck(entry, TransferOutcome::Stopped, std::nullopt);
-        if (reason) {
-            d.lastResult = "Could not check the server for changes: " + *reason;
-            Save(entry);
-        }
     }
 }
 
@@ -416,15 +416,19 @@ bool Coordinator::EndSyncCheck(Entry& entry, TransferOutcome outcome, const std:
     d.finalUrl = check->finalUrl;
     d.completedAtMs = check->completedAtMs;
     d.status = DownloadStatus::Completed;
-    entry.replaceFinalFile = false;
+    entry.download.replaceFinalFile = false;
     entry.receivedBytes = d.DownloadedBytes();
     if (outcome == TransferOutcome::Unchanged) {
         d.lastResult = "Unchanged on the server";
+        NoteQueueWorkDone(entry);
     } else if (failure) {
         d.lastResult = "Could not check the server for changes: " + DescribeFailure(*failure);
     } else {
         d.lastResult = "The check for changes was stopped";
     }
+    // Moved to an ordinary queue while it was checked: a completed download leaves it, as it would
+    // have had it completed there, instead of being downloaded again by that queue.
+    LeaveQueueOnCompletion(entry);
     Save(entry);
     MarkChanged(entry);
     return true;
@@ -476,9 +480,15 @@ void Coordinator::CheckSchedules()
         if (stop && *stop > now) {
             stop.reset();
         }
-        if (start && stop && *stop >= *start) {
-            continue;  // both passed while LDM could not look: the queue would stop again at once
+        if (start && stop && *stop > *start) {
+            // Both passed while LDM could not look, the stop after the start: the queue ends stopped.
+            if (queueRuns_.contains(id)) {
+                StopQueue(id);
+            }
+            continue;
         }
+        // A stop at the moment of a start ends the previous run ("stop time" equal to the start
+        // time means the next day), so it comes first.
         if (stop) {
             StopQueue(id);
         }
@@ -597,6 +607,16 @@ void Coordinator::MarkMembersChanged(model::QueueId id)
         }
     }
     snapshotDirty_ = true;
+}
+
+void Coordinator::NoteQueueWorkDone(const Entry& entry)
+{
+    if (!entry.download.queueId) {
+        return;
+    }
+    if (const auto run = queueRuns_.find(*entry.download.queueId); run != queueRuns_.end()) {
+        run->second.completedAny = true;
+    }
 }
 
 void Coordinator::LeaveQueueOnCompletion(Entry& entry)
