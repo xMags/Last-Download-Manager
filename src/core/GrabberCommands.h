@@ -47,6 +47,7 @@ struct GrabberExploreCommand {
     model::GrabberProjectId id;
     bool keepChecks = false;
     std::vector<model::Cookie> cookies;
+    bool thenDownload = false;  // download the checked files once exploring ends
 };
 // Stops exploring and the project's downloads.
 struct GrabberStopCommand {

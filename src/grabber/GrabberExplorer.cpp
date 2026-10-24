@@ -154,6 +154,9 @@ void GrabberExplorer::Handle(core::GrabberCommand command)
                 }
             } else if constexpr (std::is_same_v<T, core::GrabberExploreCommand>) {
                 Explore(typed.id, typed.keepChecks, std::move(typed.cookies), false);
+                if (Project* project = Find(typed.id); project != nullptr && project->exploring && typed.thenDownload) {
+                    project->downloadAfterExplore = true;
+                }
             } else if constexpr (std::is_same_v<T, core::GrabberStopCommand>) {
                 if (Project* project = Find(typed.id)) {
                     StopProject(*project);
@@ -216,7 +219,11 @@ void GrabberExplorer::SaveProject(core::GrabberSaveProjectCommand command)
         fail("The project no longer exists.");
         return;
     }
-    if (existing != nullptr && (existing->exploring || existing->downloading)) {
+    // A running project's schedule may change; what it explores may not.
+    const bool sameWork = existing != nullptr && existing->stored.definition == incoming.definition &&
+                          existing->stored.loginUser == incoming.loginUser && !command.loginPassword &&
+                          existing->stored.isTemplate == incoming.isTemplate;
+    if (existing != nullptr && (existing->exploring || existing->downloading) && !sameWork) {
         fail("Stop the project before changing it.");
         return;
     }
@@ -244,7 +251,9 @@ void GrabberExplorer::SaveProject(core::GrabberSaveProjectCommand command)
         }
         existing->stored = std::move(incoming);
         existing->damaged.reset();
-        Prepare(*existing);
+        if (!sameWork) {
+            Prepare(*existing);
+        }
         saved.id = existing->stored.id;
     } else {
         incoming.createdAtMs = ports_.clock->NowUnixMs();
@@ -402,6 +411,7 @@ void GrabberExplorer::StopProject(Project& project)
         }
         project.cookieLines.clear();
         project.cookies.clear();
+        WritePendingPages(project);  // what was read is kept
         SaveProjectRow(project);
     }
     StopDownloads(project);
@@ -671,7 +681,15 @@ void GrabberExplorer::OnPageRead(Project& project, Item& item, const core::Fetch
         AddLink(project, *page, link, base);
     }
     if (project.stored.definition.savePages) {
-        SavePage(project, *FindItem(project, itemId), finished, links, base);
+        // Written once exploring ends, when every link's file is decided (some wait for their
+        // size); a large site past the budget gets the rest written at once, with what is known.
+        PendingPage pending{itemId, finished.body, base, links.links};
+        if (project.pendingBytes + pending.body.size() > config_.maxPendingPageBytes) {
+            WritePage(project, pending);
+        } else {
+            project.pendingBytes += pending.body.size();
+            project.pendingPages.push_back(std::move(pending));
+        }
     }
 }
 
@@ -790,22 +808,32 @@ void GrabberExplorer::ClassifyFile(Project& project, Item& item, std::optional<s
     }
 }
 
-void GrabberExplorer::SavePage(Project& project, const Item& page, const core::FetchFinished& finished,
-                               const PageLinks& links, const std::string& base)
+void GrabberExplorer::WritePendingPages(Project& project)
 {
+    for (const PendingPage& page : project.pendingPages) {
+        WritePage(project, page);
+    }
+    project.pendingPages.clear();
+    project.pendingBytes = 0;
+}
+
+void GrabberExplorer::WritePage(Project& project, const PendingPage& page)
+{
+    const Item* item = FindItem(project, page.itemId);
     const auto root = SaveRoot(project);
-    const auto pageUrl = core::ParseUrl(page.data.url);
+    const auto pageUrl = item != nullptr ? core::ParseUrl(item->data.url) : std::nullopt;
     if (!root || !pageUrl) {
         return;
     }
+    const std::string& base = page.base;
     const model::GrabberProjectDefinition& definition = project.stored.definition;
     const std::string pagePath = LocalRelativePath(*pageUrl, true, definition.keepSiteFolders);
-    std::string body = finished.body;
+    std::string body = page.body;
     if (definition.convertLinks) {
         // Links to what this project saves point at the saved copies; the rest stay on the web.
         std::vector<LinkReplacement> replacements;
-        replacements.reserve(links.links.size());
-        for (const HtmlLink& link : links.links) {
+        replacements.reserve(page.links.size());
+        for (const HtmlLink& link : page.links) {
             const auto resolved = media::ResolveLinkUrl(base, link.address);
             if (!resolved) {
                 continue;
@@ -829,7 +857,7 @@ void GrabberExplorer::SavePage(Project& project, const Item& page, const core::F
             }
             replacements.push_back(LinkReplacement{link.begin, link.end, std::move(reference)});
         }
-        body = RewriteLinks(finished.body, std::move(replacements));
+        body = RewriteLinks(page.body, std::move(replacements));
     }
     const std::filesystem::path target = *root / PathFromUtf8(pagePath);
     if (base::Status created = ports_.fileSystem->CreateDirectories(target.parent_path()); !created) {
@@ -841,9 +869,9 @@ void GrabberExplorer::SavePage(Project& project, const Item& page, const core::F
         ReportError("A page could not be saved: " + written.GetError().message);
         return;
     }
-    if (Item* item = FindItem(project, page.data.id)) {
-        item->data.localPath = PathToUtf8(target);
-        Changed(project, *item);
+    if (Item* saved = FindItem(project, page.itemId)) {
+        saved->data.localPath = PathToUtf8(target);
+        Changed(project, *saved);
     }
 }
 
@@ -853,6 +881,7 @@ void GrabberExplorer::FinishExploreIfDone(Project& project)
         return;
     }
     project.exploring = false;
+    WritePendingPages(project);
     project.cookieLines.clear();
     project.cookies.clear();
     project.stored.lastRunAtMs = ports_.clock->NowUnixMs();
