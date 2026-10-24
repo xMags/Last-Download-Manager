@@ -1294,7 +1294,12 @@ void GrabberExplorer::CheckSchedules()
         if (stop && *stop > now) {
             stop.reset();
         }
-        if (start && stop && *stop >= *start) {
+        // As for queues: a stop after a start in the same check leaves the project stopped; a stop at
+        // the moment of a start ends the previous run first.
+        if (start && stop && *stop > *start) {
+            if (project->scheduledRun) {
+                StopProject(*project);
+            }
             continue;
         }
         if (stop && project->scheduledRun) {
