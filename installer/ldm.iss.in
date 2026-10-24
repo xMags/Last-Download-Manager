@@ -1,0 +1,102 @@
+; Last Download Manager installer (M5 design section 2). Configured by cmake/Installer.cmake and
+; compiled by the ldm_installer target from the files ldm_package stages; do not edit the copy in
+; the build folder. Per user, no administrator rights.
+
+#define AppName "Last Download Manager"
+#define AppVersion "@PROJECT_VERSION@"
+#define AppExe "ldm.exe"
+#define Stage "@LDM_INSTALLER_STAGE@"
+#define OutputFolder "@LDM_INSTALLER_OUTPUT@"
+#define AppIcon "@LDM_INSTALLER_ICON@"
+#define DataFolder "{localappdata}\Last Download Manager"
+#define HostName "io.github.mrdevfx.ldm"
+
+[Setup]
+; A new id: the 1.x and 2.x installers installed for all users into Program Files.
+AppId={{D02D5BDD-BDC7-45E4-BC73-D8DED2117D7B}
+AppName={#AppName}
+AppVersion={#AppVersion}
+AppVerName={#AppName} {#AppVersion}
+AppPublisher=Last Download Manager
+AppPublisherURL=https://github.com/xMags/Last-Download-Manager
+AppSupportURL=https://github.com/xMags/Last-Download-Manager/issues
+AppUpdatesURL=https://github.com/xMags/Last-Download-Manager/releases
+VersionInfoVersion={#AppVersion}.0
+DefaultDirName={userpf}\{#AppName}
+DefaultGroupName={#AppName}
+DisableProgramGroupPage=yes
+PrivilegesRequired=lowest
+ArchitecturesAllowed=x64compatible
+ArchitecturesInstallIn64BitMode=x64compatible
+MinVersion=10.0
+LicenseFile={#Stage}\LICENSE
+OutputDir={#OutputFolder}
+OutputBaseFilename=LastDownloadManager-windows-x64-setup
+SetupIconFile={#AppIcon}
+UninstallDisplayIcon={app}\{#AppExe}
+UninstallDisplayName={#AppName}
+Compression=lzma2/max
+SolidCompression=yes
+WizardStyle=modern
+; Windows' Restart Manager asks to close ldm.exe and the ldm-host.exe processes browsers hold open,
+; so their files can be replaced. Closing the host only disconnects the extension for a moment.
+CloseApplications=yes
+RestartApplications=no
+
+[Languages]
+Name: "english"; MessagesFile: "compiler:Default.isl"
+
+[Tasks]
+Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
+Name: "startup"; Description: "Start Last Download Manager in the notification area when I sign in"; GroupDescription: "Startup:"; Flags: unchecked
+
+[Files]
+Source: "{#Stage}\ldm.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#Stage}\ldm-host.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#Stage}\ffmpeg.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#Stage}\ffprobe.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#Stage}\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#Stage}\THIRD-PARTY-NOTICES.txt"; DestDir: "{app}"; Flags: ignoreversion
+
+[Icons]
+Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExe}"
+Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopicon
+
+[Registry]
+; Launch on startup: the same value LDM's Options write (RunKeyStartup).
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "{#AppName}"; ValueData: """{app}\{#AppExe}"" --tray"; Tasks: startup
+; Removed at uninstall whoever wrote it: this installer or LDM's Options.
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: none; ValueName: "{#AppName}"; Flags: uninsdeletevalue dontcreatekey
+; The browser helper's keys are written by ldm.exe --write-host-manifests below; these entries only
+; remove them at uninstall.
+Root: HKCU; Subkey: "Software\Google\Chrome\NativeMessagingHosts\{#HostName}"; Flags: uninsdeletekey dontcreatekey
+Root: HKCU; Subkey: "Software\Microsoft\Edge\NativeMessagingHosts\{#HostName}"; Flags: uninsdeletekey dontcreatekey
+Root: HKCU; Subkey: "Software\Mozilla\NativeMessagingHosts\{#HostName}"; Flags: uninsdeletekey dontcreatekey
+
+[Run]
+; The browsers can start LDM through the extension before it was ever launched.
+Filename: "{app}\{#AppExe}"; Parameters: "--write-host-manifests"; StatusMsg: "Registering the browser helper..."; Flags: runhidden waituntilterminated
+Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags: nowait postinstall skipifsilent
+
+[UninstallDelete]
+Type: files; Name: "{#DataFolder}\browser\chromium-host.json"
+Type: files; Name: "{#DataFolder}\browser\firefox-host.json"
+Type: dirifempty; Name: "{#DataFolder}\browser"
+
+[Code]
+// The download list and settings stay unless the user asks to delete them too (decision 4).
+// Downloaded files are never touched. A silent uninstall keeps them.
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  Folder: String;
+begin
+  if (CurUninstallStep <> usPostUninstall) or UninstallSilent then
+    exit;
+  Folder := ExpandConstant('{#DataFolder}');
+  if not DirExists(Folder) then
+    exit;
+  if MsgBox('Also delete your download list and settings?' + #13#10#13#10 +
+            'Choose No to keep them for a later installation. Downloaded files are not deleted either way.',
+            mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES then
+    DelTree(Folder, True, True, True);
+end;
