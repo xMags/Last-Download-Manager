@@ -128,6 +128,10 @@ std::wstring GrabberStatusText(const grabber::GrabberProjectView& view)
     }
     const grabber::GrabberStats& s = view.stats;
     std::wstring text;
+    if (view.startPageFailure && !view.exploring) {
+        return L"The start page could not be read: " + base::ToUtf16(*view.startPageFailure) +
+               L". Check its address, or sign in to the site in the project's settings.";
+    }
     if (view.exploring) {
         text = L"Exploring: " + Count(s.pagesExplored, L"page", L"pages") + L" read, " + std::to_wstring(s.pagesWaiting) +
                L" waiting. ";

@@ -30,6 +30,8 @@ struct GrabberProjectView {
     model::GrabberProject project;  // loginSecret is always empty here
     bool hasPassword = false;
     std::optional<std::string> damaged;  // the stored definition could not be read
+    // Why the last exploration found nothing: the start page could not be read.
+    std::optional<std::string> startPageFailure;
     bool open = false;      // its window is open
     bool exploring = false;
     bool downloading = false;

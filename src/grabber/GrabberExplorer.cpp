@@ -1,6 +1,7 @@
 #include "grabber/GrabberExplorer.h"
 
 #include "base/Paths.h"
+#include "core/FailureText.h"
 #include "core/FileNames.h"
 #include "core/Matching.h"
 #include "core/NetworkAddress.h"
@@ -362,6 +363,7 @@ void GrabberExplorer::Explore(model::GrabberProjectId id, bool keepChecks, std::
         item.otherSitesDepth = 0;
     }
     project.exploring = true;
+    project.startPageFailure.reset();
     project.scheduledRun = scheduled;
     project.pagesExplored = 0;
     project.limitReached = false;
@@ -639,6 +641,9 @@ void GrabberExplorer::OnFetched(const Fetch& fetch, const core::FetchFinished& f
     } else if (finished.failure) {
         item->data.state = model::GrabberItemState::Failed;
         Changed(*project, *item);
+        if (!item->data.parentId) {
+            project->startPageFailure = std::string(core::DescribeFailureReason(finished.failure->reason));
+        }
     } else {
         OnPageRead(*project, *item, finished);
     }
@@ -1485,6 +1490,7 @@ void GrabberExplorer::Publish()
         view.hasPassword = !project.stored.loginSecret.empty();
         view.project.loginSecret.clear();
         view.damaged = project.damaged;
+        view.startPageFailure = project.startPageFailure;
         view.open = project.open;
         view.exploring = project.exploring;
         view.downloading = project.downloading;

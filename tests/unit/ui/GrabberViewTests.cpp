@@ -107,6 +107,12 @@ TEST(GrabberView, DescribesItems)
     view.stats.filesFound = 1;
     view.stats.filesChecked = 1;
     EXPECT_EQ(ldm::ui::GrabberStatusText(view), L"Exploring: 3 pages read, 2 waiting. 1 file listed, 1 checked, 0 downloaded.");
+    view.exploring = false;
+    view.startPageFailure = "The server refused the connection";
+    EXPECT_EQ(ldm::ui::GrabberStatusText(view),
+              L"The start page could not be read: The server refused the connection. Check its address, or sign in to "
+              L"the site in the project's settings.");
+    view.startPageFailure.reset();
     view.damaged = "bad";
     EXPECT_NE(ldm::ui::GrabberStatusText(view).find(L"damaged"), std::wstring::npos);
     EXPECT_NE(ldm::ui::GrabberStatisticsText(view).find(L"Files listed: 1"), std::wstring::npos);
