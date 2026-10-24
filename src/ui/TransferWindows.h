@@ -53,7 +53,8 @@ public:
     [[nodiscard]] std::vector<std::pair<HWND, std::wstring>> Windows() const;
 
 private:
-    void RunCompletionAction(model::CompletionAction action, bool forceTerminate = false);
+    // `reason` says what finished, for the countdown.
+    void RunCompletionAction(model::CompletionAction action, const std::wstring& reason, bool forceTerminate = false);
     void PlaySound(const model::SoundEvent& sound);
     void ShowError(const std::wstring& message) const;
 

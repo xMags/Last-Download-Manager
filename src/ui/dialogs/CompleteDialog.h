@@ -39,7 +39,8 @@ private:
 // The cancellable countdown before a power action after a download completes (checklist P-05).
 class CountdownDialog final : public Dialog {
 public:
-    CountdownDialog(const Theme& theme, std::wstring action, int seconds);
+    // `reason` is the sentence that comes first: what finished.
+    CountdownDialog(const Theme& theme, std::wstring reason, std::wstring action, int seconds);
     // True when the action should run (the countdown finished or the user chose to do it now).
     [[nodiscard]] bool Run(HWND owner);
 
@@ -49,6 +50,7 @@ private:
     bool OnMessage(UINT message, WPARAM wParam, LPARAM lParam, LRESULT& result) override;
     void Refresh();
 
+    std::wstring reason_;
     std::wstring action_;
     int remaining_;
     bool confirmed_ = false;
