@@ -1573,7 +1573,9 @@ void Coordinator::OnFinalized(Entry& entry, const FinalizeFinished& finalized)
         // Another program may have created the final name meanwhile: pick a free one and retry.
         if (!entry.deleteWhenStopped && ports_.fileSystem->Exists(FinalPath(d)) &&
             entry.finalizeAttempts < kMaxFinalizeAttempts) {
-            if (auto unique = UniqueFileName(PathFromUtf8(d.saveDir), d.fileName, d.id)) {
+            // No exception for this download: the file at its final name is someone else's now,
+            // and treating it as its own would retry the same name until the attempts run out.
+            if (auto unique = UniqueFileName(PathFromUtf8(d.saveDir), d.fileName, std::nullopt)) {
                 d.fileName = std::move(*unique);
                 BeginFinalize(entry);
                 return;
