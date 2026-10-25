@@ -140,6 +140,14 @@ core::FetchFinished MemoryFetch::Finish(CURLcode result)
         return finished;
     }
     if (tooLarge_ || result == CURLE_FILESIZE_EXCEEDED) {
+        // A long error page is the error, not a size problem: "not found" says what went wrong.
+        long errorStatus = 0;
+        if (curl_easy_getinfo(easy, CURLINFO_RESPONSE_CODE, &errorStatus) == CURLE_OK) {
+            if (auto failure = ClassifyHttpStatus(static_cast<int>(errorStatus)); failure && errorStatus != 0) {
+                finished.failure = std::move(failure);
+                return finished;
+            }
+        }
         finished.failure = core::TransferFailure{core::FailureReason::Protocol, core::FailureClass::Fatal, 0,
                                                  "the response is larger than " + std::to_string(request_.maxBytes) +
                                                      " bytes"};
