@@ -4,6 +4,8 @@
 // Routes (all serve the same deterministic payload, byte i = i % 251, unless noted):
 //   /range.bin           ranges, ETag, Last-Modified
 //   /no-range.bin        "Accept-Ranges: none", ignores Range
+//   /quiet-no-range.bin  ignores Range without saying so (no Accept-Ranges header); unpaced, and
+//                        answers requests with a Range a second late
 //   /redirect            302 to /range.bin
 //   /changing.bin        ranges, but every request serves different bytes (overlap mismatch)
 //   /versioned.bin       ranges; content, ETag and Last-Modified follow /control/bump
@@ -217,7 +219,7 @@ export function createReferenceFixture({
   };
 
   // Answers a request for `body` with range support when `ranges` is set. Returns after headers.
-  const serveBody = (request, response, id, body, { ranges = true, etag, lastModified, name, disposition, cutAfter, salt, contentType } = {}) => {
+  const serveBody = (request, response, id, body, { ranges = true, announceRanges = true, unpaced = false, etag, lastModified, name, disposition, cutAfter, salt, contentType } = {}) => {
     // Conditional requests (RFC 9110 13.1): If-None-Match decides when present, else If-Modified-Since.
     const noneMatch = request.headers['if-none-match'];
     const modifiedSince = request.headers['if-modified-since'];
@@ -263,6 +265,7 @@ export function createReferenceFixture({
       'Content-Length': end - start + 1,
       'Accept-Ranges': ranges ? 'bytes' : 'none',
     };
+    if (!announceRanges) delete headers['Accept-Ranges'];
     if (!contentType) headers['Content-Disposition'] = disposition ?? `attachment; filename="${name}"`;
     if (etag) headers.ETag = etag;
     if (lastModified) headers['Last-Modified'] = lastModified;
@@ -274,6 +277,10 @@ export function createReferenceFixture({
     }
     let source = body;
     if (salt !== undefined) source = payload(body.length, salt);
+    if (unpaced) {
+      response.end(source.subarray(start, end + 1));
+      return;
+    }
     stream(response, source, start, end, id, cutAfter);
   };
 
@@ -400,6 +407,15 @@ export function createReferenceFixture({
       case '/no-range.bin':
         serveBody(request, response, id, data, { ranges: false, etag: strong, lastModified: modified, name: 'no-range.bin' });
         return;
+      case '/quiet-no-range.bin': {
+        // The whole file at once, and requests for a range answered a second late: the first
+        // connection reaches every split point before the extra ones learn ranges are ignored.
+        const answer = () => serveBody(request, response, id, data,
+          { ranges: false, announceRanges: false, unpaced: true, name: 'quiet-no-range.bin' });
+        if (request.headers.range) setTimeout(answer, 1000);
+        else answer();
+        return;
+      }
       case '/changing.bin':
         serveBody(request, response, id, data, { name: 'changing.bin', salt: id * 7 });
         return;
