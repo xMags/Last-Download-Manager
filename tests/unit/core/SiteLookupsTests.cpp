@@ -222,14 +222,14 @@ TEST_F(SiteLookupsTest, ARefreshReusesOnlyAVeryRecentAnswer)
     LookUp(1);
     Answer(0, Found());
     clock_.now += std::chrono::seconds(30);
-    lookups_.Refresh(DownloadId{5}, 2, kPage);
+    lookups_.Refresh(DownloadId{5}, 2, kPage, "");
     ASSERT_EQ(refreshed_.size(), 1u) << "30 seconds old: the same addresses are still fresh";
     EXPECT_EQ(std::get<0>(refreshed_[0]), DownloadId{5});
     EXPECT_EQ(std::get<1>(refreshed_[0]), 2);
     EXPECT_EQ(resolver_.asked.size(), 1u);
 
     clock_.now += std::chrono::minutes(5);
-    lookups_.Refresh(DownloadId{5}, 3, kPage);
+    lookups_.Refresh(DownloadId{5}, 3, kPage, "");
     ASSERT_EQ(resolver_.asked.size(), 2u);
     LookUp(2);
     EXPECT_EQ(resolver_.asked.size(), 2u) << "the panel still takes the 5 minute old answer";
@@ -241,7 +241,7 @@ TEST_F(SiteLookupsTest, ARefreshReusesOnlyAVeryRecentAnswer)
 
 TEST_F(SiteLookupsTest, ACancelledRefreshIsNotAnswered)
 {
-    lookups_.Refresh(DownloadId{5}, 1, kPage);
+    lookups_.Refresh(DownloadId{5}, 1, kPage, "");
     lookups_.CancelRefresh(DownloadId{5});
     ASSERT_EQ(resolver_.cancelled.size(), 1u);
     Answer(0, Found());
@@ -254,10 +254,10 @@ TEST_F(SiteLookupsTest, AnAnswerCanStartTheNextLookupOfTheSamePage)
     // starts instead of the new request joining the lookup that just answered.
     react_ = [this](DownloadId id, std::int64_t epoch) {
         if (epoch == 1) {
-            lookups_.Refresh(id, 2, kPage);
+            lookups_.Refresh(id, 2, kPage, "");
         }
     };
-    lookups_.Refresh(DownloadId{5}, 1, kPage);
+    lookups_.Refresh(DownloadId{5}, 1, kPage, "");
     SiteLookupFinished failed;
     failed.problem = Problem::Resolver;
     Answer(0, failed);
@@ -266,6 +266,26 @@ TEST_F(SiteLookupsTest, AnAnswerCanStartTheNextLookupOfTheSamePage)
     Answer(1, Found());
     ASSERT_EQ(refreshed_.size(), 2u);
     EXPECT_TRUE(std::get<2>(refreshed_[1]).video);
+}
+
+TEST_F(SiteLookupsTest, ASignedInLookupIsAskedApartWithItsCookiesAndKeptApart)
+{
+    LookUpSiteVideoCommand signedIn{1, kPage};
+    signedIn.cookies.push_back(ldm::model::Cookie{"youtube.com", false, "/", true, 0, "SID", "secret"});
+    lookups_.LookUp(signedIn);
+    LookUp(2);  // the same page without the sign-in: not joined to it
+    ASSERT_EQ(resolver_.asked.size(), 2u);
+    EXPECT_NE(resolver_.asked[0].cookies.find("SID\tsecret"), std::string::npos);
+    EXPECT_TRUE(resolver_.asked[1].cookies.empty());
+
+    Answer(0, Found());
+    LookUp(3);  // the signed-in answer is not reused for a lookup without the sign-in
+    EXPECT_EQ(resolver_.asked.size(), 2u) << "the unsigned lookup is still under way";
+    Answer(1, Found());
+    LookUp(4);
+    EXPECT_EQ(resolver_.asked.size(), 2u) << "now each has its own answer kept";
+    lookups_.Refresh(DownloadId{9}, 1, kPage, ".youtube.com\tTRUE\t/\tTRUE\t0\tSID\tsecret\n");
+    EXPECT_EQ(resolver_.asked.size(), 2u) << "a very recent signed-in answer serves the refresh";
 }
 
 }  // namespace

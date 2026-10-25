@@ -6,6 +6,7 @@
 #include "resource.h"
 #include "ui/FileDialogs.h"
 #include "ui/dialogs/CaptureDialogs.h"
+#include "ui/dialogs/SiteSignInDialog.h"
 
 #include <commctrl.h>
 #include <uxtheme.h>
@@ -378,6 +379,8 @@ void OptionsDialog::Load()
     Check(IDC_OPT_STARTUP, input_.launchOnStartup);
     Check(IDC_OPT_CLIPBOARD, s.monitorClipboard);
     Check(IDC_OPT_SITEVIDEOS, s.siteVideosEnabled);
+    siteSignIn_ = s.siteVideosSignIn;
+    Put(IDC_OPT_SITESIGNIN_LIST, SignInSummary(siteSignIn_));
 
     captureKeys_ = s.captureKeys;
     browserMenus_ = BrowserMenus{s.chromiumMenu, s.firefoxMenu};
@@ -675,6 +678,14 @@ void OptionsDialog::OnPageCommand(int id, int code)
     case IDC_OPT_SITEVIDEOS:
         ShowSiteTools();
         break;
+    case IDC_OPT_SITESIGNIN: {
+        SiteSignInDialog dialog(CurrentTheme(), siteSignIn_);
+        if (auto setting = dialog.Run(Handle())) {
+            siteSignIn_ = std::move(*setting);
+            Put(IDC_OPT_SITESIGNIN_LIST, SignInSummary(siteSignIn_));
+        }
+        break;
+    }
     case IDC_OPT_SITETOOLS_CHECK:
         if (input_.checkSiteTools) {
             input_.checkSiteTools();
@@ -876,6 +887,7 @@ bool OptionsDialog::Store()
     s.mediaSiteExceptions = mediaPanel_.siteExceptions;
     s.mediaDrmNotice = mediaPanel_.drmNotice;
     s.siteVideosEnabled = IsChecked(IDC_OPT_SITEVIDEOS);
+    s.siteVideosSignIn = siteSignIn_;
 
     StoreCategory(currentCategory_);
     for (const model::Category& category : categories_) {
@@ -1011,6 +1023,7 @@ void OptionsDialog::ApplyEditedFields(const model::Settings& edited, model::Sett
     current.mediaSiteExceptions = edited.mediaSiteExceptions;
     current.mediaDrmNotice = edited.mediaDrmNotice;
     current.siteVideosEnabled = edited.siteVideosEnabled;
+    current.siteVideosSignIn = edited.siteVideosSignIn;
     current.temporaryDirectory = edited.temporaryDirectory;
     current.setFileDateFromServer = edited.setFileDateFromServer;
     current.showStartDialog = edited.showStartDialog;

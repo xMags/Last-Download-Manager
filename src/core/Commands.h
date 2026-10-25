@@ -290,6 +290,8 @@ struct FetchManifestCommand {
 struct LookUpSiteVideoCommand {
     std::int64_t lookupId = 0;  // chosen by the caller, at least 1
     std::string pageUrl;        // any address core::CheckSitePage accepts
+    // The browser's cookies for the page's site, when Options let it sign in there (decision E1).
+    std::vector<model::Cookie> cookies;
 };
 
 // The caller no longer wants the answer (the tab went to another page). It is not sent.

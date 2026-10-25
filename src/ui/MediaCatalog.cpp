@@ -148,11 +148,12 @@ void MediaCatalog::OnSitePage(BrowserConnectionId connection, browser::SitePage 
     item.siteVideo = true;
     item.state = MediaItem::State::Fetching;
     item.lookupId = ++lastLookupId_;
+    item.cookies = page.cookies;  // the sign-in, for the lookup and the download
     lookups_[item.lookupId] = key;
     const std::int64_t lookupId = item.lookupId;
     tab.items.push_back(std::move(item));
     if (hooks_.lookUp) {
-        hooks_.lookUp(core::LookUpSiteVideoCommand{lookupId, video->address});
+        hooks_.lookUp(core::LookUpSiteVideoCommand{lookupId, video->address, page.cookies});
     }
     if (hooks_.changed) {
         hooks_.changed(connection, page.tabId);
@@ -171,10 +172,13 @@ void FillSiteItem(MediaItem& item, const core::SiteLookupFinished& finished)
     item.siteTitle = finished.video->title;
     // Cookies the resolver got from the site while reading the page, which the site wants back
     // with the requests for its files. Not the browser's.
-    item.cookies.clear();
+    // Beside the browser's for the site, when the user let it sign in there.
     for (const media::SiteCookie& site : finished.video->cookies) {
         model::Cookie cookie{site.domain, site.hostOnly, site.path, site.secure, site.expires, site.name, site.value};
-        if (model::IsValidCookie(cookie)) {
+        const bool known = std::any_of(item.cookies.begin(), item.cookies.end(), [&cookie](const model::Cookie& c) {
+            return c.domain == cookie.domain && c.path == cookie.path && c.name == cookie.name;
+        });
+        if (!known && model::IsValidCookie(cookie)) {
             item.cookies.push_back(std::move(cookie));
         }
     }

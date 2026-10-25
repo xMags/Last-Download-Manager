@@ -214,6 +214,18 @@ BEGIN
     PUSHBUTTON "Cancel", IDCANCEL, 243, 159, 50, 14
 END
 
+IDD_SITE_SIGNIN DIALOGEX 0, 0, 260, 228
+STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Sign in on sites"
+FONT 9, "Segoe UI", 400, 0, 0x1
+BEGIN
+    LTEXT "Some videos play only for a signed-in account: on Vimeo, Instagram and Reddit, and age-restricted or members-only ones on YouTube. For the sites you check, LDM asks your browser for the cookies it keeps for that site and gives them to yt-dlp for that page only. They are never sent anywhere else and never kept by yt-dlp.", -1, 7, 7, 246, 50
+    CONTROL "", IDC_SI_LIST, "SysListView32", LVS_REPORT | LVS_NOCOLUMNHEADER | LVS_SINGLESEL | WS_BORDER | WS_TABSTOP, 7, 60, 246, 102
+    LTEXT "YouTube: Google may flag or suspend an account that programs use. Use a second account if you want to be safe.", -1, 7, 168, 246, 26
+    DEFPUSHBUTTON "OK", IDOK, 149, 207, 50, 14
+    PUSHBUTTON "Cancel", IDCANCEL, 203, 207, 50, 14
+END
+
 IDD_SITE_PLAYLIST DIALOGEX 0, 0, 380, 252
 STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Download videos"
@@ -564,10 +576,12 @@ BEGIN
     AUTOCHECKBOX "&Download videos from web pages", IDC_OPT_SITEVIDEOS, 7, 7, 286, 10, WS_TABSTOP
     LTEXT "On a video page of YouTube, Dailymotion, Vimeo, Twitch, SoundCloud, TED, Bandcamp or Instagram, the media panel offers the video's qualities. On any other page, right-click and choose Download video with LDM, or use Find video in Add URL. LDM asks yt-dlp, a free program, what the page offers, then downloads the video itself.", -1, 7, 22, 286, 42
     LTEXT "Turning this on downloads yt-dlp, and Deno, which yt-dlp needs for YouTube, from their GitHub pages: about 61 MB, 125 MB on disk. LDM keeps them up to date.", -1, 7, 66, 286, 18
-    GROUPBOX "Components", -1, 7, 88, 286, 74
-    LTEXT "", IDC_OPT_SITETOOLS_STATUS, 14, 101, 272, 36
-    PUSHBUTTON "&Check for updates", IDC_OPT_SITETOOLS_CHECK, 14, 141, 80, 14, WS_TABSTOP
-    PUSHBUTTON "&Remove components", IDC_OPT_SITETOOLS_REMOVE, 100, 141, 80, 14, WS_TABSTOP
+    GROUPBOX "Components", -1, 7, 86, 286, 62
+    LTEXT "", IDC_OPT_SITETOOLS_STATUS, 14, 97, 272, 26
+    PUSHBUTTON "&Check for updates", IDC_OPT_SITETOOLS_CHECK, 14, 127, 80, 14, WS_TABSTOP
+    PUSHBUTTON "&Remove components", IDC_OPT_SITETOOLS_REMOVE, 100, 127, 80, 14, WS_TABSTOP
+    PUSHBUTTON "&Sign in on sites...", IDC_OPT_SITESIGNIN, 7, 156, 80, 14, WS_TABSTOP
+    LTEXT "", IDC_OPT_SITESIGNIN_LIST, 93, 159, 200, 20, SS_NOPREFIX
 END
 
 IDD_OPTIONS_FILETYPES DIALOGEX 0, 0, 300, 200

@@ -32,4 +32,22 @@ struct SitePage {
 // automatic offer). A host matches itself and its subdomains.
 [[nodiscard]] std::vector<std::string> AutomaticSiteHosts();
 
+// A site whose videos may need the user's account (video-sites round 2, decision E1): with the
+// user's consent in Options, the browser hands LDM the cookies it sends to the site's pages, and
+// LDM hands them to the resolver for that page only.
+struct SignInSite {
+    std::string_view key;   // stored in Settings::siteVideosSignIn
+    std::string_view name;  // shown in Options
+    std::string_view hosts;  // space-separated; each matches itself and its subdomains
+    bool flagsAccounts = false;  // the site is known to flag accounts that programs use (YouTube)
+};
+
+[[nodiscard]] const std::vector<SignInSite>& SignInSites();
+
+// The hosts of the sites `setting` (space-separated keys) turns on; unknown keys are ignored.
+[[nodiscard]] std::vector<std::string> SignInHosts(std::string_view setting);
+
+// Whether `setting` turns sign-in on for the site of `pageUrl`.
+[[nodiscard]] bool UsesSignIn(std::string_view setting, std::string_view pageUrl);
+
 }  // namespace ldm::core

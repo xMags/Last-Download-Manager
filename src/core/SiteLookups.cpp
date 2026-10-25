@@ -1,6 +1,7 @@
 #include "core/SiteLookups.h"
 
 #include "core/SiteList.h"
+#include "model/Cookie.h"
 
 #include <algorithm>
 #include <iterator>
@@ -8,6 +9,13 @@
 namespace ldm::core {
 
 namespace {
+
+// An answer got with the user's sign-in may show what an answer without it would not, and the
+// other way round: they are kept apart.
+std::string CacheKey(const std::string& pageUrl, const std::string& cookies)
+{
+    return cookies.empty() ? pageUrl : pageUrl + "\n(signed in)";
+}
 
 SiteLookupFinished Failed(SiteLookupFinished::Problem problem, std::string message)
 {
@@ -36,13 +44,14 @@ void SiteLookups::LookUp(const LookUpSiteVideoCommand& command)
                     Failed(SiteLookupFinished::Problem::Video, "This page is not one LDM can look for videos on."));
         return;
     }
-    if (const Cached* cached = Recent(page->address, kPanelReuse)) {
+    const std::string cookies = model::CookiesToText(command.cookies);
+    if (const Cached* cached = Recent(CacheKey(page->address, cookies), kPanelReuse)) {
         SiteLookupFinished answer;
         answer.video = cached->video;
         AnswerPanel(command.lookupId, std::move(answer));
         return;
     }
-    Pending* pending = Join(page->address);
+    Pending* pending = Join(page->address, cookies);
     if (pending == nullptr) {
         AnswerPanel(command.lookupId, Failed(SiteLookupFinished::Problem::Busy, "Too many videos are being looked up at once."));
         return;
@@ -62,20 +71,20 @@ void SiteLookups::Cancel(std::int64_t panelLookupId)
     }
 }
 
-void SiteLookups::Refresh(model::DownloadId id, std::int64_t epoch, const std::string& pageUrl)
+void SiteLookups::Refresh(model::DownloadId id, std::int64_t epoch, const std::string& pageUrl, const std::string& cookies)
 {
     const auto page = CheckSitePage(pageUrl);
     if (!page) {
         refreshed_(id, epoch, Failed(SiteLookupFinished::Problem::Video, "The download has no video page to ask again."));
         return;
     }
-    if (const Cached* cached = Recent(page->address, kRefreshReuse)) {
+    if (const Cached* cached = Recent(CacheKey(page->address, cookies), kRefreshReuse)) {
         SiteLookupFinished answer;
         answer.video = cached->video;
         refreshed_(id, epoch, answer);
         return;
     }
-    Pending* pending = Join(page->address);
+    Pending* pending = Join(page->address, cookies);
     if (pending == nullptr) {
         refreshed_(id, epoch, Failed(SiteLookupFinished::Problem::Busy, "Too many videos are being looked up at once."));
         return;
@@ -102,7 +111,7 @@ void SiteLookups::OnProxyResolved(model::DownloadId key, const std::optional<std
         return;  // dropped meanwhile
     }
     it->second.awaitingProxy = false;
-    resolver_.Resolve(SiteLookupRequest{lookupId, it->second.pageUrl, proxy});
+    resolver_.Resolve(SiteLookupRequest{lookupId, it->second.pageUrl, proxy, it->second.cookies});
 }
 
 void SiteLookups::OnFinished(model::DownloadId key, const SiteLookupFinished& finished)
@@ -120,7 +129,7 @@ void SiteLookups::OnFinished(model::DownloadId key, const SiteLookupFinished& fi
         answer = Failed(SiteLookupFinished::Problem::Busy, "The lookup was stopped.");
     }
     if (answer.video) {
-        Remember(pending.pageUrl, *answer.video);
+        Remember(CacheKey(pending.pageUrl, pending.cookies), *answer.video);
     }
     for (const std::int64_t panelId : pending.panelIds) {
         AnswerPanel(panelId, answer);
@@ -130,10 +139,10 @@ void SiteLookups::OnFinished(model::DownloadId key, const SiteLookupFinished& fi
     }
 }
 
-SiteLookups::Pending* SiteLookups::Join(const std::string& pageUrl)
+SiteLookups::Pending* SiteLookups::Join(const std::string& pageUrl, const std::string& cookies)
 {
     for (auto& [id, pending] : pending_) {
-        if (pending.pageUrl == pageUrl) {
+        if (pending.pageUrl == pageUrl && pending.cookies.empty() == cookies.empty()) {
             return &pending;
         }
     }
@@ -143,6 +152,7 @@ SiteLookups::Pending* SiteLookups::Join(const std::string& pageUrl)
     const std::int64_t lookupId = ++lastLookupId_;
     Pending& pending = pending_[lookupId];
     pending.pageUrl = pageUrl;
+    pending.cookies = cookies;
     Start(lookupId, pending);
     return &pending;
 }
@@ -154,7 +164,7 @@ void SiteLookups::Start(std::int64_t lookupId, Pending& pending)
         pending.awaitingProxy = true;
         return;
     }
-    resolver_.Resolve(SiteLookupRequest{lookupId, pending.pageUrl, lookup.proxy});
+    resolver_.Resolve(SiteLookupRequest{lookupId, pending.pageUrl, lookup.proxy, pending.cookies});
 }
 
 const SiteLookups::Cached* SiteLookups::Recent(const std::string& pageUrl, std::chrono::steady_clock::duration age)

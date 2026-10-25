@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <array>
+#include <fstream>
 #include <system_error>
 #include <utility>
 #include <variant>
@@ -105,7 +106,8 @@ ResolverFailure ReadResolverFailure(std::string_view errors)
     return {Problem::Resolver, error};
 }
 
-std::vector<std::wstring> YtDlpArguments(const YtDlpTools& tools, const core::SiteLookupRequest& request)
+std::vector<std::wstring> YtDlpArguments(const YtDlpTools& tools, const core::SiteLookupRequest& request,
+                                         const std::optional<std::filesystem::path>& cookieFile)
 {
     // Every behaviour is set here: no user configuration, no playlist, no progress or colours,
     // LDM's own cache and FFmpeg, and LDM's choice of proxy, where an empty one means directly.
@@ -116,9 +118,12 @@ std::vector<std::wstring> YtDlpArguments(const YtDlpTools& tools, const core::Si
         L"--ffmpeg-location", tools.ffmpegFolder.native(),
         L"--js-runtimes", L"deno:" + tools.deno.native(),
         L"--proxy", base::ToUtf16(request.proxy.value_or(std::string())),
-        L"--dump-single-json",
-        // The address after "--" is never read as an option, whatever it starts with.
-        L"--", base::ToUtf16(request.pageUrl)};
+        L"--dump-single-json"};
+    if (cookieFile) {
+        arguments.insert(arguments.end(), {L"--cookies", cookieFile->native()});
+    }
+    // The address after "--" is never read as an option, whatever it starts with.
+    arguments.insert(arguments.end(), {L"--", base::ToUtf16(request.pageUrl)});
     return arguments;
 }
 
@@ -226,9 +231,32 @@ core::SiteLookupFinished YtDlpResolver::LookUp(const core::SiteLookupRequest& re
     std::error_code ignored;
     std::filesystem::create_directories(tools_.cacheFolder, ignored);
 
+    // The user's sign-in for this page only: a file in LDM's own folder for yt-dlp to read, which
+    // it may also write back to. Removed when the lookup ends, however it ends.
+    std::optional<std::filesystem::path> cookieFile;
+    struct RemoveFile {
+        const std::optional<std::filesystem::path>& path;
+        ~RemoveFile()
+        {
+            if (path) {
+                std::error_code error;
+                std::filesystem::remove(*path, error);
+            }
+        }
+    } removeCookies{cookieFile};
+    if (!request.cookies.empty()) {
+        cookieFile = tools_.cacheFolder / (L"sign-in-" + std::to_wstring(request.lookupId) + L".txt");
+        std::ofstream out(*cookieFile, std::ios::binary | std::ios::trunc);
+        out << "# Netscape HTTP Cookie File\n" << request.cookies;
+        out.close();
+        if (!out) {
+            return Failure(Problem::Resolver, "Your sign-in for this site could not be handed to yt-dlp.");
+        }
+    }
+
     ChildProcessRequest run;
     run.program = tools_.ytDlp;
-    run.arguments = YtDlpArguments(tools_, request);
+    run.arguments = YtDlpArguments(tools_, request, cookieFile);
     run.workingDirectory = tools_.ytDlp.parent_path();
     run.separateErrors = true;
     run.limits.timeout = kLookupTimeout;

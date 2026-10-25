@@ -360,6 +360,9 @@ private:
     // A site video added from a list, at its first start: its tracks from `video` by its
     // siteQuality. The reason when none fit.
     [[nodiscard]] std::optional<std::string> ChooseSiteTracks(Entry& entry, const media::SiteVideo& video);
+    // A site video's cookies for its resolver, as SiteLookupRequest::cookies: empty unless Options
+    // let the browser sign in on its site.
+    [[nodiscard]] std::string SignInCookies(const model::Download& download);
     void OnUpdateChecked(const UpdateCheckOutcome& outcome);
 
     // HLS playlists fetched at a stream's start or a live recording's reload, by fetch id. Their

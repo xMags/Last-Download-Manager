@@ -80,6 +80,8 @@ export function parseConfig(message) {
     sitePages: message.sitePages === true,
     // The sites whose pages LDM wants; LDM 5.1 sends no list and wants YouTube's.
     siteHosts: hostList(message.siteHosts),
+    // The sites the user let sign in through the browser: their pages go with their cookies.
+    signInHosts: hostList(message.signInHosts) ?? [],
   };
 }
 
@@ -385,6 +387,7 @@ export function makeSitePage(page) {
     url: page.url,
     pageTitle: cleanPageText(page.pageTitle, MAX_PAGE_TITLE_BYTES) || undefined,
     userAgent: cleanText(page.userAgent, 1024) || 'Mozilla/5.0',
+    cookies: Array.isArray(page.cookies) ? cookieList(page.cookies) : undefined,
   };
 }
 
@@ -405,6 +408,7 @@ export function makeSiteRequest(request) {
     incognito: Boolean(request.incognito),
     pageTitle: cleanPageText(request.pageTitle, MAX_PAGE_TITLE_BYTES) || undefined,
     userAgent: cleanText(request.userAgent, 1024) || 'Mozilla/5.0',
+    cookies: Array.isArray(request.cookies) ? cookieList(request.cookies) : undefined,
   };
 }
 
@@ -481,11 +485,11 @@ export function parseCookiesRequest(message) {
   return { requestId: message.id, url: message.url };
 }
 
-/** The answer to a cookies request: the browser's cookies for its address, as LDM accepts them. */
-export function makeCookies(requestId, browserCookies) {
+/** Browser cookies as LDM accepts them: converted, without repeats, at most MAX_COOKIES. */
+export function cookieList(browserCookies) {
   const seen = new Set();
   const cookies = [];
-  for (const cookie of browserCookies) {
+  for (const cookie of browserCookies ?? []) {
     const converted = toLdmCookie(cookie);
     const key = converted && `${converted.domain}\t${converted.path}\t${converted.name}`;
     if (converted && !seen.has(key) && cookies.length < MAX_COOKIES) {
@@ -493,7 +497,12 @@ export function makeCookies(requestId, browserCookies) {
       cookies.push(converted);
     }
   }
-  return { v: PROTOCOL_VERSION, id: nextId(), type: 'cookies', requestId, cookies };
+  return cookies;
+}
+
+/** The answer to a cookies request: the browser's cookies for its address, as LDM accepts them. */
+export function makeCookies(requestId, browserCookies) {
+  return { v: PROTOCOL_VERSION, id: nextId(), type: 'cookies', requestId, cookies: cookieList(browserCookies) };
 }
 
 /**

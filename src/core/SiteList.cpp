@@ -255,6 +255,69 @@ std::optional<SitePage> CheckSitePage(std::string_view pageUrl)
     return page;
 }
 
+const std::vector<SignInSite>& SignInSites()
+{
+    static const std::vector<SignInSite> sites{
+        {"youtube", "YouTube", "youtube.com youtu.be", true},
+        {"vimeo", "Vimeo", "vimeo.com", false},
+        {"instagram", "Instagram", "instagram.com", false},
+        {"facebook", "Facebook", "facebook.com fb.watch", false},
+        {"x", "X (Twitter)", "x.com twitter.com", false},
+        {"reddit", "Reddit", "reddit.com", false},
+        {"tiktok", "TikTok", "tiktok.com", false},
+        {"twitch", "Twitch", "twitch.tv", false},
+        {"dailymotion", "Dailymotion", "dailymotion.com", false},
+        {"bilibili", "Bilibili", "bilibili.com bilibili.tv", false},
+        {"patreon", "Patreon", "patreon.com", false},
+        {"niconico", "Niconico", "nicovideo.jp", false},
+    };
+    return sites;
+}
+
+std::vector<std::string> SignInHosts(std::string_view setting)
+{
+    const auto words = [](std::string_view text) {
+        std::vector<std::string_view> out;
+        while (!text.empty()) {
+            const size_t start = text.find_first_not_of(' ');
+            if (start == std::string_view::npos) {
+                break;
+            }
+            text.remove_prefix(start);
+            const size_t end = std::min(text.find(' '), text.size());
+            out.push_back(text.substr(0, end));
+            text.remove_prefix(end);
+        }
+        return out;
+    };
+    std::vector<std::string> hosts;
+    const auto keys = words(setting);
+    for (const SignInSite& site : SignInSites()) {
+        if (std::find(keys.begin(), keys.end(), site.key) == keys.end()) {
+            continue;
+        }
+        for (const std::string_view host : words(site.hosts)) {
+            hosts.emplace_back(host);
+        }
+    }
+    return hosts;
+}
+
+bool UsesSignIn(std::string_view setting, std::string_view pageUrl)
+{
+    const auto url = ParseUrl(pageUrl);
+    if (!url) {
+        return false;
+    }
+    for (const std::string& host : SignInHosts(setting)) {
+        if (url->host == host || (url->host.size() > host.size() && url->host.ends_with(host) &&
+                                  url->host[url->host.size() - host.size() - 1] == '.')) {
+            return true;
+        }
+    }
+    return false;
+}
+
 std::vector<std::string> AutomaticSiteHosts()
 {
     std::vector<std::string> hosts;

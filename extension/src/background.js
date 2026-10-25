@@ -14,7 +14,8 @@ import { cleanKeys, LinkClicks } from './link-clicks.js';
 import { MediaDetector } from './media-detect.js';
 import { isDownloadAddress, makeCookies, makeSiteRequest, menuSettings, parseCookiesRequest, parseMediaList }
   from './protocol.js';
-import { SitePages } from './site-pages.js';
+import { cookieStoreFor } from './cookie-stores.js';
+import { isSiteAddress, SitePages } from './site-pages.js';
 import { applyToolbar, toolbarAppearance } from './toolbar.js';
 import { VideoPositions } from './video-positions.js';
 
@@ -124,8 +125,23 @@ const sitePages = new SitePages(api, connection, {
   ready: settingsLoaded,
   isEnabled: () => enabled && rules.sitePages === true,
   hosts: () => rules.siteHosts ?? null,
+  signInHosts: () => rules.signInHosts ?? [],
+  cookiesFor: signInCookies,
   userAgent: navigator.userAgent,
 });
+
+/**
+ * The cookies the browser sends to `url`, from the store of `tab`'s window (a private window has
+ * its own): the user's sign-in for a site LDM's Options let sign in. None when that store cannot
+ * be found.
+ */
+async function signInCookies(url, tab) {
+  const storeId = await cookieStoreFor(api, tab);
+  if (storeId === null) {
+    return [];
+  }
+  return (await api.cookies.getAll(storeId ? { url, storeId } : { url }).catch(() => [])) ?? [];
+}
 
 /** Shows `text` in the page the user is on; pages the browser protects show nothing. */
 function tell(tab, text) {
@@ -171,8 +187,11 @@ async function onMenuClick(info, tab) {
       break;
     case MenuId.VideoPage:
     case MenuId.VideoLink: {
+      const page = clickedVideoPage(info);
+      const signIn = isSiteAddress(page, rules.signInHosts ?? []);
       const message = makeSiteRequest({
-        url: clickedVideoPage(info),
+        url: page,
+        cookies: signIn ? await signInCookies(page, tab) : undefined,
         referrer: info.menuItemId === MenuId.VideoLink ? info.pageUrl : undefined,
         incognito: Boolean(tab?.incognito),
         pageTitle: info.menuItemId === MenuId.VideoPage ? tab?.title : undefined,

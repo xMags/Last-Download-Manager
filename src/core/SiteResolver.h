@@ -16,6 +16,10 @@ struct SiteLookupRequest {
     std::int64_t lookupId = 0;  // at least 1
     std::string pageUrl;        // core::CheckSitePage's address of the page
     std::optional<std::string> proxy;  // as downloads use it; nothing: connect directly
+    // The user's sign-in for the page's site (decision E1): the browser's cookies for it as
+    // model::CookiesToText lines. Empty for none. Handed to the resolver for this page only and
+    // never kept by it.
+    std::string cookies;
 };
 
 // Lookups and their proxy questions use DownloadIds in their own range, below the update check's

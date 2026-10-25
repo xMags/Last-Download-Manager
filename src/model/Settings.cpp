@@ -368,6 +368,7 @@ void VisitSettings(Visitor& v, SettingsType& s)
     v.Bool("siteVideos.enabled", s.siteVideosEnabled);
     v.Int64("siteVideos.ytDlpCheckUnixMs", s.siteVideosYtDlpCheckUnixMs, 0, std::numeric_limits<std::int64_t>::max());
     v.Int64("siteVideos.denoCheckUnixMs", s.siteVideosDenoCheckUnixMs, 0, std::numeric_limits<std::int64_t>::max());
+    v.String("siteVideos.signIn", s.siteVideosSignIn);
 }
 
 }  // namespace

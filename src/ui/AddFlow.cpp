@@ -251,6 +251,7 @@ void AddFlow::AddSitePlaylist(const media::SitePlaylist& playlist, const browser
         if (!request.userAgent.empty()) {
             command.userAgent = request.userAgent;
         }
+        command.cookies = request.cookies;  // the sign-in it asks again with when it starts
         const std::string title = entry.title.empty() ? "video " + std::to_string(index + 1) : entry.title;
         const auto page = core::CheckSitePage(entry.url);
         core::MediaChoice media;

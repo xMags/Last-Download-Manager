@@ -233,6 +233,9 @@ struct Settings {
     bool siteVideosEnabled = false;
     std::int64_t siteVideosYtDlpCheckUnixMs = 0;
     std::int64_t siteVideosDenoCheckUnixMs = 0;
+    // The sites (core::SignInSites keys, space-separated) whose pages the resolver is asked about
+    // with the browser's cookies for them, so videos that need an account work. None by default.
+    std::string siteVideosSignIn;
 };
 
 using SettingsMap = std::map<std::string, std::string, std::less<>>;

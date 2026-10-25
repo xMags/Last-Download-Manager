@@ -35,7 +35,8 @@ public:
     void Cancel(std::int64_t panelLookupId);
     // A download needs fresh addresses for `pageUrl`: answered through `refreshed`. An answer is
     // reused only when it is very recent, since the old addresses are what failed.
-    void Refresh(model::DownloadId id, std::int64_t epoch, const std::string& pageUrl);
+    // `cookies`: the download's sign-in for the site, as SiteLookupRequest::cookies.
+    void Refresh(model::DownloadId id, std::int64_t epoch, const std::string& pageUrl, const std::string& cookies);
     void CancelRefresh(model::DownloadId id);
 
     // Events with an id for which IsSiteLookupKey holds.
@@ -54,6 +55,7 @@ private:
 
     struct Pending {
         std::string pageUrl;
+        std::string cookies;  // the sign-in it asks with; lookups with and without one are apart
         bool awaitingProxy = false;
         std::vector<std::int64_t> panelIds;
         std::vector<RefreshKey> refreshes;
@@ -63,8 +65,9 @@ private:
         std::chrono::steady_clock::time_point at;
     };
 
-    // The lookup for `pageUrl` that is under way, or a new one; nothing when too many are.
-    [[nodiscard]] Pending* Join(const std::string& pageUrl);
+    // The lookup for `pageUrl` with this sign-in that is under way, or a new one; nothing when too
+    // many are.
+    [[nodiscard]] Pending* Join(const std::string& pageUrl, const std::string& cookies);
     void Start(std::int64_t lookupId, Pending& pending);
     [[nodiscard]] const Cached* Recent(const std::string& pageUrl, std::chrono::steady_clock::duration age);
     void Remember(const std::string& pageUrl, const media::SiteVideo& video);
@@ -78,7 +81,7 @@ private:
     Clock& clock_;
     Refreshed refreshed_;
     std::map<std::int64_t, Pending> pending_;  // by the resolver's lookup id
-    std::map<std::string, Cached> cache_;      // by page
+    std::map<std::string, Cached> cache_;      // by CacheKey: the page, and whether signed in
     std::int64_t lastLookupId_ = 0;
 };
 

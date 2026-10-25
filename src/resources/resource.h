@@ -671,6 +671,10 @@
 #define IDC_SP_NONE 1858
 #define IDC_SP_QUALITY 1859
 #define IDC_SP_START 1860
+#define IDD_SITE_SIGNIN 349
+#define IDC_SI_LIST 1861
+#define IDC_OPT_SITESIGNIN 1862
+#define IDC_OPT_SITESIGNIN_LIST 1863
 
 // The Grabber window's list menu
 #define ID_GRABBER_CHECK 40200

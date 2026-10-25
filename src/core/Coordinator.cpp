@@ -2023,14 +2023,14 @@ void Coordinator::StartStream(Entry& entry)
             return;
         }
         entry.pendingRefresh = true;
-        sites_->Refresh(d.id, d.epoch, d.url);
+        sites_->Refresh(d.id, d.epoch, d.url, SignInCookies(d));
         return;
     }
     if (d.siteVideo && sites_ && !entry.refreshedThisRun &&
         (entry.forceRefresh || NeedsFreshAddresses(d, ports_.clock->NowUnixMs()))) {
         // The run waits for the answer as it waits for playlists: running, without the engine.
         entry.pendingRefresh = true;
-        sites_->Refresh(d.id, d.epoch, d.url);
+        sites_->Refresh(d.id, d.epoch, d.url, SignInCookies(d));
         return;
     }
     if (!entry.listedThisRun && IsRecording(d)) {
@@ -2066,6 +2066,17 @@ void Coordinator::StartStream(Entry& entry)
         const auto now = ports_.clock->Steady();
         entry.nextPlaylistReload = entry.listedThisRun ? now + ReloadInterval(d, true) : now;
     }
+}
+
+std::string Coordinator::SignInCookies(const model::Download& download)
+{
+    // The browser's cookies come with a site video only when Options let the browser sign in on
+    // its site (decision E1); turning that off since is honoured here too.
+    if (download.cookieSecret.empty() || !UsesSignIn(settings_.siteVideosSignIn, download.url)) {
+        return {};
+    }
+    auto cookies = ports_.secrets->Unprotect(download.cookieSecret);
+    return cookies ? std::move(cookies).Value() : std::string();
 }
 
 std::vector<std::string> Coordinator::StreamCookieLines(const model::Download& download)

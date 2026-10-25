@@ -123,3 +123,24 @@ test('without a list from LDM, YouTube is the site', async () => {
   await withList.onUpdated(2, { url: watch('aqz-KE-bpKQ') }, { url: watch('aqz-KE-bpKQ') });
   assert.deepEqual(listed.posted.map((m) => m.tabId), [1]);
 });
+
+test('a site the user let sign in goes with its cookies, other sites without', async () => {
+  const connection = recorder();
+  const asked = [];
+  const sitePages = new SitePages(fakeApi(), connection, {
+    ready: Promise.resolve(), isEnabled: () => true, hosts: () => ['vimeo.com', 'dailymotion.com'],
+    signInHosts: () => ['vimeo.com'],
+    cookiesFor: async (url) => {
+      asked.push(url);
+      return [{ domain: '.vimeo.com', hostOnly: false, path: '/', secure: true, expirationDate: 1900000000, name: 'vuid', value: 'v1' }];
+    },
+    userAgent: 'UA/1',
+  });
+  await sitePages.onUpdated(1, { url: 'https://vimeo.com/76979871' }, { url: 'https://vimeo.com/76979871' });
+  await sitePages.onUpdated(2, { url: 'https://www.dailymotion.com/video/x5kesuj' }, { url: 'https://www.dailymotion.com/video/x5kesuj' });
+  assert.deepEqual(asked, ['https://vimeo.com/76979871']);
+  const [vimeo, dailymotion] = connection.posted;
+  assert.equal(vimeo.cookies.length, 1);
+  assert.equal(vimeo.cookies[0].name, 'vuid');
+  assert.equal(dailymotion.cookies, undefined);
+});
