@@ -978,6 +978,24 @@ TEST_F(CoordinatorTest, QuotaHoldsDownloadsUntilThePeriodEnds)
     EXPECT_FALSE(View(first).waitingForQuota);
 }
 
+TEST_F(CoordinatorTest, AFinalNameTakenMeanwhileMovesTheFileToANumberedName)
+{
+    const DownloadId id = *Add("http://x.test/a.zip").id;
+    Finish(id, 1, TransferOutcome::Completed, {{0, 5, 5}}, std::nullopt, 5);
+    ASSERT_EQ(engine_.finalizes.size(), 1u);
+    const fs::path taken = engine_.finalizes.back().finalPath;
+    // Another program saved a file under the same name while the download ran.
+    files_.Put(taken, 10);
+    ldm::core::FinalizeFinished failed;
+    failed.failure = ldm::core::TransferFailure{ldm::core::FailureReason::DiskError, ldm::core::FailureClass::Fatal, 0, "exists"};
+    Send(id, 1, failed);
+    ASSERT_EQ(engine_.finalizes.size(), 2u);
+    EXPECT_EQ(engine_.finalizes.back().finalPath, taken.parent_path() / L"a (2).zip");
+    Send(id, 1, ldm::core::FinalizeFinished{});
+    EXPECT_EQ(View(id).download.status, DownloadStatus::Completed);
+    EXPECT_EQ(View(id).download.fileName, "a (2).zip");
+}
+
 TEST_F(CoordinatorTest, QuotaWarningLetsTheUserKeepDownloading)
 {
     EnableQuota(*coordinator_, true);
