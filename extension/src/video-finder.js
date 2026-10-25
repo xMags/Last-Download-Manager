@@ -27,11 +27,32 @@
   let lastReport = '';
   let lastReportTime = 0;
 
+  /**
+   * The page's videos. A player built as a web component keeps its video inside a shadow root
+   * (VK's), so when the page itself has none, the open shadow roots are searched too.
+   */
+  function pageVideos() {
+    const videos = [...document.querySelectorAll('video')];
+    if (videos.length > 0) {
+      return videos;
+    }
+    const search = (root) => {
+      for (const element of root.querySelectorAll('*')) {
+        if (element.shadowRoot) {
+          videos.push(...element.shadowRoot.querySelectorAll('video'));
+          search(element.shadowRoot);
+        }
+      }
+    };
+    search(document);
+    return videos;
+  }
+
   /** The largest visible video, playing ones first; null when there is none. */
   function bestVideo() {
     let best = null;
     let bestScore = 0;
-    for (const video of document.querySelectorAll('video')) {
+    for (const video of pageVideos()) {
       const rect = video.getBoundingClientRect();
       const visibleWidth = Math.min(rect.right, window.innerWidth) - Math.max(rect.left, 0);
       const visibleHeight = Math.min(rect.bottom, window.innerHeight) - Math.max(rect.top, 0);
