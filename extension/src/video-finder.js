@@ -26,6 +26,19 @@
   let offset = isTop ? { x: 0, y: 0 } : null;  // unknown until the parent frame says
   let lastReport = '';
   let lastReportTime = 0;
+  // The search of shadow roots walks the whole document, too much for every display frame.
+  const SHADOW_SEARCH_MS = 1000;
+  let shadowVideos = [];
+  let shadowSearchTime = -Infinity;
+  const toldFrames = new WeakMap();  // child frame -> the offset it was last told
+
+  const send = (message) => {
+    try {
+      api.runtime.sendMessage(message).catch(() => {});
+    } catch {
+      // the extension was reloaded; this frame's script is orphaned
+    }
+  };
 
   /**
    * The page's videos. A player built as a web component keeps its video inside a shadow root
@@ -36,6 +49,11 @@
     if (videos.length > 0) {
       return videos;
     }
+    const now = performance.now();
+    if (now - shadowSearchTime < SHADOW_SEARCH_MS) {
+      return shadowVideos.filter((video) => video.isConnected);
+    }
+    shadowSearchTime = now;
     const search = (root) => {
       for (const element of root.querySelectorAll('*')) {
         if (element.shadowRoot) {
@@ -45,6 +63,7 @@
       }
     };
     search(document);
+    shadowVideos = videos;
     return videos;
   }
 
@@ -76,11 +95,17 @@
     }
     for (const frame of document.querySelectorAll('iframe, frame')) {
       const rect = frame.getBoundingClientRect();
+      const x = offset.x + rect.left + frame.clientLeft;
+      const y = offset.y + rect.top + frame.clientTop;
+      const told = toldFrames.get(frame);
+      // Told again when it moved, and with each heartbeat, for a frame that reloaded meanwhile.
+      if (told && told.x === x && told.y === y && told.window === frame.contentWindow &&
+          Date.now() - told.time < HEARTBEAT_MS) {
+        continue;
+      }
       try {
-        frame.contentWindow?.postMessage({ [OFFSET_KEY]: {
-          x: offset.x + rect.left + frame.clientLeft,
-          y: offset.y + rect.top + frame.clientTop,
-        } }, '*');
+        frame.contentWindow?.postMessage({ [OFFSET_KEY]: { x, y } }, '*');
+        toldFrames.set(frame, { x, y, window: frame.contentWindow, time: Date.now() });
       } catch {
         // a frame being torn down
       }
@@ -123,7 +148,7 @@
     }
     lastReport = text;
     lastReportTime = now;
-    api.runtime.sendMessage(message).catch(() => {});
+    send(message);
   }
 
   // Positions change with scrolling, resizing, layout and playback; checking once per display
@@ -141,6 +166,7 @@
     const started = on && !tracking;
     tracking = on;
     lastReport = '';
+    shadowSearchTime = -Infinity;
     if (started) {
       requestAnimationFrame(onFrame);
     }
@@ -165,5 +191,5 @@
   });
 
   // A frame added or reloaded while the tab already has media asks whether to track.
-  api.runtime.sendMessage({ type: 'video-finder-ready' }).catch(() => {});
+  send({ type: 'video-finder-ready' });
 })();
