@@ -12,6 +12,7 @@
 #include <filesystem>
 #include <map>
 #include <mutex>
+#include <shared_mutex>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -46,8 +47,9 @@ struct ResolverFailure {
 
 class YtDlpResolver final : public core::SiteResolver {
 public:
-    // `listener` must outlive this object.
-    YtDlpResolver(YtDlpTools tools, core::EngineListener& listener);
+    // `listener` and `toolsLock` must outlive this object. A run holds `toolsLock` shared, so the
+    // programs are not replaced while they run (SiteToolsFolder::Lock); tests may pass none.
+    YtDlpResolver(YtDlpTools tools, core::EngineListener& listener, std::shared_mutex* toolsLock = nullptr);
     // Ends running lookups and joins the workers; lookups still queued are dropped unanswered, as
     // the core is shutting down.
     ~YtDlpResolver() override;
@@ -68,6 +70,7 @@ private:
 
     const YtDlpTools tools_;
     core::EngineListener& listener_;
+    std::shared_mutex* const toolsLock_;
 
     std::mutex mutex_;
     std::condition_variable wake_;

@@ -2,7 +2,8 @@
 // the folder named by LDM_FAKE_SITE_DIR, keyed by the video id of the page address it was given
 // (the last argument): <id>.json goes to standard output, <id>.err to standard error, <id>.sleep
 // holds milliseconds to wait first, and <id>.code the exit code. It writes its arguments, one per
-// line, to <id>.args.
+// line, to <id>.args. Asked only "--version", it prints LDM_FAKE_VERSION, as the tool installer's
+// check of a new yt-dlp expects.
 #include <windows.h>
 
 #include <chrono>
@@ -31,6 +32,15 @@ void Write(FILE* to, const std::string& text)
 
 int wmain(int argc, wchar_t** argv)
 {
+    // The installer's check: answers with LDM_FAKE_VERSION.
+    if (argc == 2 && std::wstring(argv[1]) == L"--version") {
+        char version[64] = {};
+        if (::GetEnvironmentVariableA("LDM_FAKE_VERSION", version, sizeof(version)) == 0) {
+            return 92;
+        }
+        Write(stdout, std::string(version) + "\n");
+        return 0;
+    }
     wchar_t folder[MAX_PATH] = {};
     if (argc < 2 || ::GetEnvironmentVariableW(L"LDM_FAKE_SITE_DIR", folder, MAX_PATH) == 0) {
         return 90;

@@ -15,7 +15,8 @@ add_executable(ldm_integration_tests
     MediaFixtures.h
     MediaFixtureTests.cpp
     RecordingListener.h
-    SiteResolverTests.cpp)
+    SiteResolverTests.cpp
+    ToolInstallerTests.cpp)
 target_link_libraries(ldm_integration_tests PRIVATE
     ldm_engine
     ldm_grabber
