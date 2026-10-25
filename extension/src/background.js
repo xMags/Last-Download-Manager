@@ -12,7 +12,8 @@ import { FormPosts } from './form-posts.js';
 import { downloadVerdict, keySettings, sendsForcedLinkToLdm } from './key-rules.js';
 import { cleanKeys, LinkClicks } from './link-clicks.js';
 import { MediaDetector } from './media-detect.js';
-import { PanelTabs } from './panel-tabs.js';
+import { OffTabDownloads } from './off-tab-downloads.js';
+import { OffTabs } from './off-tabs.js';
 import { replacesPage } from './media-rules.js';
 import { isDownloadAddress, makeCookies, makeSiteRequest, menuSettings, parseCookiesRequest, parseMediaList }
   from './protocol.js';
@@ -96,9 +97,12 @@ const settingsLoaded = api.storage.local.get(['enabled', 'config']).then((stored
 
 const clicks = new LinkClicks();
 const forms = new FormPosts();
+const offTabs = new OffTabs(api);
+const offTabDownloads = new OffTabDownloads(api, (tabId) => offTabs.isOff(tabId));
 
 const capture = new DownloadCapture(api, connection, {
-  ready: settingsLoaded,
+  ready: Promise.all([settingsLoaded, offTabs.ready]),
+  fromOffTab: (download) => offTabDownloads.fromOffTab(download),
   isEnabled: () => enabled,
   rules: () => rules,
   postFor: (url) => forms.postFor(url),
@@ -122,8 +126,7 @@ const mediaDetector = new MediaDetector(api, connection, {
   rules: () => rules,
   userAgent: navigator.userAgent,
 });
-const panelTabs = new PanelTabs(api);
-const videoPositions = new VideoPositions(api, connection, (tabId) => panelTabs.isOff(tabId));
+const videoPositions = new VideoPositions(api, connection, (tabId) => offTabs.isOff(tabId));
 const sitePages = new SitePages(api, connection, {
   ready: settingsLoaded,
   isEnabled: () => enabled && rules.sitePages === true,
@@ -219,13 +222,13 @@ async function onMenuClick(info, tab) {
 function render() {
   const warn = (error) => console.warn('LDM: could not update the toolbar button', error);
   applyToolbar(api, toolbarAppearance({ enabled, connection: connection.state })).catch(warn);
-  for (const tabId of panelTabs.switchedTabs()) {
+  for (const tabId of offTabs.switchedTabs()) {
     renderTab(tabId);
   }
 }
 
 function renderTab(tabId) {
-  const look = toolbarAppearance({ enabled, connection: connection.state, panelOff: panelTabs.isOff(tabId) });
+  const look = toolbarAppearance({ enabled, connection: connection.state, tabOff: offTabs.isOff(tabId) });
   // A tab that closed meanwhile refuses; nothing to do then.
   applyToolbar(api, look, tabId).catch(() => {});
 }
@@ -240,7 +243,7 @@ async function setEnabled(on) {
 
 // Listeners are registered synchronously, so events that woke the script are not missed.
 api.action.onClicked.addListener(async (tab) => {
-  await Promise.all([settingsLoaded, panelTabs.ready]);  // a click can wake the script first
+  await Promise.all([settingsLoaded, offTabs.ready]);  // a click can wake the script first
   // A grey button means "click to turn on": with integration off, the click turns it back on.
   if (!enabled) {
     await setEnabled(true);
@@ -249,7 +252,7 @@ api.action.onClicked.addListener(async (tab) => {
   if (!Number.isSafeInteger(tab?.id) || tab.id < 0) {
     return;
   }
-  await panelTabs.toggle(tab.id);
+  await offTabs.toggle(tab.id);
   videoPositions.panelSwitched(tab.id);
   renderTab(tab.id);
 });
@@ -269,7 +272,10 @@ if (api.downloads.onDeterminingFilename) {
 
 // Form submissions of pages and frames, for downloads that answer them.
 const FORM_FILTER = { urls: ['<all_urls>'], types: ['main_frame', 'sub_frame'] };
-api.webRequest.onBeforeRequest.addListener((details) => forms.onBeforeRequest(details), FORM_FILTER, ['requestBody']);
+api.webRequest.onBeforeRequest.addListener((details) => {
+  forms.onBeforeRequest(details);
+  offTabDownloads.onBeforeRequest(details);
+}, FORM_FILTER, ['requestBody']);
 api.webRequest.onSendHeaders.addListener((details) => forms.onSendHeaders(details), FORM_FILTER, ['requestHeaders']);
 api.webRequest.onHeadersReceived.addListener((details) => forms.onHeadersReceived(details), FORM_FILTER, ['responseHeaders']);
 
@@ -299,12 +305,12 @@ api.tabs.onRemoved.addListener((tabId) => {
   mediaDetector.reset(tabId);
   videoPositions.forget(tabId);
   sitePages.reset(tabId);
-  panelTabs.forget(tabId).catch(() => {});
+  offTabs.forget(tabId).catch(() => {});
 });
 // Video sites change the video without loading a page; the address still changes.
 api.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   // Firefox drops a tab's own button look when the tab loads a page.
-  if (changeInfo.status === 'loading' && panelTabs.switchedTabs().includes(tabId)) {
+  if (changeInfo.status === 'loading' && offTabs.switchedTabs().includes(tabId)) {
     renderTab(tabId);
   }
   sitePages.onUpdated(tabId, changeInfo, tab).catch((error) => console.warn('LDM: site page failed', error));
@@ -364,7 +370,8 @@ function onPageMessage(message, sender, reply) {
       // links without a file extension, unless the settings say otherwise) are answered at once;
       // their download, if any, is forced when it starts.
       const settings = keySettings(rules);
-      if (!enabled || !settings.force.enabled || !isDownloadAddress(message.href) || !sendsForcedLinkToLdm(settings, message.href)) {
+      if (!enabled || offTabs.isOff(sender.tab?.id) || !settings.force.enabled || !isDownloadAddress(message.href) ||
+          !sendsForcedLinkToLdm(settings, message.href)) {
         reply({ handled: false });
         return false;
       }
@@ -397,7 +404,7 @@ api.runtime.onMessage.addListener((message, sender, reply) => {
   return false;
 });
 
-Promise.all([settingsLoaded, panelTabs.ready]).then(() => {
+Promise.all([settingsLoaded, offTabs.ready]).then(() => {
   render();
   updateMenu();
   connection.connect();

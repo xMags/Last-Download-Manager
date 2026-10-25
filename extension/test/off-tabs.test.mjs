@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { PanelTabs } from '../src/panel-tabs.js';
+import { OffTabs } from '../src/off-tabs.js';
 
 function sessionStorage(initial) {
   const data = { ...initial };
@@ -16,7 +16,7 @@ function sessionStorage(initial) {
 
 test('a click turns the panel off in one tab and the next turns it on again', async () => {
   const storage = sessionStorage({});
-  const tabs = new PanelTabs({ storage });
+  const tabs = new OffTabs({ storage });
   assert.equal(await tabs.toggle(4), true);
   assert.equal(tabs.isOff(4), true);
   assert.equal(tabs.isOff(5), false, 'other tabs keep their panel');
@@ -29,17 +29,17 @@ test('a click turns the panel off in one tab and the next turns it on again', as
 
 test('the switched tabs survive the background script stopping', async () => {
   const storage = sessionStorage({});
-  await new PanelTabs({ storage }).toggle(9);
-  const restarted = new PanelTabs({ storage });
+  await new OffTabs({ storage }).toggle(9);
+  const restarted = new OffTabs({ storage });
   await restarted.ready;
   assert.equal(restarted.isOff(9), true);
 });
 
 test('stored junk is ignored, and a browser without session storage still works', async () => {
-  const junk = new PanelTabs({ storage: sessionStorage({ panelTabs: [[1, true], ['x', true], [2, 'yes'], 3] }) });
+  const junk = new OffTabs({ storage: sessionStorage({ offTabs: [[1, true], ['x', true], [2, 'yes'], 3] }) });
   await junk.ready;
   assert.deepEqual(junk.switchedTabs(), [1]);
-  const bare = new PanelTabs({ storage: {} });
+  const bare = new OffTabs({ storage: {} });
   await bare.ready;
   assert.equal(await bare.toggle(1), true);
 });

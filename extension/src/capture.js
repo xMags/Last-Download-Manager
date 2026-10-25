@@ -19,6 +19,8 @@ export class DownloadCapture {
    *          userAgent: string, canHideDownloadUi: boolean}} options
    *   ready settles once the stored settings are loaded; a download can wake the extension first.
    *   keyVerdict gives 'prevent', 'force' or 'none' for {url, finalUrl, referrer, mimeType, fileName}.
+   *   fromOffTab (optional) resolves to true for {url, finalUrl, referrer} of a download from a tab
+   *   where the user turned integration off.
    *   postFor (optional) gives the form submission a download answered, or null.
    */
   constructor(api, connection, options) {
@@ -41,6 +43,10 @@ export class DownloadCapture {
     }
     const url = item.url;
     const finalUrl = item.finalUrl || item.url;
+    // A switched-off tab is left alone entirely, the force keys included.
+    if (await this.options.fromOffTab?.({ url, finalUrl, referrer: item.referrer })) {
+      return false;
+    }
     const verdict = this.options.keyVerdict({ url, finalUrl, referrer: item.referrer, mimeType: item.mime, fileName });
     if (verdict === 'prevent') {
       return false;

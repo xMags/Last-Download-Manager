@@ -31,22 +31,22 @@ test('connected shows the plain icon', () => {
   const look = toolbarAppearance({ enabled: true, connection: State.Connected });
   assert.equal(look.icon, 'on');
   assert.equal(look.badge, '');
-  assert.match(look.title, /click to hide the video panel in this tab/);
+  assert.match(look.title, /click to turn integration off in this tab/);
 });
 
-test('a tab with the panel off shows the grey icon and says a click shows it again', () => {
-  const look = toolbarAppearance({ enabled: true, connection: State.Connected, panelOff: true });
+test('a switched-off tab shows the grey icon and says a click turns it on again', () => {
+  const look = toolbarAppearance({ enabled: true, connection: State.Connected, tabOff: true });
   assert.equal(look.icon, 'off');
   assert.equal(look.badge, '');
-  assert.match(look.title, /panel is off in this tab/);
-  assert.match(look.title, /click to show the video panel/);
-  const failing = toolbarAppearance({ enabled: true, connection: State.Error, panelOff: true });
+  assert.match(look.title, /Integration is off in this tab/);
+  assert.match(look.title, /click to turn integration on in this tab/);
+  const failing = toolbarAppearance({ enabled: true, connection: State.Error, tabOff: true });
   assert.equal(failing.badge, '!', 'an error still shows in a switched-off tab');
   assert.match(failing.title, /\[error\]/);
 });
 
 test('with integration off, every tab says a click turns it on', () => {
-  const look = toolbarAppearance({ enabled: false, connection: State.Connected, panelOff: true });
+  const look = toolbarAppearance({ enabled: false, connection: State.Connected, tabOff: true });
   assert.equal(look.icon, 'off');
   assert.match(look.title, /\[disabled\]/);
   assert.match(look.title, /click to turn browser integration on/);
