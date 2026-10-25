@@ -344,10 +344,17 @@ TEST(SiteVideo, DashPieceListsBecomeSegmentsUnderTheirBase)
     EXPECT_EQ(VariantIds(video), (std::vector<std::string>{"v1"}));
     EXPECT_EQ(video.offer.variants[0].audioGroup, "pieces");
     const auto& track = std::get<TrackSegments>(video.offer.variants[0].source);
-    ASSERT_EQ(track.segments.size(), 3u);
-    EXPECT_EQ(track.segments[0].url, "https://cdn.example.test/v/init.mp4");
-    EXPECT_EQ(track.segments[1].url, "https://cdn.example.test/v/1.m4s");
-    EXPECT_EQ(track.segments[2].url, "https://other.example.test/2.m4s");
+    ASSERT_EQ(track.inits.size(), 1u);  // the first piece, without a duration
+    EXPECT_EQ(track.inits[0].url, "https://cdn.example.test/v/init.mp4");
+    ASSERT_EQ(track.segments.size(), 2u);
+    EXPECT_EQ(track.segments[0].url, "https://cdn.example.test/v/1.m4s");
+    EXPECT_EQ(track.segments[0].init, 0u);
+    EXPECT_EQ(track.segments[1].url, "https://other.example.test/2.m4s");
+    // A single piece is the track itself, not an init.
+    ASSERT_EQ(video.offer.audio.size(), 1u);
+    const auto& sound = std::get<TrackSegments>(*video.offer.audio[0].source);
+    EXPECT_TRUE(sound.inits.empty());
+    ASSERT_EQ(sound.segments.size(), 1u);
     EXPECT_DOUBLE_EQ(track.targetSeconds, 4);
     ASSERT_EQ(video.offer.audio.size(), 1u);
     EXPECT_EQ(video.offer.audio[0].groupId, "pieces");

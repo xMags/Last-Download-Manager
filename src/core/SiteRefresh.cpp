@@ -1,5 +1,6 @@
 #include "core/SiteRefresh.h"
 
+#include "core/MediaPieces.h"
 #include "core/Url.h"
 
 #include <charconv>
@@ -9,39 +10,64 @@ namespace ldm::core {
 
 namespace {
 
-// The format `id` of the video's offer: its address and the length the site states.
+// The format `id` of the video's offer: where its pieces come from, and the length the site states.
 struct OfferedFormat {
-    std::string url;
+    const media::SegmentSource* source = nullptr;
     std::optional<std::int64_t> bytes;
 };
 
 std::optional<OfferedFormat> FindFormat(const media::MediaOffer& offer, const std::string& id)
 {
-    const auto from = [](const std::optional<media::SiteFormat>& site, const media::SegmentSource& source)
-        -> std::optional<OfferedFormat> {
-        const auto* track = std::get_if<media::TrackSegments>(&source);
-        if (!site || track == nullptr || track->segments.size() != 1) {
-            return std::nullopt;
-        }
-        return OfferedFormat{track->segments.front().url, site->bytes};
-    };
     for (const media::Variant& variant : offer.variants) {
         if (variant.site && variant.site->id == id) {
-            return from(variant.site, variant.source);
+            return OfferedFormat{&variant.source, variant.site->bytes};
         }
     }
     for (const media::Rendition& audio : offer.audio) {
         if (audio.site && audio.site->id == id && audio.source) {
-            return from(audio.site, *audio.source);
+            return OfferedFormat{&*audio.source, audio.site->bytes};
         }
     }
     return std::nullopt;
 }
 
-// The track's current address: a whole-file track's only piece. Its sourceUrl is the video's page.
+// The address of a whole file, from a format that is one.
+std::optional<std::string> WholeFileUrl(const OfferedFormat& format)
+{
+    const auto* track = std::get_if<media::TrackSegments>(format.source);
+    if (track == nullptr || track->segments.size() != 1 || !track->inits.empty() || track->segments.front().range) {
+        return std::nullopt;
+    }
+    return track->segments.front().url;
+}
+
+// The track's current address: its first piece (a whole-file track's only one). Its sourceUrl is
+// the video's page, or for HLS its playlist.
 std::string_view AddressOf(const model::MediaTrack& track)
 {
     return track.pieces.empty() ? std::string_view() : std::string_view(track.pieces.front().url);
+}
+
+// How a stored track and its format fit together: the same kind of delivery, or not at all.
+enum class Fit {
+    WholeFile,
+    Playlist,
+    Pieces,
+    None,
+};
+
+Fit FitOf(const model::Download& download, const model::MediaTrack& track, const OfferedFormat& format)
+{
+    if (std::holds_alternative<media::PlaylistAddress>(*format.source)) {
+        return download.kind == model::DownloadKind::Hls ? Fit::Playlist : Fit::None;
+    }
+    if (download.kind != model::DownloadKind::Dash) {
+        return Fit::None;
+    }
+    if (track.wholeFile) {
+        return WholeFileUrl(format) ? Fit::WholeFile : Fit::None;
+    }
+    return Fit::Pieces;
 }
 
 }  // namespace
@@ -82,12 +108,15 @@ bool NeedsFreshAddresses(const model::Download& download, std::int64_t nowUnixMs
     }
     const std::int64_t margin = std::chrono::milliseconds(kSiteAddressMargin).count();
     for (const model::MediaTrack& track : download.tracks) {
-        if (track.siteFormat.empty() || !track.wholeFile) {
+        if (track.siteFormat.empty()) {
             continue;
         }
-        const auto expires = AddressExpiresAtUnixMs(AddressOf(track));
-        if (expires && *expires - margin <= nowUnixMs) {
-            return true;
+        // A file's or first piece's address, and for HLS the playlist's own.
+        for (const std::string_view address : {AddressOf(track), std::string_view(track.sourceUrl)}) {
+            const auto expires = AddressExpiresAtUnixMs(address);
+            if (expires && *expires - margin <= nowUnixMs) {
+                return true;
+            }
         }
     }
     return false;
@@ -104,13 +133,17 @@ FreshAddresses ApplyFreshAddresses(model::Download& download, const media::SiteV
     // Checked first, so a missing format changes nothing at all.
     std::vector<std::optional<OfferedFormat>> formats;
     for (const model::MediaTrack& track : download.tracks) {
-        if (track.siteFormat.empty() || !track.wholeFile || track.pieces.empty()) {
+        if (track.siteFormat.empty() || (track.wholeFile && track.pieces.empty())) {
             formats.emplace_back();
             continue;
         }
         auto format = FindFormat(video.offer, track.siteFormat);
         if (!format) {
             result.failure = "The site no longer offers the quality this download was started with.";
+            return result;
+        }
+        if (FitOf(download, track, *format) == Fit::None) {
+            result.failure = "The site now offers the quality this download was started with in another way.";
             return result;
         }
         formats.push_back(std::move(format));
@@ -121,18 +154,44 @@ FreshAddresses ApplyFreshAddresses(model::Download& download, const media::SiteV
         }
         model::MediaTrack& track = download.tracks[t];
         const OfferedFormat& format = *formats[t];
-        const bool sameBytes = track.expectedBytes && format.bytes && *track.expectedBytes == *format.bytes;
-        if (!sameBytes) {
-            track.ranges.clear();
-            track.pieces.front().done = false;
-            track.pieces.front().bytes.reset();
-            track.expectedBytes = format.bytes;
-            result.restarted.push_back(t);
-        } else if (AddressOf(track) == format.url) {
-            continue;  // nothing new
+        switch (FitOf(download, track, format)) {
+        case Fit::Playlist:
+            // Its pieces' addresses may be signed too: the playlist is always read again.
+            track.sourceUrl = std::get<media::PlaylistAddress>(*format.source).url;
+            result.relist.push_back(t);
+            break;
+        case Fit::Pieces: {
+            model::MediaTrack fresh = track;
+            FillTrack(fresh, std::get<media::TrackSegments>(*format.source));
+            if (!KeepProgress(fresh, track)) {
+                result.restarted.push_back(t);
+            }
+            track.keys = std::move(fresh.keys);
+            track.pieces = std::move(fresh.pieces);
+            track.ranges = std::move(fresh.ranges);
+            track.wholeFile = fresh.wholeFile;
+            result.changed.push_back(t);
+            break;
         }
-        track.pieces.front().url = format.url;
-        result.changed.push_back(t);
+        case Fit::WholeFile: {
+            const std::string url = *WholeFileUrl(format);
+            const bool sameBytes = track.expectedBytes && format.bytes && *track.expectedBytes == *format.bytes;
+            if (!sameBytes) {
+                track.ranges.clear();
+                track.pieces.front().done = false;
+                track.pieces.front().bytes.reset();
+                track.expectedBytes = format.bytes;
+                result.restarted.push_back(t);
+            } else if (AddressOf(track) == url) {
+                break;  // nothing new
+            }
+            track.pieces.front().url = url;
+            result.changed.push_back(t);
+            break;
+        }
+        case Fit::None:
+            break;  // refused above
+        }
     }
     return result;
 }

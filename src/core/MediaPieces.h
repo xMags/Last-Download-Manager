@@ -34,6 +34,12 @@ struct TrackAppend {
 // Takes over `live`; a track that reaches media::kMaxSegmentsPerTrack pieces stops being live.
 TrackAppend AppendTrack(model::MediaTrack& track, const media::TrackSegments& reloaded);
 
+// A site video's track listed again from fresh addresses (`fresh`) takes over what `previous`
+// had on disk when both list the same pieces: as many, of the same kinds, lengths, ranges, init
+// sections and keys. Only the addresses may differ. Returns whether it did; otherwise `fresh`
+// starts from nothing, so bytes of two different lists are never joined.
+bool KeepProgress(model::MediaTrack& fresh, const model::MediaTrack& previous);
+
 // The parts folder's file for a piece: "t<track>\<index>.<extension>". The extension is the
 // address's when it is a short alphanumeric one and the piece is not an init section; otherwise
 // "mp4" for init sections, "vtt" for subtitles and "ts" for the rest. FFmpeg reads the files by

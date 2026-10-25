@@ -202,6 +202,26 @@ TrackAppend AppendTrack(model::MediaTrack& track, const media::TrackSegments& re
     return append;
 }
 
+bool KeepProgress(model::MediaTrack& fresh, const model::MediaTrack& previous)
+{
+    const auto samePlace = [](const model::MediaPiece& a, const model::MediaPiece& b) {
+        return a.kind == b.kind && a.rangeOffset == b.rangeOffset && a.rangeLength == b.rangeLength &&
+               a.durationUs == b.durationUs && a.init == b.init && a.key.has_value() == b.key.has_value();
+    };
+    if (fresh.live || previous.live || fresh.wholeFile != previous.wholeFile ||
+        fresh.pieces.size() != previous.pieces.size() || fresh.keys.size() != previous.keys.size() ||
+        !std::equal(fresh.pieces.begin(), fresh.pieces.end(), previous.pieces.begin(), samePlace)) {
+        return false;
+    }
+    for (size_t i = 0; i < fresh.pieces.size(); ++i) {
+        fresh.pieces[i].done = previous.pieces[i].done;
+        fresh.pieces[i].bytes = previous.pieces[i].bytes;
+        fresh.pieces[i].skipped = previous.pieces[i].skipped;
+    }
+    fresh.ranges = previous.ranges;
+    return true;
+}
+
 std::filesystem::path PiecePath(const std::filesystem::path& parts, std::uint32_t track,
                                 const model::MediaTrack& owner, std::uint32_t index)
 {
