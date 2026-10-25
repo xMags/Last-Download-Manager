@@ -2,6 +2,8 @@
 // handed to LDM together with the form (checklist ENG-11). The browser's downloads API does not
 // say how a download was requested, so webRequest observes the submissions.
 
+import { replacesPage } from './media-rules.js';
+
 const LIFETIME_MS = 30000;
 const MAX_POSTS = 20;
 export const MAX_BODY_BYTES = 1024 * 1024;
@@ -84,9 +86,20 @@ export class FormPosts {
     if (!body || body.bytes.length > MAX_BODY_BYTES) {
       return;
     }
-    this.posts.push({ url: started.url, ...body, at: this.now() });
+    this.posts.push({ requestId: details.requestId, url: started.url, ...body, at: this.now() });
     if (this.posts.length > MAX_POSTS) {
       this.posts.shift();
+    }
+  }
+
+  /**
+   * webRequest.onHeadersReceived: a submission answered with a page did not download anything, so
+   * it is forgotten at once. A later download of the same address is then not sent as the form
+   * again, and the form's fields (a login's too) do not stay in memory.
+   */
+  onHeadersReceived(details) {
+    if (replacesPage(details)) {
+      this.posts = this.posts.filter((post) => post.requestId !== details.requestId);
     }
   }
 
