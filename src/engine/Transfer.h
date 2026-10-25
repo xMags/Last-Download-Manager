@@ -15,6 +15,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <random>
@@ -213,6 +214,9 @@ private:
 
     TokenBucket bucket_;
     int allowedConnections_ = 1;
+    // The most connections the server took at once in this run: lowered when it refuses an extra one
+    // while others still receive, and never ramped past again.
+    int connectionCeiling_ = std::numeric_limits<int>::max();
     Clock::time_point nextRampAt_{};
     Clock::time_point nextProgressAt_{};
     std::int64_t receivedThisRun_ = 0;

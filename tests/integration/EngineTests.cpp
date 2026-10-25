@@ -8,6 +8,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <chrono>
 #include <condition_variable>
 #include <filesystem>
@@ -247,6 +248,19 @@ TEST_F(EngineTest, ConnectionLimitIsHonored)
     ASSERT_EQ(finished.outcome, TransferOutcome::Completed);
     EXPECT_LE(server_->Log().at("maxActive").get<int>(), 2);
     EXPECT_TRUE(HoldsPayload(PartialPath(), server_->Size()));
+}
+
+TEST_F(EngineTest, AServerThatRefusesExtraConnectionsIsKeptToTheOnesItTakes)
+{
+    auto request = Request("/limited.bin");
+    request.maxConnections = 8;
+    const auto finished = Run(std::move(request), 120s);
+    ASSERT_EQ(finished.outcome, TransferOutcome::Completed) << (finished.failure ? finished.failure->message : "");
+    EXPECT_TRUE(HoldsPayload(PartialPath(), server_->Size()));
+    const nlohmann::json log = server_->Log();
+    const auto refused = std::count_if(log.at("entries").begin(), log.at("entries").end(),
+                                       [](const nlohmann::json& entry) { return entry.value("event", "") == "refused"; });
+    EXPECT_GT(refused, 0) << "the run asked for more connections than the server takes";
 }
 
 TEST_F(EngineTest, ServerWithoutRangesGetsExactlyOneConnection)

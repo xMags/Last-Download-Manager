@@ -692,6 +692,16 @@ void Transfer::OnConnectionDone(CURL* easy, CURLcode result, Clock::time_point n
         // that drops every connection after a while must still be able to finish the file.
         segment->attempts = 0;
     }
+    // A server that limits connections per client may refuse an extra one: BitChute's file servers
+    // answer 404 past a few at once. While other connections of the run still receive, that says
+    // nothing about the file, so the run keeps to the connections it has and asks for the segment
+    // again later. A refusal of the only connection left is the server's answer, as before.
+    const bool refused = failure && (failure->reason == FailureReason::NotFound || failure->reason == FailureReason::PermissionDenied);
+    if (refused && phase_ == Phase::Running && !connections_.empty()) {
+        connectionCeiling_ = static_cast<int>(connections_.size());
+        allowedConnections_ = std::min(allowedConnections_, connectionCeiling_);
+        failure->failureClass = FailureClass::Retryable;
+    }
     HandleFailure(*segment, failure.value_or(MakeFailure(FailureReason::Internal, FailureClass::Fatal,
                                                           "connection ended without a result")),
                   retryAfter, now);
@@ -745,7 +755,7 @@ void Transfer::FillSlots(Clock::time_point now)
         return;
     }
 
-    if (allowedConnections_ < request_.maxConnections && now >= nextRampAt_) {
+    if (allowedConnections_ < std::min(request_.maxConnections, connectionCeiling_) && now >= nextRampAt_) {
         allowedConnections_ += 1;
         nextRampAt_ = now + services_.tuning->rampInterval;
     }
@@ -989,7 +999,7 @@ Transfer::Clock::time_point Transfer::NextDeadline(Clock::time_point now) const
         return now;
     }
     Clock::time_point deadline = nextProgressAt_;
-    if (phase_ == Phase::Running && allowedConnections_ < request_.maxConnections) {
+    if (phase_ == Phase::Running && allowedConnections_ < std::min(request_.maxConnections, connectionCeiling_)) {
         deadline = std::min(deadline, nextRampAt_);
     }
     for (const Segment& segment : segments_) {
