@@ -80,6 +80,7 @@ MediaPanelController::MediaPanelController(BrowserWindows& windows, const Theme&
                                        Place();
                                    },
                                    [this] { Place(); },
+                                   [this](HWND menuWindow) { MenuShown(menuWindow); },
                                });
 }
 
@@ -140,6 +141,9 @@ void MediaPanelController::OnVideoPosition(BrowserConnectionId connection, const
 {
     const TabKey key{connection, position.tabId};
     if (position.visible) {
+        if (followed_ && followed_->tab != key) {
+            panel_.SetMinWidth(0);  // the width matched another tab's menu
+        }
         followed_ = Followed{key, position};
         panel_.StartTimer(kFollowIntervalMs);
     } else if (followed_ && followed_->tab == key) {
@@ -220,7 +224,24 @@ void MediaPanelController::OpenMenu(POINT anchor)
     UniqueMenu menu(::CreatePopupMenu());
     std::vector<PanelAction> actions;
     AppendItems(menu.get(), items, actions);
-    const PanelMenuPainter painter(theme_, panel_.Dpi());
+    PanelMenuPainter painter(theme_, panel_.Dpi());
+    // In full mode the panel and its menu are one width: the wider of the two sets it. The panel
+    // grows to the left, so it stays over the video's corner.
+    menuLineWidth_ = 0;
+    if (!panel_.Mini()) {
+        if (menuEdgeDpi_ != panel_.Dpi()) {
+            menuEdge_ = -1;
+        }
+        // Until a menu was seen, a guess; MenuShown corrects it while the menu is open.
+        const int edge = menuEdge_ >= 0 ? menuEdge_ : ::GetSystemMetricsForDpi(SM_CXMENUCHECK, panel_.Dpi()) + 6;
+        RECT panelRect = panel_.WindowRect();
+        const int width = std::max<int>(panelRect.right - panelRect.left, painter.NaturalWidth(items) + edge);
+        panel_.SetMinWidth(width);
+        menuLineWidth_ = width - edge;
+        painter.SetMinimumWidth(menuLineWidth_);
+        panelRect = panel_.WindowRect();
+        anchor.x = panelRect.left;
+    }
     MENUINFO look{sizeof(look)};
     look.fMask = MIM_BACKGROUND | MIM_APPLYTOSUBMENUS;
     look.hbrBack = painter.Background();
@@ -235,11 +256,31 @@ void MediaPanelController::OpenMenu(POINT anchor)
     ::PostMessageW(panel_.Handle(), WM_NULL, 0, 0);
     panel_.SetMenuPainter(nullptr);
     menuOpen_ = false;
+    menuLineWidth_ = 0;
     // Browser events ran while the menu was open; the tab may be gone, so only its key is kept.
     if (command >= 1 && command <= actions.size()) {
         Run(actions[command - 1], key);
     }
     Place();
+}
+
+void MediaPanelController::MenuShown(HWND menuWindow)
+{
+    if (menuLineWidth_ <= 0 || menuWindow == nullptr) {
+        return;
+    }
+    RECT menuRect{};
+    ::GetWindowRect(menuWindow, &menuRect);
+    const int menuWidth = menuRect.right - menuRect.left;
+    menuEdge_ = menuWidth - menuLineWidth_;
+    menuEdgeDpi_ = panel_.Dpi();
+    // The first menu at this DPI was sized by a guess: the panel follows the menu's real width,
+    // and the menu moves under the panel (also when Windows moved it in from the screen edge).
+    panel_.SetMinWidth(menuWidth);
+    const RECT panelRect = panel_.WindowRect();
+    const int panelWidth = panelRect.right - panelRect.left;
+    ::SetWindowPos(menuWindow, nullptr, panelRect.left, menuRect.top, std::max(menuWidth, panelWidth),
+                   menuRect.bottom - menuRect.top, SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOOWNERZORDER);
 }
 
 void MediaPanelController::Run(const PanelAction& action, const TabKey& key)

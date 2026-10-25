@@ -144,6 +144,9 @@ void MediaPanelWindow::Destroy()
 
 void MediaPanelWindow::UpdateFont(UINT dpi)
 {
+    if (dpi != dpi_) {
+        minWidth_ = 0;  // a width measured for another DPI
+    }
     dpi_ = dpi;
     font_ = CreateLabelFont(dpi);
     glyphs_ = CreateIconFont(Scale(kIcon96, dpi));
@@ -163,7 +166,7 @@ SIZE MediaPanelWindow::SizeForDpi(UINT dpi) const
     // never cut the text short.
     const int width = Scale(kPadding96 + kIcon96 + kGap96, dpi) + textWidth +
                       Scale(kGap96 + kArrow96 + kPadding96 + 2 * kSideButton96 + kTextSlack96, dpi);
-    return SIZE{width, height};
+    return SIZE{dpi == dpi_ ? std::max(width, minWidth_) : width, height};
 }
 
 SIZE MediaPanelWindow::SizeAt(POINT at) const
@@ -220,14 +223,39 @@ void MediaPanelWindow::SetMini(bool mini)
         return;
     }
     mini_ = mini;
-    if (window_ != nullptr && visible_) {
-        RECT rect{};
-        ::GetWindowRect(window_, &rect);
-        const SIZE size = SizeForDpi(dpi_);
-        // Keeps the right edge, where the panel sits over the video's corner.
-        ::SetWindowPos(window_, HWND_TOPMOST, rect.right - size.cx, rect.top, size.cx, size.cy, SWP_NOACTIVATE);
-        ::InvalidateRect(window_, nullptr, FALSE);
+    minWidth_ = 0;
+    ResizeKeepingRight();
+}
+
+void MediaPanelWindow::SetMinWidth(int width)
+{
+    if (minWidth_ == width) {
+        return;
     }
+    minWidth_ = width;
+    ResizeKeepingRight();
+}
+
+RECT MediaPanelWindow::WindowRect() const
+{
+    RECT rect{};
+    if (window_ != nullptr) {
+        ::GetWindowRect(window_, &rect);
+    }
+    return rect;
+}
+
+void MediaPanelWindow::ResizeKeepingRight()
+{
+    if (window_ == nullptr || !visible_) {
+        return;
+    }
+    RECT rect{};
+    ::GetWindowRect(window_, &rect);
+    const SIZE size = SizeForDpi(dpi_);
+    // Keeps the right edge, where the panel sits over the video's corner.
+    ::SetWindowPos(window_, HWND_TOPMOST, rect.right - size.cx, rect.top, size.cx, size.cy, SWP_NOACTIVATE);
+    ::InvalidateRect(window_, nullptr, FALSE);
 }
 
 void MediaPanelWindow::ThemeChanged()
@@ -353,6 +381,7 @@ LRESULT MediaPanelWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lPar
         if (part == Part::Main && callbacks_.openMenu) {
             RECT rect{};
             ::GetWindowRect(window_, &rect);
+            menuShownReported_ = false;
             callbacks_.openMenu(POINT{rect.left, rect.bottom + Scale(2, dpi_)});
         } else if (part == Part::Small) {
             SetMini(true);
@@ -377,6 +406,15 @@ LRESULT MediaPanelWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lPar
         }
         return ::DefWindowProcW(window_, message, wParam, lParam);
     }
+    case WM_ENTERIDLE:
+        // The first idle moment of a menu comes once its top level is on screen, before any submenu.
+        if (wParam == MSGF_MENU && menuPainter_ != nullptr && !menuShownReported_) {
+            menuShownReported_ = true;
+            if (callbacks_.menuShown) {
+                callbacks_.menuShown(reinterpret_cast<HWND>(lParam));  // the menu's window, as documented
+            }
+        }
+        return 0;
     case WM_TIMER:
         if (wParam == kTimerId && callbacks_.tick) {
             callbacks_.tick();

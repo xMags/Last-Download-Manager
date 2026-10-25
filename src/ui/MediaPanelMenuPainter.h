@@ -6,6 +6,8 @@
 
 #include <windows.h>
 
+#include <vector>
+
 namespace ldm::ui {
 
 // Draws the media panel's menu (owner-drawn lines of a TrackPopupMenu menu): an icon column,
@@ -21,15 +23,22 @@ public:
     // The menu's background, also behind its edges and in its submenus.
     [[nodiscard]] HBRUSH Background() const noexcept { return background_.get(); }
 
+    // The widest of `items` (one menu level, without submenus) as Measure gives it.
+    [[nodiscard]] int NaturalWidth(const std::vector<PanelMenuItem>& items) const;
+    // Lines are never narrower than this, so the menu can be as wide as the panel above it.
+    void SetMinimumWidth(int width) noexcept { minimumWidth_ = width; }
+
     void Measure(MEASUREITEMSTRUCT& measure) const;
     void Draw(const DRAWITEMSTRUCT& draw) const;
 
 private:
     [[nodiscard]] int Px(int value96) const noexcept;
+    [[nodiscard]] int MeasureWidth(const PanelMenuItem& item) const;
 
     const Palette& colors_;
     bool dark_ = false;
     UINT dpi_ = USER_DEFAULT_SCREEN_DPI;
+    int minimumWidth_ = 0;
     UniqueFont text_;
     UniqueFont badgeFont_;
     UniqueFont icons_;
