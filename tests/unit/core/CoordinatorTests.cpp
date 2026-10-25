@@ -2,6 +2,7 @@
 #include "base/Result.h"
 #include "base/Utf.h"
 #include "core/Coordinator.h"
+#include "core/MediaDownloads.h"
 #include "storage/SqliteStore.h"
 
 #include <gtest/gtest.h>
@@ -1084,6 +1085,19 @@ TEST_F(CoordinatorTest, ASiteVideoIsStoredWithItsPageAndTrackFormats)
     EXPECT_EQ(stored->tracks[1].expectedBytes, 10'271'496);
     ASSERT_EQ(engine_.mediaStarts.size(), 1u);
     EXPECT_TRUE(engine_.mediaStarts[0].tracks[0].wholeFile);
+    for (const auto& track : engine_.mediaStarts[0].tracks) {
+        EXPECT_EQ(track.maxRequestBytes, ldm::core::kSiteVideoRequestBytes) << "the site slows long requests down";
+    }
+}
+
+TEST_F(CoordinatorTest, OtherStreamsHaveNoRequestCap)
+{
+    const AddResult result = Add("https://cdn.test/v.mpd", AddMode::StartNow, [](AddDownloadCommand& c) { c.media = DashChoice(); });
+    ASSERT_TRUE(result.id);
+    ASSERT_EQ(engine_.mediaStarts.size(), 1u);
+    for (const auto& track : engine_.mediaStarts[0].tracks) {
+        EXPECT_FALSE(track.maxRequestBytes);
+    }
 }
 
 TEST_F(CoordinatorTest, ASiteVideoNeedsItsCanonicalPageAndAFormatPerTrack)

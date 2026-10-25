@@ -28,6 +28,10 @@ struct TransferCredentials {
 struct TransferRequest {
     model::DownloadId id;
     std::int64_t epoch = 0;
+    // Every request asks for at most this many bytes, the first of a fresh run too, and a segment
+    // continues with the next request at once. Some servers slow down long requests (video
+    // sites). Nothing: no limit, and a fresh run starts with a plain GET (ENG-01).
+    std::optional<std::int64_t> maxRequestBytes;
 
     std::string url;
     std::optional<std::string> referer;
@@ -86,6 +90,8 @@ struct MediaTrackRequest {
     std::string url;
     std::filesystem::path path;
     std::vector<model::Segment> ranges;
+    // The cap of each request (TransferRequest::maxRequestBytes); a site video's track has one.
+    std::optional<std::int64_t> maxRequestBytes;
     // A live recording: the run does not complete when these pieces are done, but waits for
     // more through TransferEngine::ExtendMedia until an extension turns `live` off.
     bool live = false;

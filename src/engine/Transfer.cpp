@@ -230,7 +230,8 @@ void Transfer::StartConnection(Segment& segment, bool probe, Clock::time_point n
     connection->requestStart = segment.position;
     connection->position = segment.position;
     connection->probe = probe;
-    connection->ranged = !(probe && !resumeRun_);
+    // A capped run never asks for the whole file, so its first request is ranged too.
+    connection->ranged = !(probe && !resumeRun_) || request_.maxRequestBytes.has_value();
     connection->easy.reset(curl_easy_init());
     if (!connection->easy) {
         Fail(MakeFailure(FailureReason::Internal, FailureClass::Fatal, "could not create a connection"));
@@ -279,10 +280,21 @@ void Transfer::StartConnection(Segment& segment, bool probe, Clock::time_point n
     std::string range;
     if (connection->ranged) {
         range = std::to_string(segment.position) + "-";
+        std::optional<std::int64_t> last;
         if (segment.end && totalSize_ && *segment.end < *totalSize_) {
             // Bounded ranges reach into the next segment so the overlap can be compared (ENG-03).
-            const std::int64_t last = std::min(*segment.end + tuning.overlapBytes, *totalSize_) - 1;
-            range += std::to_string(last);
+            last = std::min(*segment.end + tuning.overlapBytes, *totalSize_) - 1;
+        }
+        if (request_.maxRequestBytes && *request_.maxRequestBytes > 0 &&
+            (!segment.end || segment.position + *request_.maxRequestBytes < *segment.end)) {
+            // A part of the segment only; the next request continues where this one ends.
+            last = segment.position + *request_.maxRequestBytes - 1;
+            connection->cappedEnd = *last + 1;
+        } else if (request_.maxRequestBytes && !last && segment.end) {
+            last = *segment.end - 1;  // the file's tail, still asked for with both ends
+        }
+        if (last) {
+            range += std::to_string(*last);
         }
         curl_easy_setopt(easy, CURLOPT_RANGE, range.c_str());  // copied by libcurl
     }
@@ -622,6 +634,7 @@ void Transfer::OnConnectionDone(CURL* easy, CURLcode result, Clock::time_point n
     }
     const std::optional<int> retryAfter = connection->headers.retryAfterSeconds;
     const bool reachedEnd = connection->reachedEnd;
+    const std::optional<std::int64_t> cappedEnd = connection->cappedEnd;
     const bool madeProgress = connection->position > connection->requestStart;
     RemoveConnection(*connection);  // `connection` is destroyed here
 
@@ -663,6 +676,10 @@ void Transfer::OnConnectionDone(CURL* easy, CURLcode result, Clock::time_point n
         if (segment->position >= *segment->end || reachedEnd) {
             segment->attempts = 0;
             return;
+        }
+        if (cappedEnd && segment->position >= *cappedEnd) {
+            segment->attempts = 0;
+            return;  // the part it asked for is complete; FillSlots serves the rest of the segment
         }
         failure = MakeFailure(FailureReason::ConnectionReset, FailureClass::Retryable,
                               "the server closed the connection before the segment was complete");
