@@ -42,6 +42,30 @@ function header(headers, name) {
   return found ? String(found.value ?? '') : '';
 }
 
+// Types a browser shows in the tab instead of downloading them.
+const SHOWN_TYPE = /^(text\/|image\/|video\/|audio\/|application\/(xhtml\+xml|xml|pdf|json)$)/;
+
+/**
+ * True when a tab's main-frame response replaces its page, so what the old page loaded is gone.
+ * Not for a page Chrome prerenders (it may never be shown), an empty answer (204, 205), a redirect
+ * (the next response decides) or a file the browser downloads, which leave the page as it was.
+ * @param {{statusCode: number, documentLifecycle?: string, responseHeaders?: {name: string, value?: string}[]}} response
+ */
+export function replacesPage(response) {
+  if (response.documentLifecycle === 'prerender') {
+    return false;
+  }
+  const status = response.statusCode;
+  if (status === 204 || status === 205 || (status >= 300 && status < 400)) {
+    return false;
+  }
+  if (/^\s*attachment/i.test(header(response.responseHeaders, 'content-disposition'))) {
+    return false;
+  }
+  const type = header(response.responseHeaders, 'content-type').split(';')[0].trim().toLowerCase();
+  return type === '' || SHOWN_TYPE.test(type);  // without a type the browser looks at the content
+}
+
 /** The response's whole size: Content-Length, or the total of a Content-Range. */
 export function responseSize(headers, statusCode) {
   if (statusCode === 206) {

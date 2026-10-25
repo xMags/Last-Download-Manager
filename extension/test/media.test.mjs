@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import { MediaDetector } from '../src/media-detect.js';
-import { classifyMedia, mediaRules, responseSize } from '../src/media-rules.js';
+import { classifyMedia, mediaRules, replacesPage, responseSize } from '../src/media-rules.js';
 import { makeMedia, makeMediaReset, makeVideoPosition, parseConfig, parseMediaList } from '../src/protocol.js';
 import { chooseVideo, cleanFrameReport, VideoPositions } from '../src/video-positions.js';
 
@@ -188,4 +188,18 @@ test('positions go to LDM only for tracked tabs, and only when they change', asy
 
   positions.setHasMedia(7, false);
   assert.deepEqual(sent.at(-1), ['tab', 7, { type: 'ldm-track-video', on: false }]);
+});
+
+test('only an answer that replaces the page clears the tab\'s media', () => {
+  const page = (statusCode, headers = {}, extra = {}) => replacesPage({
+    statusCode, responseHeaders: Object.entries(headers).map(([name, value]) => ({ name, value })), ...extra,
+  });
+  assert.equal(page(200, { 'Content-Type': 'text/html; charset=utf-8' }), true);
+  assert.equal(page(200), true, 'the browser looks at the content');
+  assert.equal(page(200, { 'Content-Type': 'video/mp4' }), true, 'a video shown in the tab');
+  assert.equal(page(200, { 'Content-Type': 'application/zip' }), false, 'downloaded');
+  assert.equal(page(200, { 'Content-Type': 'text/plain', 'Content-Disposition': 'attachment; filename=a.txt' }), false);
+  assert.equal(page(204), false);
+  assert.equal(page(302, { Location: '/x' }), false);
+  assert.equal(page(200, { 'Content-Type': 'text/html' }, { documentLifecycle: 'prerender' }), false);
 });

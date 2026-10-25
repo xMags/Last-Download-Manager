@@ -12,6 +12,7 @@ import { FormPosts } from './form-posts.js';
 import { downloadVerdict, keySettings, sendsForcedLinkToLdm } from './key-rules.js';
 import { cleanKeys, LinkClicks } from './link-clicks.js';
 import { MediaDetector } from './media-detect.js';
+import { replacesPage } from './media-rules.js';
 import { isDownloadAddress, makeCookies, makeSiteRequest, menuSettings, parseCookiesRequest, parseMediaList }
   from './protocol.js';
 import { cookieStoreFor } from './cookie-stores.js';
@@ -242,16 +243,25 @@ api.webRequest.onBeforeRequest.addListener((details) => forms.onBeforeRequest(de
 api.webRequest.onSendHeaders.addListener((details) => forms.onSendHeaders(details), FORM_FILTER, ['requestHeaders']);
 
 // Media for the panel over web players (M3 design section 6): responses are only observed.
+// A tab that loads another page starts with nothing to offer, decided on the page's answer before
+// that answer is looked at as media: a link that turns out to be a download, or a request that
+// never answers, leaves the page and its media as they were. Single-page sites that change the
+// video without loading a page keep their earlier media until they do.
+const forgetTab = (tabId) => {
+  mediaDetector.reset(tabId);
+  videoPositions.forget(tabId);
+  sitePages.reset(tabId);
+};
 api.webRequest.onHeadersReceived.addListener((details) => {
+  if (details.type === 'main_frame' && details.tabId >= 0 && replacesPage(details)) {
+    forgetTab(details.tabId);
+  }
   mediaDetector.onHeadersReceived(details).catch((error) => console.warn('LDM: media check failed', error));
 }, { urls: ['http://*/*', 'https://*/*'] }, ['responseHeaders']);
-// A tab that loads another page starts with nothing to offer. Single-page sites that change the
-// video without loading a page keep their earlier media until they do.
+// Pages without web answers (another scheme) replace the page too.
 api.webRequest.onBeforeRequest.addListener((details) => {
-  if (details.tabId >= 0) {
-    mediaDetector.reset(details.tabId);
-    videoPositions.forget(details.tabId);
-    sitePages.reset(details.tabId);
+  if (details.tabId >= 0 && !/^https?:/i.test(details.url)) {
+    forgetTab(details.tabId);
   }
 }, { urls: ['<all_urls>'], types: ['main_frame'] });
 api.tabs.onRemoved.addListener((tabId) => {
