@@ -7,12 +7,13 @@ import { browserInfo } from './browser-info.js';
 import { DownloadCapture } from './capture.js';
 import { baseName } from './capture-rules.js';
 import { LdmConnection, State } from './connection.js';
-import { applyMenu, clickedAddress, menuItems, MenuId } from './context-menu.js';
+import { applyMenu, clickedAddress, clickedVideoPage, menuItems, MenuId } from './context-menu.js';
 import { FormPosts } from './form-posts.js';
 import { downloadVerdict, keySettings, sendsForcedLinkToLdm } from './key-rules.js';
 import { cleanKeys, LinkClicks } from './link-clicks.js';
 import { MediaDetector } from './media-detect.js';
-import { isDownloadAddress, makeCookies, menuSettings, parseCookiesRequest, parseMediaList } from './protocol.js';
+import { isDownloadAddress, makeCookies, makeSiteRequest, menuSettings, parseCookiesRequest, parseMediaList }
+  from './protocol.js';
 import { SitePages } from './site-pages.js';
 import { applyToolbar, toolbarAppearance } from './toolbar.js';
 import { VideoPositions } from './video-positions.js';
@@ -35,7 +36,7 @@ const connection = new LdmConnection(api, {
     incognitoAllowed: await api.extension.isAllowedIncognitoAccess(),
   }),
   onConfig: (config) => {
-    const menuChanged = JSON.stringify(menuSettings(config)) !== JSON.stringify(menuSettings(rules));
+    const menuChanged = JSON.stringify(menuOf(config)) !== JSON.stringify(menuOf(rules));
     rules = config;
     api.storage.local.set({ config });
     if (menuChanged) {
@@ -135,11 +136,18 @@ function tell(tab, text) {
     .catch(() => console.warn('LDM:', text));
 }
 
+// The right-click items the config turns on. "Download video" needs an LDM that takes site
+// requests: one with site videos on that sends its list of sites (an older one would close the
+// connection on the unknown message).
+function menuOf(config) {
+  return { ...menuSettings(config), videos: config?.sitePages === true && Array.isArray(config?.siteHosts) };
+}
+
 // Menu updates run one after another, so a removeAll never races the creates of another update.
 let menuUpdate = Promise.resolve();
 function updateMenu() {
   menuUpdate = menuUpdate
-    .then(() => applyMenu(api, menuItems(menuSettings(rules))))
+    .then(() => applyMenu(api, menuItems(menuOf(rules))))
     .catch((error) => console.warn('LDM: could not update the right-click menu', error));
 }
 
@@ -161,6 +169,22 @@ async function onMenuClick(info, tab) {
     case MenuId.All:
       await allLinks.start(tab, info.frameId ?? 0, info.menuItemId === MenuId.Selected);
       break;
+    case MenuId.VideoPage:
+    case MenuId.VideoLink: {
+      const message = makeSiteRequest({
+        url: clickedVideoPage(info),
+        referrer: info.menuItemId === MenuId.VideoLink ? info.pageUrl : undefined,
+        incognito: Boolean(tab?.incognito),
+        pageTitle: info.menuItemId === MenuId.VideoPage ? tab?.title : undefined,
+        userAgent: navigator.userAgent,
+      });
+      if (!message) {
+        tell(tab, 'Last Download Manager cannot look for a video at this address.');
+      } else if (!connection.post(message)) {
+        tell(tab, LinksMessage.NoContact);
+      }
+      break;
+    }
     default:
       break;
   }

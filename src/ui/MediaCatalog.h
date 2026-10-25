@@ -68,6 +68,10 @@ struct TabMedia {
     std::optional<std::string> sitePage;
 };
 
+// A site video item (MediaItem::siteVideo) from the resolver's answer: the offer, its qualities,
+// the title and the cookies the site set, or the reason it failed.
+void FillSiteItem(MediaItem& item, const core::SiteLookupFinished& finished);
+
 // What each tab of each browser offers for the media panel (M3 design section 6). UI thread only.
 // Manifests are fetched through the core and read here; an answer for a tab whose page changed
 // meanwhile is dropped, as is one for an item that is gone.

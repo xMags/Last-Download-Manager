@@ -159,6 +159,32 @@ void MediaCatalog::OnSitePage(BrowserConnectionId connection, browser::SitePage 
     }
 }
 
+void FillSiteItem(MediaItem& item, const core::SiteLookupFinished& finished)
+{
+    if (!finished.video) {
+        item.state = MediaItem::State::Failed;
+        item.failure = finished.failure.empty() ? std::string("This video could not be looked up.") : finished.failure;
+        return;
+    }
+    item.offer = finished.video->offer;
+    item.seconds = finished.video->seconds;
+    item.siteTitle = finished.video->title;
+    // Cookies the resolver got from the site while reading the page, which the site wants back
+    // with the requests for its files. Not the browser's.
+    item.cookies.clear();
+    for (const media::SiteCookie& site : finished.video->cookies) {
+        model::Cookie cookie{site.domain, site.hostOnly, site.path, site.secure, site.expires, site.name, site.value};
+        if (model::IsValidCookie(cookie)) {
+            item.cookies.push_back(std::move(cookie));
+        }
+    }
+    item.qualities = media::BuildQualityList(*item.offer, item.seconds);
+    item.state = item.qualities.entries.empty() ? MediaItem::State::Failed : MediaItem::State::Ready;
+    if (item.state == MediaItem::State::Failed) {
+        item.failure = "This video has no format LDM can download.";
+    }
+}
+
 bool MediaCatalog::OnSiteLookedUp(const core::SiteLookupFinished& finished)
 {
     const auto pending = lookups_.find(finished.lookupId);
@@ -176,28 +202,7 @@ bool MediaCatalog::OnSiteLookedUp(const core::SiteLookupFinished& finished)
     if (item == tab->second.items.end()) {
         return true;  // the tab went to another video meanwhile
     }
-    if (finished.video) {
-        item->offer = finished.video->offer;
-        item->seconds = finished.video->seconds;
-        item->siteTitle = finished.video->title;
-        // Cookies the resolver got from the site while reading the page, which the site wants
-        // back with the requests for its files. Not the browser's.
-        item->cookies.clear();
-        for (const media::SiteCookie& site : finished.video->cookies) {
-            model::Cookie cookie{site.domain, site.hostOnly, site.path, site.secure, site.expires, site.name, site.value};
-            if (model::IsValidCookie(cookie)) {
-                item->cookies.push_back(std::move(cookie));
-            }
-        }
-        item->qualities = media::BuildQualityList(*item->offer, item->seconds);
-        item->state = item->qualities.entries.empty() ? MediaItem::State::Failed : MediaItem::State::Ready;
-        if (item->state == MediaItem::State::Failed) {
-            item->failure = "This video has no format LDM can download.";
-        }
-    } else {
-        item->state = MediaItem::State::Failed;
-        item->failure = finished.failure.empty() ? std::string("This video could not be looked up.") : finished.failure;
-    }
+    FillSiteItem(*item, finished);
     if (hooks_.changed) {
         hooks_.changed(key.first, key.second);
     }

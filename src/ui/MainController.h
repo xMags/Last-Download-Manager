@@ -97,6 +97,8 @@ public:
     void OnBrowserCapture(browser::Capture capture);
     // A stream picked in the media panel.
     void OnStreamCapture(StreamCapture capture);
+    // "Download video" from the browser's right-click menu (video-sites round 2, section 2.2).
+    void OnSiteRequest(browser::SiteRequest request);
     // "Download all links" or "Download selected links" from the browser (checklist B-05).
     void OnBrowserLinks(BrowserSessions::LinksRequest request);
     // WM_CLIPBOARDUPDATE (checklist A-09).

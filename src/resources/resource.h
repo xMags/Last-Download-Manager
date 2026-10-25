@@ -657,6 +657,13 @@
 #define IDC_OPT_SITETOOLS_CHECK 1844
 #define IDC_OPT_SITETOOLS_REMOVE 1845
 
+// Download video: a page the user named (video-sites round 2)
+#define IDD_SITE_VIDEO 347
+#define IDC_SV_PAGE 1850
+#define IDC_SV_STATUS 1851
+#define IDC_SV_LIST 1852
+#define IDC_ADD_VIDEO 1853
+
 // The Grabber window's list menu
 #define ID_GRABBER_CHECK 40200
 #define ID_GRABBER_UNCHECK 40201

@@ -123,7 +123,8 @@ private:
     // The once-asked question about the update check, when the window is first seen.
     struct UpdatesQuestion {};
     using ExternalInput = std::variant<core::LaunchRequest, std::vector<std::string>, browser::Capture,
-                                       BrowserSessions::LinksRequest, ElevationNotice, StreamCapture, UpdatesQuestion>;
+                                       BrowserSessions::LinksRequest, ElevationNotice, StreamCapture, UpdatesQuestion,
+                                       browser::SiteRequest>;
     void QueueExternalInput(ExternalInput input);
 
     Services services_;

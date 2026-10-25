@@ -388,6 +388,26 @@ export function makeSitePage(page) {
   };
 }
 
+/**
+ * The user asked for the video of a page (the right-click menu's "Download video"): LDM asks its
+ * site resolver about `url`. Only sent to an LDM that sent its list of sites.
+ */
+export function makeSiteRequest(request) {
+  if (!isWebAddress(request.url)) {
+    return null;
+  }
+  return {
+    v: PROTOCOL_VERSION,
+    id: nextId(),
+    type: 'site-request',
+    url: request.url,
+    referrer: isWebAddress(request.referrer) ? request.referrer : undefined,
+    incognito: Boolean(request.incognito),
+    pageTitle: cleanPageText(request.pageTitle, MAX_PAGE_TITLE_BYTES) || undefined,
+    userAgent: cleanText(request.userAgent, 1024) || 'Mozilla/5.0',
+  };
+}
+
 /** The tab's page changed or the tab closed. */
 export function makeMediaReset(tabId) {
   return isBrowserId(tabId) ? { v: PROTOCOL_VERSION, id: nextId(), type: 'media-reset', tabId } : null;

@@ -16,6 +16,8 @@
 #include "ui/dialogs/DownloadInfoDialog.h"
 #include "ui/dialogs/ListDialogs.h"
 #include "ui/dialogs/MessageDialog.h"
+#include "core/SiteList.h"
+#include "ui/dialogs/SiteVideoDialog.h"
 
 #include <algorithm>
 #include <filesystem>
@@ -173,6 +175,48 @@ void AddFlow::AddAddress(const ExternalAdd& add)
         InfoDialogInput{add.url, std::nullopt, std::nullopt, policy, add.saveDir, add.fileName, add.browser, add.media});
 }
 
+void AddFlow::AddStream(StreamCapture capture)
+{
+    ExternalAdd add;
+    add.url = std::move(capture.manifestUrl);
+    add.fileName = std::move(capture.fileName);
+    // Picked by the user: cancelling it says nothing about the capture rules.
+    add.browser = BrowserRequest{std::move(capture.pageUrl), std::move(capture.userAgent), std::move(capture.cookies),
+                                 std::nullopt, std::nullopt, true};
+    add.media = std::move(capture.media);
+    AddAddress(add);
+}
+
+void AddFlow::AddSiteVideo(browser::SiteRequest request)
+{
+    const auto snapshot = context_.snapshot();
+    if (!snapshot) {
+        return;
+    }
+    if (!snapshot->settings.siteVideosEnabled) {
+        ShowError(L"Downloading videos from web pages is off. Turn it on in Options > Site videos.");
+        return;
+    }
+    if (siteDialog_ != nullptr) {
+        return;  // one at a time; the open one is in front
+    }
+    SiteVideoDialog::Hooks hooks;
+    hooks.lookUp = [this](core::LookUpSiteVideoCommand command) { Post(std::move(command)); };
+    hooks.cancelLookup = [this](std::int64_t lookupId) { Post(core::CancelSiteLookupCommand{lookupId}); };
+    SiteVideoDialog dialog(*context_.theme, std::move(request), nextSiteLookupId_++, std::move(hooks));
+    siteDialog_ = &dialog;
+    auto capture = dialog.Run(context_.owner);
+    siteDialog_ = nullptr;
+    if (capture) {
+        AddStream(std::move(*capture));
+    }
+}
+
+bool AddFlow::OnSiteLookedUp(const core::SiteLookupFinished& finished)
+{
+    return siteDialog_ != nullptr && siteDialog_->OnSiteLookedUp(finished);
+}
+
 void AddFlow::ApplyBrowserRequest(const std::optional<BrowserRequest>& browser, core::AddDownloadCommand& command)
 {
     if (!browser) {
@@ -180,7 +224,9 @@ void AddFlow::ApplyBrowserRequest(const std::optional<BrowserRequest>& browser, 
     }
     command.referer = browser->referrer;
     command.parentPage = browser->referrer;
-    command.userAgent = browser->userAgent;
+    if (!browser->userAgent.empty()) {
+        command.userAgent = browser->userAgent;  // otherwise Options' User-Agent
+    }
     command.cookies = browser->cookies;
     command.post = browser->post;
     command.contentType = browser->mimeType;
@@ -215,13 +261,23 @@ void AddFlow::AddUrl(std::string initialUrl)
             initialUrl = urls.front();
         }
     }
-    AddUrlDialog dialog(*context_.theme, HistoryEntries(snapshot->settings.addressHistory), std::move(initialUrl));
+    const bool siteVideos = snapshot->settings.siteVideosEnabled;
+    AddUrlDialog dialog(*context_.theme, HistoryEntries(snapshot->settings.addressHistory), std::move(initialUrl), siteVideos);
     const auto input = dialog.Run(context_.owner);
     if (!input) {
         return;
     }
     const std::string url = input->url;
     ModifySettings([url](model::Settings& s) { s.addressHistory = PushHistory(s.addressHistory, url, kAddressHistoryLimit); });
+
+    // A video page of a listed site is never a file to download: its video is.
+    const auto page = siteVideos && !input->user ? core::CheckSitePage(url) : std::nullopt;
+    if (input->findVideo || (page && page->automatic)) {
+        browser::SiteRequest request;
+        request.url = url;
+        AddSiteVideo(std::move(request));
+        return;
+    }
 
     // The duplicate question comes before the info dialog (checklist A-05).
     std::optional<model::DuplicatePolicy> policy;

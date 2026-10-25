@@ -138,6 +138,8 @@ add_library(ldm_ui STATIC
     dialogs/QueueDialogs.h
     dialogs/SchedulerWindow.cpp
     dialogs/SchedulerWindow.h
+    dialogs/SiteVideoDialog.cpp
+    dialogs/SiteVideoDialog.h
     dialogs/UpdateDialog.cpp
     dialogs/UpdateDialog.h)
 target_link_libraries(ldm_ui
