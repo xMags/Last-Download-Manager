@@ -89,26 +89,38 @@ test('the config says which menu items appear, on by default', () => {
     { downloadLink: false, downloadAll: true });
 });
 
+// The page items, without the toolbar button's own switch.
+const pageItems = (menu) => menuItems(menu).filter((item) => item.id !== MenuId.Integration);
+
 test('menu items follow the settings', () => {
-  const ids = (menu) => menuItems(menu).map((item) => item.id);
+  const ids = (menu) => pageItems(menu).map((item) => item.id);
   assert.deepEqual(ids({ downloadLink: true, downloadAll: true }), [MenuId.Link, MenuId.Page, MenuId.Selected, MenuId.All]);
   assert.deepEqual(ids({ downloadLink: false, downloadAll: true }), [MenuId.All]);
   assert.deepEqual(ids({ downloadLink: true, downloadAll: false }), [MenuId.Link, MenuId.Page, MenuId.Selected]);
-  const all = menuItems({ downloadLink: true, downloadAll: true });
+  const all = pageItems({ downloadLink: true, downloadAll: true });
   assert.ok(all.every((item) => item.title.endsWith('with LDM')));
 });
 
 test('the video items appear only when LDM takes site requests', () => {
-  const ids = (menu) => menuItems(menu).map((item) => item.id);
+  const ids = (menu) => pageItems(menu).map((item) => item.id);
   assert.deepEqual(ids({ downloadLink: false, downloadAll: false, videos: true }), [MenuId.VideoPage, MenuId.VideoLink]);
   assert.deepEqual(ids({ downloadLink: false, downloadAll: false, videos: false }), []);
-  const [page, link] = menuItems({ downloadLink: false, downloadAll: false, videos: true });
+  const [page, link] = pageItems({ downloadLink: false, downloadAll: false, videos: true });
   assert.deepEqual(page.contexts, ['page', 'frame', 'video']);
   assert.deepEqual(link.contexts, ['link']);
   assert.equal(clickedVideoPage({ menuItemId: MenuId.VideoLink, linkUrl: 'https://v.test/1', pageUrl: 'https://a.test/' }),
     'https://v.test/1');
   assert.equal(clickedVideoPage({ menuItemId: MenuId.VideoPage, pageUrl: 'https://a.test/', frameUrl: 'https://p.test/e' }),
     'https://p.test/e');
+});
+
+test('the toolbar button always has the integration switch, checked while integration is on', () => {
+  const switchOf = (menu) => menuItems(menu).find((item) => item.id === MenuId.Integration);
+  const on = switchOf({ downloadLink: false, downloadAll: false });
+  assert.deepEqual(on.contexts, ['action']);
+  assert.equal(on.type, 'checkbox');
+  assert.equal(on.checked, true);
+  assert.equal(switchOf({ downloadLink: true, downloadAll: true, enabled: false }).checked, false);
 });
 
 test('a site request carries only web addresses', () => {

@@ -559,7 +559,8 @@ void OptionsDialog::ShowConnectedBrowsers()
         : privateBlocked
             ? L"For private windows, open the browser's extensions page, choose Details for Last Download Manager and "
               L"allow it in Incognito (Chrome), InPrivate (Edge) or Private Windows (Firefox)."
-            : L"Click the LDM button in a browser's toolbar to turn capturing on or off for that browser.");
+            : L"Right-click the LDM button in a browser's toolbar and choose Browser integration to turn capturing "
+              L"on or off for that browser.");
 }
 
 void OptionsDialog::RefreshLimits()

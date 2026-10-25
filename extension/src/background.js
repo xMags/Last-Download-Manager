@@ -12,6 +12,7 @@ import { FormPosts } from './form-posts.js';
 import { downloadVerdict, keySettings, sendsForcedLinkToLdm } from './key-rules.js';
 import { cleanKeys, LinkClicks } from './link-clicks.js';
 import { MediaDetector } from './media-detect.js';
+import { PanelTabs } from './panel-tabs.js';
 import { replacesPage } from './media-rules.js';
 import { isDownloadAddress, makeCookies, makeSiteRequest, menuSettings, parseCookiesRequest, parseMediaList }
   from './protocol.js';
@@ -121,7 +122,8 @@ const mediaDetector = new MediaDetector(api, connection, {
   rules: () => rules,
   userAgent: navigator.userAgent,
 });
-const videoPositions = new VideoPositions(api, connection);
+const panelTabs = new PanelTabs(api);
+const videoPositions = new VideoPositions(api, connection, (tabId) => panelTabs.isOff(tabId));
 const sitePages = new SitePages(api, connection, {
   ready: settingsLoaded,
   isEnabled: () => enabled && rules.sitePages === true,
@@ -164,7 +166,7 @@ function menuOf(config) {
 let menuUpdate = Promise.resolve();
 function updateMenu() {
   menuUpdate = menuUpdate
-    .then(() => applyMenu(api, menuItems(menuOf(rules))))
+    .then(() => applyMenu(api, menuItems({ ...menuOf(rules), enabled })))
     .catch((error) => console.warn('LDM: could not update the right-click menu', error));
 }
 
@@ -182,6 +184,9 @@ async function onMenuClick(info, tab) {
       }
       break;
     }
+    case MenuId.Integration:
+      await setEnabled(info.checked === true);
+      break;
     case MenuId.Selected:
     case MenuId.All:
       await allLinks.start(tab, info.frameId ?? 0, info.menuItemId === MenuId.Selected);
@@ -210,18 +215,43 @@ async function onMenuClick(info, tab) {
   }
 }
 
+/** The toolbar button for every tab, and for each tab with a look of its own. */
 function render() {
-  applyToolbar(api, toolbarAppearance({ enabled, connection: connection.state })).catch((error) => {
-    console.warn('LDM: could not update the toolbar button', error);
-  });
+  const warn = (error) => console.warn('LDM: could not update the toolbar button', error);
+  applyToolbar(api, toolbarAppearance({ enabled, connection: connection.state })).catch(warn);
+  for (const tabId of panelTabs.switchedTabs()) {
+    renderTab(tabId);
+  }
+}
+
+function renderTab(tabId) {
+  const look = toolbarAppearance({ enabled, connection: connection.state, panelOff: panelTabs.isOff(tabId) });
+  // A tab that closed meanwhile refuses; nothing to do then.
+  applyToolbar(api, look, tabId).catch(() => {});
+}
+
+/** Integration on or off for the whole browser (the toolbar button's right-click menu). */
+async function setEnabled(on) {
+  enabled = on;
+  await api.storage.local.set({ enabled });
+  render();
+  updateMenu();
 }
 
 // Listeners are registered synchronously, so events that woke the script are not missed.
-api.action.onClicked.addListener(async () => {
-  await settingsLoaded;  // a click can wake the script before the stored state is read
-  enabled = !enabled;
-  await api.storage.local.set({ enabled });
-  render();
+api.action.onClicked.addListener(async (tab) => {
+  await Promise.all([settingsLoaded, panelTabs.ready]);  // a click can wake the script first
+  // A grey button means "click to turn on": with integration off, the click turns it back on.
+  if (!enabled) {
+    await setEnabled(true);
+    return;
+  }
+  if (!Number.isSafeInteger(tab?.id) || tab.id < 0) {
+    return;
+  }
+  await panelTabs.toggle(tab.id);
+  videoPositions.panelSwitched(tab.id);
+  renderTab(tab.id);
 });
 
 if (api.downloads.onDeterminingFilename) {
@@ -269,9 +299,14 @@ api.tabs.onRemoved.addListener((tabId) => {
   mediaDetector.reset(tabId);
   videoPositions.forget(tabId);
   sitePages.reset(tabId);
+  panelTabs.forget(tabId).catch(() => {});
 });
 // Video sites change the video without loading a page; the address still changes.
 api.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  // Firefox drops a tab's own button look when the tab loads a page.
+  if (changeInfo.status === 'loading' && panelTabs.switchedTabs().includes(tabId)) {
+    renderTab(tabId);
+  }
   sitePages.onUpdated(tabId, changeInfo, tab).catch((error) => console.warn('LDM: site page failed', error));
 });
 api.tabs.onActivated.addListener(() => videoPositions.refreshAll());
@@ -362,7 +397,7 @@ api.runtime.onMessage.addListener((message, sender, reply) => {
   return false;
 });
 
-settingsLoaded.then(() => {
+Promise.all([settingsLoaded, panelTabs.ready]).then(() => {
   render();
   updateMenu();
   connection.connect();
