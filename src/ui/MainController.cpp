@@ -833,6 +833,13 @@ void MainController::ShowOptions()
     if (context_.connectedBrowsers) {
         input.connectedBrowsers = context_.connectedBrowsers();
     }
+    // Snapshots keep arriving while the dialog is open, so the page shows the latest state.
+    input.siteTools = [this] {
+        const auto latest = Snapshot();
+        return latest ? latest->siteTools : core::SiteToolsView{};
+    };
+    input.checkSiteTools = [this] { Post(core::CheckSiteToolsCommand{}); };
+    input.removeSiteTools = [this] { Post(core::RemoveSiteToolsCommand{}); };
     OptionsDialog dialog(*context_.theme, std::move(input), *context_.secrets, *context_.system);
     auto output = dialog.Run(context_.owner);
     if (!output) {

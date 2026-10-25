@@ -454,6 +454,13 @@ void Coordinator::Handle(Command command)
                 }
             } else if constexpr (std::is_same_v<T, RemoveSiteToolsCommand>) {
                 if (tools_) {
+                    // Turned off too, or the next tick would download them again.
+                    if (settings_.siteVideosEnabled) {
+                        settings_.siteVideosEnabled = false;
+                        if (base::Status saved = ports_.store->SaveSettings(model::SettingsToMap(settings_)); !saved) {
+                            ReportError("Settings could not be saved: " + saved.GetError().message);
+                        }
+                    }
                     tools_->Remove();
                     snapshotDirty_ = true;
                 }
