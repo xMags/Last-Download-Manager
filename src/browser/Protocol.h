@@ -181,6 +181,8 @@ struct SitePage {
     std::string url;  // http or https
     std::string pageTitle;
     std::string userAgent;
+    // The cookies the browser sends to the page, only for a site of Config::signInHosts.
+    std::vector<model::Cookie> cookies;
 };
 
 // The user asked for the video of a page (the right-click menu's "Download video", or an address
@@ -192,6 +194,7 @@ struct SiteRequest {
     bool incognito = false;
     std::string pageTitle;
     std::string userAgent;  // the browser's; empty for Add URL, which uses LDM's own
+    std::vector<model::Cookie> cookies;  // as SitePage::cookies
 };
 
 using Message = std::variant<HostInfo, Hello, Capture, Links, LinkInfo, MediaFound, MediaReset, VideoPosition, Cookies,
@@ -242,6 +245,9 @@ struct Config {
     // The hosts whose pages it sends (core::AutomaticSiteHosts), each with its subdomains. An
     // extension that does not read them sends YouTube's, the only site of 5.1.
     std::vector<std::string> siteHosts;
+    // The hosts whose pages come with the browser's cookies for them (core::SignInHosts): the
+    // sites the user let sign in, in Options.
+    std::vector<std::string> signInHosts;
 };
 
 [[nodiscard]] std::string EncodeConfig(const Config& config, std::string_view replyTo);

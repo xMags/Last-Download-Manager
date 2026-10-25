@@ -94,4 +94,14 @@ TEST(YtDlpResolver, AVeryLongErrorIsCut)
     EXPECT_LE(long_.message.size(), 300u);
 }
 
+TEST(YtDlpResolver, ASignInIsHandedOverAsACookiesFileBeforeThePage)
+{
+    const ldm::core::SiteLookupRequest request{1, "https://vimeo.com/76979871", {}, "vimeo.com\tFALSE\t/\tTRUE\t0\tvuid\tv\n"};
+    const std::filesystem::path file = LR"(C:\Users\u\AppData\Local\Last Download Manager\tools\cache\sign-in-1.txt)";
+    const auto arguments = YtDlpArguments(Tools(), request, file);
+    EXPECT_EQ(After(arguments, L"--cookies"), file.native());
+    EXPECT_EQ(arguments.back(), L"https://vimeo.com/76979871");
+    EXPECT_EQ(After(YtDlpArguments(Tools(), request), L"--cookies"), L"(missing)") << "only with a file";
+}
+
 }  // namespace

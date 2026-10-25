@@ -532,6 +532,9 @@ std::optional<SiteRequest> ParseSiteRequest(const nlohmann::json& object)
         return std::nullopt;
     }
     request.userAgent = std::move(*userAgent);
+    if (object.contains("cookies") && !ParseCookies(object, kMaxCookies, request.cookies)) {
+        return std::nullopt;
+    }
     return request;
 }
 
@@ -560,6 +563,9 @@ std::optional<SitePage> ParseSitePage(const nlohmann::json& object)
         return std::nullopt;
     }
     page.userAgent = std::move(*userAgent);
+    if (object.contains("cookies") && !ParseCookies(object, kMaxCookies, page.cookies)) {
+        return std::nullopt;
+    }
     return page;
 }
 
@@ -760,6 +766,7 @@ std::string EncodeConfig(const Config& config, std::string_view replyTo)
                         {"siteExceptions", config.media.siteExceptions}};
     message["sitePages"] = config.sitePages;
     message["siteHosts"] = config.siteHosts;
+    message["signInHosts"] = config.signInHosts;
     return message.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
 }
 

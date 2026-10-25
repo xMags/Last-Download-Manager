@@ -31,7 +31,8 @@ std::string ConfigInputs(const model::Settings& settings)
     }
     return settings.capturedExtensions + kSeparator + settings.captureSiteExceptions + kSeparator +
            settings.captureAddressExceptions + kSeparator + keys + kSeparator + settings.mediaTypes + kSeparator +
-           std::to_string(settings.mediaMinimumKilobytes) + kSeparator + settings.mediaSiteExceptions;
+           std::to_string(settings.mediaMinimumKilobytes) + kSeparator + settings.mediaSiteExceptions + kSeparator +
+           settings.siteVideosSignIn;
 }
 
 std::vector<std::string> Words(const std::string& text)
@@ -137,11 +138,17 @@ void BrowserSessions::OnEvent(BrowserEvent event, const model::Settings& setting
     } else if (auto* page = std::get_if<browser::SitePage>(&parsed.message)) {
         // Asked for only while site videos are on; one sent just before they were turned off is dropped.
         if (handlers_.onSitePage && settings.siteVideosEnabled) {
+            if (!core::UsesSignIn(settings.siteVideosSignIn, page->url)) {
+                page->cookies.clear();  // an older config's, or a site the user no longer lets sign in
+            }
             handlers_.onSitePage(event.connection, std::move(*page));
         }
     } else if (auto* request = std::get_if<browser::SiteRequest>(&parsed.message)) {
         // The menu item shows only while site videos are on; one clicked just before is dropped.
         if (handlers_.onSiteRequest && settings.siteVideosEnabled) {
+            if (!core::UsesSignIn(settings.siteVideosSignIn, request->url)) {
+                request->cookies.clear();
+            }
             handlers_.onSiteRequest(std::move(*request));
         }
     } else if (const auto* position = std::get_if<browser::VideoPosition>(&parsed.message)) {
@@ -271,6 +278,7 @@ browser::Config BrowserSessions::MakeConfig(const model::Settings& settings, bro
     config.media.siteExceptions = lowerWords(settings.mediaSiteExceptions);
     config.sitePages = settings.siteVideosEnabled;
     config.siteHosts = core::AutomaticSiteHosts();
+    config.signInHosts = core::SignInHosts(settings.siteVideosSignIn);
     config.siteExceptions = Words(settings.captureSiteExceptions);
     // Address patterns hold no spaces, so whitespace separates them as well as line breaks do.
     config.addressExceptions = Words(settings.captureAddressExceptions);

@@ -43,6 +43,7 @@ SiteVideoDialog::SiteVideoDialog(const Theme& theme, browser::SiteRequest reques
     item_.siteVideo = true;
     item_.state = MediaItem::State::Fetching;
     item_.lookupId = lookupId_;
+    item_.cookies = request_.cookies;  // the sign-in, when the user let the browser give it
     // The download's page is the address the resolver is asked about, as LDM checks it, so a
     // refresh asks about the same page.
     const auto page = core::CheckSitePage(request_.url);
@@ -71,7 +72,7 @@ bool SiteVideoDialog::OnInit()
     ::SendMessageW(Item(IDC_SV_LIST), LB_SETTABSTOPS, 1, reinterpret_cast<LPARAM>(stops));
     pending_ = true;
     if (hooks_.lookUp) {
-        hooks_.lookUp(core::LookUpSiteVideoCommand{lookupId_, item_.url});
+        hooks_.lookUp(core::LookUpSiteVideoCommand{lookupId_, item_.url, request_.cookies});
     }
     return true;
 }

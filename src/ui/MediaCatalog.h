@@ -69,7 +69,8 @@ struct TabMedia {
 };
 
 // A site video item (MediaItem::siteVideo) from the resolver's answer: the offer, its qualities,
-// the title and the cookies the site set, or the reason it failed.
+// the title and the cookies the site set (added to the browser's sign-in the item may have), or
+// the reason it failed.
 void FillSiteItem(MediaItem& item, const core::SiteLookupFinished& finished);
 
 // What each tab of each browser offers for the media panel (M3 design section 6). UI thread only.

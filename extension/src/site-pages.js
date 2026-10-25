@@ -27,6 +27,7 @@ export class SitePages {
    * @param {object} api the extension API object
    * @param {{post: function(object): boolean}} connection the lasting connection to LDM
    * @param {{ready: Promise, isEnabled: function(): boolean, hosts: function(): (string[]|null),
+   *          signInHosts?: function(): string[], cookiesFor?: function(string, object): Promise<object[]>,
    *          userAgent: string}} options
    */
   constructor(api, connection, options) {
@@ -42,7 +43,7 @@ export class SitePages {
       return;
     }
     await this.options.ready;
-    this.report(tabId, tab);
+    await this.report(tabId, tab);
   }
 
   /** The tab loads another page, or closed: its next address is new to LDM. */
@@ -55,13 +56,11 @@ export class SitePages {
     this.sent.clear();
     await this.options.ready;
     const tabs = await this.api.tabs.query({}).catch(() => []);
-    for (const tab of tabs ?? []) {
-      this.report(tab.id, tab);
-    }
+    await Promise.all((tabs ?? []).map((tab) => this.report(tab.id, tab)));
   }
 
   /** @private */
-  report(tabId, tab) {
+  async report(tabId, tab) {
     if (!this.options.isEnabled() || !Number.isSafeInteger(tabId) || tabId < 0 || !tab) {
       return;
     }
@@ -71,15 +70,23 @@ export class SitePages {
     if (!isSiteAddress(url, this.options.hosts?.() ?? DEFAULT_SITE_HOSTS) || url === previous) {
       return;
     }
+    // Taken before the cookies are read, so a second report of the same address waits for none.
+    this.sent.set(tabId, url);
+    // The user's sign-in, only for the sites LDM's Options let sign in.
+    const signIn = isSiteAddress(url, this.options.signInHosts?.() ?? []) && this.options.cookiesFor;
+    const cookies = signIn ? await this.options.cookiesFor(url, tab).catch(() => []) : undefined;
     const message = makeSitePage({
       tabId,
       incognito: Boolean(tab.incognito),
       url,
       pageTitle: tab.title,
       userAgent: this.options.userAgent,
+      cookies,
     });
-    if (message && this.connection.post(message)) {
-      this.sent.set(tabId, url);
+    if (!message || !this.connection.post(message)) {
+      if (this.sent.get(tabId) === url) {
+        this.sent.delete(tabId);
+      }
     }
   }
 }

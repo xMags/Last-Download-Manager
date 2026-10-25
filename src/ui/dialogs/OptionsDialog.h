@@ -110,6 +110,7 @@ private:
     bool loginsEdited_ = false;
     std::optional<Output> result_;
     std::wstring siteToolsText_;  // shown now, so the timer only redraws on a change
+    std::string siteSignIn_;      // Settings::siteVideosSignIn as edited
 };
 
 }  // namespace ldm::ui

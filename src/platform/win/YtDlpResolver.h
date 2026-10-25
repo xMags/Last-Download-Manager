@@ -12,6 +12,7 @@
 #include <filesystem>
 #include <map>
 #include <mutex>
+#include <optional>
 #include <shared_mutex>
 #include <string>
 #include <string_view>
@@ -43,7 +44,9 @@ struct ResolverFailure {
 [[nodiscard]] ResolverFailure ReadResolverFailure(std::string_view errors);
 
 // yt-dlp's arguments for one lookup. Pure, for tests.
-[[nodiscard]] std::vector<std::wstring> YtDlpArguments(const YtDlpTools& tools, const core::SiteLookupRequest& request);
+// `cookieFile`: the Netscape cookies file of the request's sign-in, when it has one.
+[[nodiscard]] std::vector<std::wstring> YtDlpArguments(const YtDlpTools& tools, const core::SiteLookupRequest& request,
+                                                       const std::optional<std::filesystem::path>& cookieFile = std::nullopt);
 
 class YtDlpResolver final : public core::SiteResolver {
 public:

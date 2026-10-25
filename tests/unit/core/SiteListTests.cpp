@@ -145,4 +145,22 @@ TEST(SiteList, TheExtensionIsToldTheListedSitesHosts)
     EXPECT_EQ(std::find(hosts.begin(), hosts.end(), "reddit.com"), hosts.end());
 }
 
+TEST(SiteList, SignInIsOnlyForTheSitesTheUserChecked)
+{
+    using ldm::core::UsesSignIn;
+    EXPECT_TRUE(UsesSignIn("vimeo youtube", "https://vimeo.com/76979871"));
+    EXPECT_TRUE(UsesSignIn("vimeo youtube", "https://m.youtube.com/watch?v=jNQXAC9IVRw"));
+    EXPECT_TRUE(UsesSignIn("youtube", "https://youtu.be/jNQXAC9IVRw"));
+    EXPECT_FALSE(UsesSignIn("vimeo", "https://www.youtube.com/watch?v=jNQXAC9IVRw"));
+    EXPECT_FALSE(UsesSignIn("vimeo", "https://notvimeo.com/1"));
+    EXPECT_FALSE(UsesSignIn("vimeo", "https://vimeo.com.example.test/1"));
+    EXPECT_FALSE(UsesSignIn("", "https://vimeo.com/1"));
+    EXPECT_FALSE(UsesSignIn("unknown", "https://vimeo.com/1"));
+    EXPECT_EQ(ldm::core::SignInHosts("x reddit"), (std::vector<std::string>{"x.com", "twitter.com", "reddit.com"}));
+    const auto& sites = ldm::core::SignInSites();
+    const auto youtube = std::find_if(sites.begin(), sites.end(), [](const auto& s) { return s.key == "youtube"; });
+    ASSERT_NE(youtube, sites.end());
+    EXPECT_TRUE(youtube->flagsAccounts);
+}
+
 }  // namespace
