@@ -244,7 +244,9 @@ std::vector<std::wstring> ProbeArguments(const std::filesystem::path& file)
             file.native()};
 }
 
-std::string DescribeProbe(std::string_view json)
+namespace {
+
+std::string DescribeParsedProbe(std::string_view json)
 {
     const auto parsed = nlohmann::json::parse(json, nullptr, false);
     if (parsed.is_discarded() || !parsed.is_object()) {
@@ -313,6 +315,17 @@ std::string DescribeProbe(std::string_view json)
         description += (description.empty() ? "" : "; ") + part;
     }
     return description;
+}
+
+}  // namespace
+
+std::string DescribeProbe(std::string_view json)
+{
+    try {
+        return DescribeParsedProbe(json);
+    } catch (const nlohmann::json::exception&) {
+        return {};  // a field of an unexpected type: the description is optional
+    }
 }
 
 }  // namespace ldm::platform
