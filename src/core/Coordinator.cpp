@@ -1994,8 +1994,15 @@ std::optional<std::string> Coordinator::ValidateMedia(const MediaChoice& media, 
                 (choice.expectedBytes && *choice.expectedBytes <= 0)) {
                 return "A track of the site video has no format to ask for again.";
             }
+            for (const std::string* query : {&choice.segmentQuery, &choice.keyQuery}) {
+                if (!query->empty() && (!media::IsSiteQuery(*query) || media.kind != model::DownloadKind::Hls)) {
+                    return "A track of the site video has address parameters LDM cannot use.";
+                }
+            }
             track.siteFormat = choice.siteFormat;
             track.expectedBytes = choice.expectedBytes;
+            track.segmentQuery = choice.segmentQuery;
+            track.keyQuery = choice.keyQuery;
         }
         download.tracks.push_back(std::move(track));
     }

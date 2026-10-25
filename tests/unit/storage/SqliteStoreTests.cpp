@@ -615,6 +615,8 @@ TEST(SqliteStore, SiteVideoKeepsItsFlagAndTrackFormatsAcrossUpdates)
     original.url = "https://www.youtube.com/watch?v=aqz-KE-bpKQ";
     original.tracks[1].siteFormat = "140";
     original.tracks[1].expectedBytes = 10'271'496;
+    original.tracks[1].segmentQuery = "Policy=p&Signature=s";
+    original.tracks[1].keyQuery = "k=1";
     auto id = store.InsertDownload(original);
     ASSERT_TRUE(id.Ok()) << id.GetError().message;
 
@@ -626,6 +628,9 @@ TEST(SqliteStore, SiteVideoKeepsItsFlagAndTrackFormatsAcrossUpdates)
     EXPECT_FALSE(d.tracks[0].expectedBytes);
     EXPECT_EQ(d.tracks[1].siteFormat, "140");
     EXPECT_EQ(d.tracks[1].expectedBytes, 10'271'496);
+    EXPECT_EQ(d.tracks[1].segmentQuery, "Policy=p&Signature=s");
+    EXPECT_EQ(d.tracks[1].keyQuery, "k=1");
+    EXPECT_TRUE(d.tracks[0].segmentQuery.empty());
 
     d.siteVideo = false;
     ASSERT_TRUE(store.SaveDownload(d).Ok());

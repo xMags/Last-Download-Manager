@@ -224,6 +224,8 @@ struct Candidate {
     bool sdr = true;
     std::string referer;
     std::vector<std::string> headers;  // "Name: value", sorted by name
+    std::string segmentQuery;          // HLS only
+    std::string keyQuery;
 };
 
 std::optional<std::string> CheckedUrl(std::string_view base, std::string_view url)
@@ -599,7 +601,8 @@ std::string Container(const Candidate& candidate)
 
 SiteFormat Format(const Candidate& candidate)
 {
-    return SiteFormat{candidate.id, candidate.bytes, candidate.referer, candidate.ext, candidate.headers};
+    return SiteFormat{candidate.id,      candidate.bytes,        candidate.referer, candidate.ext,
+                      candidate.headers, candidate.segmentQuery, candidate.keyQuery};
 }
 
 // The RFC 6381 list as far as the site named it.
@@ -741,6 +744,32 @@ void ReadSubtitles(const Json& root, MediaOffer& offer)
 
 }  // namespace
 
+bool IsSiteQuery(std::string_view query)
+{
+    if (query.empty() || query.size() > 4096 || query.front() == '&' || query.back() == '&' ||
+        query.find("&&") != std::string_view::npos) {
+        return false;
+    }
+    // RFC 3986 query characters, without '#' or anything that would need encoding first.
+    const bool characters = std::all_of(query.begin(), query.end(), [](char c) {
+        return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+               std::string_view("-._~%!$'()*+,;=:@/?&").find(c) != std::string_view::npos;
+    });
+    if (!characters) {
+        return false;
+    }
+    size_t start = 0;
+    while (start <= query.size()) {
+        const size_t end = std::min(query.find('&', start), query.size());
+        const std::string_view pair = query.substr(start, end - start);
+        if (pair.find('=') == 0 || pair.find('=') == std::string_view::npos) {
+            return false;  // every part names its parameter
+        }
+        start = end + 1;
+    }
+    return true;
+}
+
 bool IsSiteHeaderLine(std::string_view line)
 {
     const size_t colon = line.find(": ");
@@ -815,6 +844,19 @@ base::Result<SiteVideo> ReadVideo(const Json& root)
             continue;
         }
         ReadCookies((*formats)[i], video.cookies);
+        if (candidate->delivery == Delivery::Hls) {
+            // The format's own, or the answer's for all of them (yt-dlp reads them from both).
+            for (const auto& [field, query] : {std::pair{"extra_param_to_segment_url", &candidate->segmentQuery},
+                                               std::pair{"extra_param_to_key_url", &candidate->keyQuery}}) {
+                std::string text = Text((*formats)[i], field);
+                if (text.empty()) {
+                    text = Text(root, field);
+                }
+                if (IsSiteQuery(text)) {
+                    *query = std::move(text);
+                }
+            }
+        }
         if (candidate->audio == Codec::None) {
             videoOnly.push_back(std::move(*candidate));
         } else if (candidate->video == Codec::None) {

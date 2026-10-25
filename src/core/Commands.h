@@ -55,6 +55,9 @@ struct MediaTrackChoice {
     // A site video's track: the resolver's format id and the exact length the site stated.
     std::string siteFormat;
     std::optional<std::int64_t> expectedBytes;
+    // An HLS site format's parameters for its playlist's addresses (media::SiteFormat).
+    std::string segmentQuery;
+    std::string keyQuery;
 };
 
 // A stream to download instead of a file (M3 design section 6). The command's `url` is then the

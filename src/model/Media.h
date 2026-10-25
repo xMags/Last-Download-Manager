@@ -97,6 +97,11 @@ struct MediaTrack {
     // format again, and its exact length when the site stated one, to tell the same bytes came.
     std::string siteFormat;
     std::optional<std::int64_t> expectedBytes;
+    // An HLS site format's parameters for every address its playlist lists: pieces and init
+    // sections take segmentQuery, keys keyQuery or else segmentQuery (media::SiteFormat). Applied
+    // each time the playlist is read, so a fresh playlist gets them too.
+    std::string segmentQuery;
+    std::string keyQuery;
     std::vector<MediaKey> keys;
     // Empty until the track's list is known (an HLS media playlist not read yet).
     std::vector<MediaPiece> pieces;

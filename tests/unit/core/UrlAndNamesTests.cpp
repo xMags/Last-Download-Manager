@@ -58,6 +58,17 @@ TEST(Url, ExtractsAddressesFromText)
     EXPECT_EQ(urls, expected);
 }
 
+TEST(Url, QueryParametersAreAddedOrReplaceTheirNamesake)
+{
+    using ldm::core::WithQueryParameters;
+    EXPECT_EQ(WithQueryParameters("https://a.test/seg1.ts", "Policy=p&Signature=s"), "https://a.test/seg1.ts?Policy=p&Signature=s");
+    EXPECT_EQ(WithQueryParameters("https://a.test/seg1.ts?n=1&Signature=old", "Signature=s&Key-Pair-Id=k"),
+              "https://a.test/seg1.ts?n=1&Signature=s&Key-Pair-Id=k");
+    EXPECT_EQ(WithQueryParameters("https://a.test/seg1.ts?n=1#t=5", "a=b"), "https://a.test/seg1.ts?n=1&a=b#t=5");
+    EXPECT_EQ(WithQueryParameters("https://a.test/seg1.ts?", "a=b"), "https://a.test/seg1.ts?a=b");
+    EXPECT_EQ(WithQueryParameters("https://a.test/seg1.ts?n=1", ""), "https://a.test/seg1.ts?n=1");
+}
+
 TEST(FileNames, FromUrlPath)
 {
     EXPECT_EQ(FileNameFromUrlPath("/dir/My%20File.zip"), "My File.zip");

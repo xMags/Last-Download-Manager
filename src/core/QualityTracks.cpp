@@ -33,6 +33,8 @@ void TakeSiteFormat(MediaTrackChoice& track, const std::optional<media::SiteForm
     if (site) {
         track.siteFormat = site->id;
         track.expectedBytes = site->bytes;
+        track.segmentQuery = site->segmentQuery;
+        track.keyQuery = site->keyQuery;
         if (!site->referer.empty()) {
             result.referer = site->referer;
         }
@@ -69,6 +71,8 @@ MediaTrackChoice TrackForRendition(const media::Rendition& rendition, const std:
     if (rendition.site) {
         track.siteFormat = rendition.site->id;
         track.expectedBytes = rendition.site->bytes;
+        track.segmentQuery = rendition.site->segmentQuery;
+        track.keyQuery = rendition.site->keyQuery;
     }
     return track;
 }

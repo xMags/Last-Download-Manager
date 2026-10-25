@@ -167,6 +167,8 @@ FreshAddresses ApplyFreshAddresses(model::Download& download, const media::SiteV
         case Fit::Playlist:
             // Its pieces' addresses may be signed too: the playlist is always read again.
             track.sourceUrl = std::get<media::PlaylistAddress>(*format.source).url;
+            track.segmentQuery = format.site->segmentQuery;
+            track.keyQuery = format.site->keyQuery;
             result.relist.push_back(t);
             break;
         case Fit::Pieces: {

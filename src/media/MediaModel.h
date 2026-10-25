@@ -97,6 +97,11 @@ struct SiteFormat {
     // Other headers the site wants with this format's requests, as "Name: value" lines (a
     // session id, a stream key); checked when read (SiteVideo.h).
     std::vector<std::string> headers;
+    // An HLS format's parameters for the addresses its playlist lists (yt-dlp's
+    // extra_param_to_segment_url, as "a=1&b=2"): every piece and init section needs them, and its
+    // keys too unless keyQuery gives their own. Empty for none.
+    std::string segmentQuery;
+    std::string keyQuery;
 };
 
 // One quality of the video, or of the whole stream when it has no video (an audio-only HLS
