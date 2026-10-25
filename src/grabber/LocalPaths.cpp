@@ -122,7 +122,12 @@ std::string LocalRelativePath(const core::Url& url, bool page, bool keepSiteFold
         return name;
     }
     std::string host = url.host;
-    if (url.port) {
+    // A scheme's own port names the same site as no port, as NormalizeAddress has it too.
+    const bool defaultPort = url.port && ((url.scheme == "http" && *url.port == 80) ||
+                                          (url.scheme == "https" && *url.port == 443) ||
+                                          (url.scheme == "ftp" && *url.port == 21) ||
+                                          (url.scheme == "ftps" && *url.port == 990));
+    if (url.port && !defaultPort) {
         host += "_" + std::to_string(*url.port);
     }
     std::string path = core::SanitizeFileName(host);

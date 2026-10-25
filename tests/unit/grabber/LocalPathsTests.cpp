@@ -28,6 +28,7 @@ TEST(LocalPaths, NamesPagesAndFiles)
     EXPECT_EQ(LocalRelativePath(U("http://example.com/img/a%20b.jpg"), false, true), "example.com/img/a b.jpg");
     EXPECT_EQ(LocalRelativePath(U("http://example.com/img/a.jpg"), false, false), "a.jpg");
     EXPECT_EQ(LocalRelativePath(U("http://example.com:8080/a.jpg"), false, true), "example.com_8080/a.jpg");
+    EXPECT_EQ(LocalRelativePath(U("https://example.com:443/a.jpg"), false, true), "example.com/a.jpg");
     EXPECT_EQ(LocalRelativePath(U("http://example.com/dir/"), false, false), "index");
 }
 
