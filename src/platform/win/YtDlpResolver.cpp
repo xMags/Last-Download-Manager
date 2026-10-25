@@ -100,6 +100,15 @@ ResolverFailure ReadResolverFailure(std::string_view errors)
     if (Contains(error, "not a bot")) {
         return {Problem::Video, "The site asked to confirm that this is not a bot. Try again later."};
     }
+    // The site could not be reached: Python's network errors, as yt-dlp passes them on. No newer
+    // yt-dlp changes that, and the raw words mean nothing to the user.
+    for (const std::string_view network : {"Connection aborted", "ConnectionResetError", "Remote end closed connection",
+                                           "timed out", "getaddrinfo failed", "Failed to resolve", "Network is unreachable",
+                                           "No route to host", "Connection refused"}) {
+        if (Contains(error, network)) {
+            return {Problem::Unreachable, "The video site could not be reached. Check the connection, or try again later."};
+        }
+    }
     // yt-dlp's words for a video only signed-in users see, which advise its own options.
     for (const std::string_view signIn : {"--cookies", "only works when logged-in", "authentication is required",
                                           "Login required", "login required"}) {

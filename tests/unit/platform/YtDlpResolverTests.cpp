@@ -80,6 +80,19 @@ TEST(YtDlpResolver, AVideoForSignedInUsersPointsAtLdmsSignInNotYtDlpsOptions)
     }
 }
 
+TEST(YtDlpResolver, ASiteThatCannotBeReachedIsSaidSoInPlainWords)
+{
+    for (const char* error : {
+             "ERROR: [Streamable] dnd1: Unable to download JSON metadata: ('Connection aborted.', ConnectionResetError(10054, 'An existing connection was forcibly closed by the remote host', None, 10054, None))",
+             "ERROR: [rutube] a10e: Unable to download video JSON: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))",
+             "ERROR: [NBC] 3646439: Unable to download JSON metadata: HTTPSConnection(host='friendship.nbc.co', port=443): Failed to resolve 'friendship.nbc.co'",
+         }) {
+        const auto failure = ReadResolverFailure(error);
+        EXPECT_EQ(failure.problem, Problem::Unreachable) << error;
+        EXPECT_EQ(failure.message, "The video site could not be reached. Check the connection, or try again later.");
+    }
+}
+
 TEST(YtDlpResolver, ABotCheckIsShownInPlainWords)
 {
     const auto bot = ReadResolverFailure("ERROR: [youtube] abcdefghijk: Sign in to confirm you\xE2\x80\x99re not a bot.");
