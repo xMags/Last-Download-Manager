@@ -415,6 +415,42 @@ TEST_F(MediaEngineTest, AWholeFileTrackIsDownloadedInRanges)
     }
 }
 
+TEST_F(MediaEngineTest, AResumedWholeFileTrackCountsOnlyTheBytesOfThisRun)
+{
+    // Half of the file is on disk from an earlier run; the coordinator adds that half itself.
+    const std::int64_t size = server_->Size();
+    const std::int64_t half = size / 2;
+    MediaTrackRequest whole;
+    whole.track = 0;
+    whole.wholeFile = true;
+    whole.url = server_->Url("/range.bin");
+    whole.path = parts_ / "t0.mp4";
+    whole.ranges = {ldm::model::Segment{0, size, half}};
+    fs::create_directories(parts_);
+    {
+        std::ofstream out(whole.path, std::ios::binary);
+        ASSERT_TRUE(out) << whole.path;
+        for (std::int64_t i = 0; i < half; ++i) {
+            out.put(static_cast<char>(ldm::test::FixtureByte(i)));
+        }
+    }
+    engine_->StartMedia(Request({whole}));
+    const auto finished = Finished(1);
+    ASSERT_TRUE(finished);
+    ASSERT_EQ(finished->outcome, TransferOutcome::Completed) << (finished->failure ? finished->failure->message : "");
+    const auto reports = listener_.All<ldm::core::MediaProgress>(DownloadId{1}, 1);
+    ASSERT_FALSE(reports.empty());
+    for (const auto& report : reports) {
+        EXPECT_GE(report.receivedBytes, 0);
+        EXPECT_LE(report.receivedBytes, size - half) << "the half on disk is not received again";
+    }
+    const std::string file = ReadFile(whole.path);
+    ASSERT_EQ(static_cast<std::int64_t>(file.size()), size);
+    for (size_t i = 0; i < file.size(); i += 4099) {
+        ASSERT_EQ(static_cast<std::uint8_t>(file[i]), ldm::test::FixtureByte(static_cast<std::int64_t>(i))) << i;
+    }
+}
+
 TEST_F(MediaEngineTest, FetchesSayWhetherTheyCameFromAPrivateNetwork)
 {
     ldm::core::FetchRequest fetch;

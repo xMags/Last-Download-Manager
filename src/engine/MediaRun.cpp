@@ -34,6 +34,9 @@ struct MediaRun::WholeFile {
     std::unique_ptr<Transfer> transfer;
     std::vector<model::Segment> ranges;
     std::optional<std::int64_t> totalSize;
+    // The Transfer counts every byte of the file, those of earlier runs too; the run reports only
+    // what arrived since `startBytes`, as the coordinator adds what was on disk itself.
+    std::int64_t startBytes = 0;
     std::int64_t receivedBytes = 0;
     std::int64_t bytesPerSecond = 0;
     int connections = 0;
@@ -111,6 +114,10 @@ void MediaRun::Begin(Clock::time_point now)
             wholeFile->track = track.track;
             wholeFile->listener = std::make_unique<WholeFileListener>(*this, *wholeFile);
             wholeFile->ranges = track.ranges;
+            for (const model::Segment& range : track.ranges) {
+                wholeFile->startBytes += range.done;
+            }
+            wholeFile->receivedBytes = wholeFile->startBytes;
             TransferServices inner = services_;
             inner.listener = wholeFile->listener.get();
             inner.runBucket = &bucket_;
@@ -838,7 +845,7 @@ void MediaRun::ReportProgress(Clock::time_point now)
     std::int64_t wholeFileSpeed = 0;
     int connections = static_cast<int>(connections_.size());
     for (const auto& wholeFile : wholeFiles_) {
-        received += wholeFile->receivedBytes;
+        received += std::max<std::int64_t>(wholeFile->receivedBytes - wholeFile->startBytes, 0);
         wholeFileSpeed += wholeFile->bytesPerSecond;
         connections += wholeFile->connections;
     }
