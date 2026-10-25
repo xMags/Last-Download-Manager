@@ -303,10 +303,10 @@ base::Result<model::Download> ReadDownload(const Statement& row)
     d.replaceFinalFile = row.Int64(40) != 0;
     d.siteVideo = row.Int64(41) != 0;
     if (const std::string quality = row.Text(42); !quality.empty()) {
-        d.siteQuality = model::ParseSiteQuality(quality);
-        if (!d.siteQuality) {
-            return CorruptRow("downloads.site_quality");
-        }
+        // The column has no CHECK, so a newer version can store a quality this one does not know
+        // without a new schema. Such a download takes the best quality rather than keeping the
+        // whole list from loading.
+        d.siteQuality = model::ParseSiteQuality(quality).value_or(model::SiteQuality::Best);
     }
     d.siteHeaderSecret = row.Blob(43);
     return d;
@@ -1225,11 +1225,9 @@ base::Status SqliteStore::SaveSettings(const model::SettingsMap& settings)
     if (!transaction) {
         return transaction.GetError();
     }
-    base::Status cleared = connection_.Execute("DELETE FROM settings");
-    if (!cleared) {
-        return cleared;
-    }
-    base::Result<Statement> insert = connection_.Prepare("INSERT INTO settings (key, value) VALUES (?1, ?2)");
+    // Keys not in the map stay: a newer version's settings must survive running an older one.
+    base::Result<Statement> insert = connection_.Prepare(
+        "INSERT INTO settings (key, value) VALUES (?1, ?2) ON CONFLICT (key) DO UPDATE SET value = excluded.value");
     if (!insert) {
         return insert.GetError();
     }
