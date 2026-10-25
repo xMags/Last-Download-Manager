@@ -23,6 +23,8 @@ inline constexpr size_t kMaxSiteAnswerBytes = 16 * 1024 * 1024;
 inline constexpr size_t kMaxSiteFormats = 500;
 inline constexpr size_t kMaxSiteUrlBytes = 16 * 1024;
 inline constexpr size_t kMaxSiteCookies = 50;
+// The most headers of a format LDM sends besides its own.
+inline constexpr size_t kMaxSiteHeaders = 16;
 
 // A cookie the resolver got from the site itself while reading the page (not one of the
 // browser's), which the site wants back with the requests for its files.
@@ -54,6 +56,11 @@ struct SiteVideo {
 // started yet, a video with nothing LDM can download (protected, or only kinds of formats it does not take), and for
 // anything that is not a well-formed answer.
 [[nodiscard]] base::Result<SiteVideo> ParseSiteVideo(std::string_view json);
+
+// Whether `line` is a header LDM sends for a site as it stands: "Name: value", the name a token
+// that is not one LDM sets itself or that describes the connection, the value without line breaks
+// (SiteFormat::headers holds only such lines).
+[[nodiscard]] bool IsSiteHeaderLine(std::string_view line);
 
 // The most videos LDM lists of one page.
 inline constexpr size_t kMaxSitePlaylistEntries = 5000;

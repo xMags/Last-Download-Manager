@@ -286,6 +286,7 @@ export function createReferenceFixture({
       event: 'request', id, method: request.method, path, range: request.headers.range ?? null,
       ifRange: request.headers['if-range'] ?? null, userAgent: request.headers['user-agent'] ?? null,
       referer: request.headers.referer ?? null, acceptEncoding: request.headers['accept-encoding'] ?? null,
+      streamKey: request.headers['x-stream-key'] ?? null,
     });
     active += 1;
     maxActive = Math.max(maxActive, active);
@@ -434,6 +435,15 @@ export function createReferenceFixture({
           return;
         }
         serveBody(request, response, id, data, { etag: strong, lastModified: modified, name: 'cookie.bin' });
+        return;
+      }
+      case '/site-header.bin': {
+        // A video site's own header (a stream key), wanted with every request.
+        if (request.headers['x-stream-key'] !== 'k1') {
+          finish(403, { 'Content-Type': 'text/plain' }, 'stream key required');
+          return;
+        }
+        serveBody(request, response, id, data, { etag: strong, lastModified: modified, name: 'site-header.bin' });
         return;
       }
       case '/auth/basic.bin': {

@@ -11,6 +11,7 @@
 #include "core/QualityTracks.h"
 #include "core/SiteList.h"
 #include "core/SiteRefresh.h"
+#include "media/SiteVideo.h"
 #include "model/Cookie.h"
 
 #include <algorithm>
@@ -302,6 +303,7 @@ void Coordinator::RecoverAfterRestart(Entry& entry)
             d.status = DownloadStatus::Completed;
             d.partialPath.reset();
             d.cookieSecret.clear();  // design decision 3: browser cookies and form data are kept only until completion
+            d.siteHeaderSecret.clear();
             d.postSecret.clear();
             d.postContentType.reset();
             if (!d.completedAtMs) {
@@ -633,6 +635,12 @@ void Coordinator::Add(const AddDownloadCommand& command)
             fail(std::move(*error));
             return;
         }
+        auto headers = ProtectSiteHeaders(command.media->siteHeaders);
+        if (!headers) {
+            fail("The site's request headers could not be protected: " + headers.GetError().message);
+            return;
+        }
+        download.siteHeaderSecret = std::move(headers).Value();
     }
     // Download Later goes into the main queue unless another was chosen (M4 design decision 2).
     const std::optional<model::QueueId> queue = command.queue ? command.queue
@@ -1585,6 +1593,7 @@ void Coordinator::OnFinalized(Entry& entry, const FinalizeFinished& finalized)
     d.partialPath.reset();
     entry.muxOutput.reset();
     d.cookieSecret.clear();  // design decision 3: browser cookies and form data are kept only until completion
+    d.siteHeaderSecret.clear();
     d.postSecret.clear();
     d.postContentType.reset();
     entry.download.replaceFinalFile = false;
@@ -2057,6 +2066,7 @@ void Coordinator::StartStream(Entry& entry)
     request.referer = d.referer;
     request.userAgent = d.userAgent.value_or(settings_.userAgent);
     request.cookieLines = StreamCookieLines(d);
+    request.headers = StreamSiteHeaders(d);
     request.proxy = entry.runProxy;
     request.maxConnections = ConnectionsFor(entry, ParseUrl(d.url), false);
     request.speedLimitBytesPerSecond = d.speedLimitBytesPerSecond;
@@ -2088,6 +2098,46 @@ std::vector<std::string> Coordinator::StreamCookieLines(const model::Download& d
     return cookies ? model::CookieLines(cookies.Value()) : std::vector<std::string>{};
 }
 
+std::vector<std::string> Coordinator::StreamSiteHeaders(const model::Download& download)
+{
+    if (download.siteHeaderSecret.empty()) {
+        return {};
+    }
+    auto text = ports_.secrets->Unprotect(download.siteHeaderSecret);
+    if (!text) {
+        return {};
+    }
+    std::vector<std::string> lines;
+    const std::string_view all = text.Value();
+    size_t start = 0;
+    while (start < all.size() && lines.size() < media::kMaxSiteHeaders) {
+        const size_t end = std::min(all.find('\n', start), all.size());
+        const std::string_view line = all.substr(start, end - start);
+        if (media::IsSiteHeaderLine(line)) {
+            lines.emplace_back(line);
+        }
+        start = end + 1;
+    }
+    return lines;
+}
+
+base::Result<std::vector<std::uint8_t>> Coordinator::ProtectSiteHeaders(const std::vector<std::string>& lines)
+{
+    std::string text;
+    size_t kept = 0;
+    for (const std::string& line : lines) {
+        if (kept < media::kMaxSiteHeaders && media::IsSiteHeaderLine(line)) {
+            text += line;
+            text += '\n';
+            ++kept;
+        }
+    }
+    if (text.empty()) {
+        return std::vector<std::uint8_t>{};
+    }
+    return ports_.secrets->Protect(text);
+}
+
 void Coordinator::FetchPlaylist(Entry& entry, std::uint32_t track, PlaylistPurpose purpose)
 {
     const model::Download& d = entry.download;
@@ -2097,6 +2147,7 @@ void Coordinator::FetchPlaylist(Entry& entry, std::uint32_t track, PlaylistPurpo
     fetch.referer = d.referer;
     fetch.userAgent = d.userAgent.value_or(settings_.userAgent);
     fetch.cookieLines = StreamCookieLines(d);
+    fetch.headers = StreamSiteHeaders(d);
     fetch.proxy = entry.runProxy;
     fetch.maxBytes = media::kMaxManifestBytes;
     fetch.refusePrivateAddresses = !d.mediaFromPrivateNetwork;
@@ -2668,6 +2719,13 @@ void Coordinator::OnSiteRefreshed(model::DownloadId id, std::int64_t epoch, cons
         OnMediaFinished(*entry, failed);
         return;
     }
+    // A session's key may have changed with the addresses; stored now, as the tracks are.
+    if (fresh.headers != StreamSiteHeaders(d)) {
+        if (auto headers = ProtectSiteHeaders(fresh.headers)) {
+            d.siteHeaderSecret = std::move(headers).Value();
+            Save(*entry);
+        }
+    }
     StoreTracks(*entry, fresh.changed);
     for (const std::uint32_t t : fresh.relist) {
         model::MediaTrack& track = d.tracks[t];
@@ -2720,6 +2778,9 @@ std::optional<std::string> Coordinator::ChooseSiteTracks(Entry& entry, const med
     }
     if (!chosen.Value().referer.empty()) {
         d.referer = chosen.Value().referer;
+    }
+    if (auto headers = ProtectSiteHeaders(chosen.Value().headers)) {
+        d.siteHeaderSecret = std::move(headers).Value();
     }
     // Cookies the site set while the resolver read the page, which it wants back with its files.
     std::vector<model::Cookie> cookies;
@@ -2916,6 +2977,7 @@ void Coordinator::PublishSnapshot()
             view->download = entry->download;
             view->download.loginSecret.clear();
             view->download.cookieSecret.clear();
+            view->download.siteHeaderSecret.clear();
             view->download.postSecret.clear();
             view->hasPassword = !entry->download.loginSecret.empty();
             view->awaitingConfirmation = entry->download.awaitingConfirmation;

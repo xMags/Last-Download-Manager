@@ -86,6 +86,9 @@ struct Download {
     // DPAPI-protected cookie lines from the browser that captured this download (model::CookiesToText);
     // empty for downloads added in LDM. Removed once the download completes.
     std::vector<std::uint8_t> cookieSecret;
+    // A site video's other request headers (media::SiteFormat::headers), DPAPI-protected as
+    // "Name: value" lines; they may carry a session's key. Removed once the download completes.
+    std::vector<std::uint8_t> siteHeaderSecret;
     // A download that came from submitting a form (checklist ENG-11): the DPAPI-protected request
     // body and its Content-Type. Empty for ordinary downloads; removed once the download completes.
     std::vector<std::uint8_t> postSecret;

@@ -38,6 +38,9 @@ struct FreshAddresses {
     // pieces: their playlists are read again before the run, and KeepProgress decides what stays.
     std::vector<std::uint32_t> relist;
     std::optional<std::string> failure;  // a track's format is no longer offered; nothing changed
+    // The site's other headers for the formats now (media::SiteFormat::headers); they replace the
+    // download's, since a session's key may have changed with its addresses.
+    std::vector<std::string> headers;
 };
 
 // Gives each track of `download` the address of its format in `video`. A whole-file track whose

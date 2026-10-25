@@ -19,6 +19,7 @@ struct QualityTracks {
     std::vector<MediaTrackChoice> tracks;
     bool picture = false;  // a video track is among them, so the file is a video
     std::string referer;   // the Referer a site wants for these formats; empty for none
+    std::vector<std::string> headers;  // the site's other headers for them (media::SiteFormat::headers)
 };
 
 // A rendition's track: from its playlist address, or from the list the manifest gave, which then

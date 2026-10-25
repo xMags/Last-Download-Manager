@@ -128,6 +128,7 @@ void MediaRun::Begin(Clock::time_point now)
             file.referer = request_.referer;
             file.userAgent = request_.userAgent;
             file.cookieLines = request_.cookieLines;
+            file.headers = request_.headers;
             file.proxy = request_.proxy;
             file.partialPath = track.path;
             file.segments = track.ranges;
@@ -276,6 +277,14 @@ CurlEasy MediaRun::NewEasy(Connection& connection, const std::string& url)
         for (const std::string& line : request_.cookieLines) {
             curl_easy_setopt(handle, CURLOPT_COOKIELIST, line.c_str());  // copied by libcurl
         }
+    }
+    curl_slist* headers = nullptr;
+    for (const std::string& line : request_.headers) {
+        headers = curl_slist_append(headers, line.c_str());
+    }
+    if (headers != nullptr) {
+        connection.headerList.reset(headers);  // kept as long as the connection
+        curl_easy_setopt(handle, CURLOPT_HTTPHEADER, headers);
     }
     curl_easy_setopt(handle, CURLOPT_HEADERFUNCTION, &MediaRun::HeaderCallback);
     curl_easy_setopt(handle, CURLOPT_HEADERDATA, &connection);
