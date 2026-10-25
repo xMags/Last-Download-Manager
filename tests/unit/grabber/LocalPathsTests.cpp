@@ -62,7 +62,7 @@ TEST(LocalPaths, BuildsRelativeReferences)
 TEST(LocalPaths, MakesAddressesSafeInAttributes)
 {
     EXPECT_EQ(AttributeSafeAddress("http://example.com/a b?x=1&y=\"2\",<3>"),
-              "http://example.com/a%20b?x=1%26y=%222%22%2C%3C3%3E");
+              "http://example.com/a%20b?x=1&amp;y=%222%22%2C%3C3%3E");
 }
 
 }  // namespace
