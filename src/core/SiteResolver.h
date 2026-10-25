@@ -14,7 +14,7 @@ namespace ldm::core {
 
 struct SiteLookupRequest {
     std::int64_t lookupId = 0;  // at least 1
-    std::string pageUrl;        // core::FindSiteVideo's canonical address, nothing a page wrote
+    std::string pageUrl;        // core::CheckSitePage's address of the page
     std::optional<std::string> proxy;  // as downloads use it; nothing: connect directly
 };
 

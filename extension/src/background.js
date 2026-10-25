@@ -122,6 +122,7 @@ const videoPositions = new VideoPositions(api, connection);
 const sitePages = new SitePages(api, connection, {
   ready: settingsLoaded,
   isEnabled: () => enabled && rules.sitePages === true,
+  hosts: () => rules.siteHosts ?? null,
   userAgent: navigator.userAgent,
 });
 

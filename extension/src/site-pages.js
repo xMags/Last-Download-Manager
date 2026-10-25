@@ -1,21 +1,22 @@
 import { isDownloadAddress, makeSitePage } from './protocol.js';
 
-// Tells LDM the address of tabs on the video sites it supports (video-sites design, section 7),
-// so it can look a video up when the page shows one, also when the site changes the video without
-// loading a page. Only these sites' own addresses are sent, and only while LDM asked for them
-// (config sitePages); LDM checks each address itself and builds its own from it.
+// Tells LDM the address of tabs on the video sites it lists (video-sites designs, round 1
+// section 7 and round 2 section 2.2), so it can look a video up when the page shows one, also when
+// the site changes the video without loading a page. Only these sites' own addresses are sent,
+// and only while LDM asked for them (config sitePages); LDM checks each address itself and builds
+// its own from it.
 
-// The sites' hosts. LDM decides which of their pages are videos.
-const SITE_HOSTS = new Set(['youtube.com', 'www.youtube.com', 'm.youtube.com', 'youtu.be', 'youtube-nocookie.com',
-  'www.youtube-nocookie.com']);
+// The sites of LDM 5.1, which sends no list of its own.
+const DEFAULT_SITE_HOSTS = ['youtube.com', 'youtu.be', 'youtube-nocookie.com'];
 
-/** True for an address on one of the supported sites. */
-export function isSiteAddress(url) {
+/** True for an address on one of `hosts` or their subdomains. LDM decides which pages are videos. */
+export function isSiteAddress(url, hosts = DEFAULT_SITE_HOSTS) {
   if (!isDownloadAddress(url) || !/^https?:/i.test(url)) {
     return false;
   }
   try {
-    return SITE_HOSTS.has(new URL(url).hostname.toLowerCase());
+    const hostname = new URL(url).hostname.toLowerCase();
+    return hosts.some((host) => hostname === host || hostname.endsWith('.' + host));
   } catch {
     return false;
   }
@@ -25,7 +26,8 @@ export class SitePages {
   /**
    * @param {object} api the extension API object
    * @param {{post: function(object): boolean}} connection the lasting connection to LDM
-   * @param {{ready: Promise, isEnabled: function(): boolean, userAgent: string}} options
+   * @param {{ready: Promise, isEnabled: function(): boolean, hosts: function(): (string[]|null),
+   *          userAgent: string}} options
    */
   constructor(api, connection, options) {
     this.api = api;
@@ -66,7 +68,7 @@ export class SitePages {
     const url = tab.url;
     const previous = this.sent.get(tabId);
     // Leaving the site for another one loads a page, and LDM forgets the tab then.
-    if (!isSiteAddress(url) || url === previous) {
+    if (!isSiteAddress(url, this.options.hosts?.() ?? DEFAULT_SITE_HOSTS) || url === previous) {
       return;
     }
     const message = makeSitePage({

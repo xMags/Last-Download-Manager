@@ -228,6 +228,9 @@ struct Config {
     // The extension sends SitePage messages: site videos are on. An LDM that says nothing gets none,
     // since an unknown message type ends the connection.
     bool sitePages = false;
+    // The hosts whose pages it sends (core::AutomaticSiteHosts), each with its subdomains. An
+    // extension that does not read them sends YouTube's, the only site of 5.1.
+    std::vector<std::string> siteHosts;
 };
 
 [[nodiscard]] std::string EncodeConfig(const Config& config, std::string_view replyTo);

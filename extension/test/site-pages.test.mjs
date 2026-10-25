@@ -94,3 +94,32 @@ test('the message carries only what LDM accepts', () => {
   assert.equal(message.userAgent, 'Mozilla/5.0');
   assert.ok(!/[\n]/.test(message.pageTitle ?? ''));
 });
+
+test('the sites LDM lists are matched with their subdomains, and only valid host names are taken', () => {
+  const config = parseConfig({
+    v: 1, id: 'push', type: 'config', appVersion: '5.2.0', capturedExtensions: [], sitePages: true,
+    siteHosts: ['youtube.com', 'dailymotion.com', 'bandcamp.com', 'Bad.Host', 'nodot', '*.example.test', 7, 'a b.test'],
+  });
+  assert.deepEqual(config.siteHosts, ['youtube.com', 'dailymotion.com', 'bandcamp.com']);
+  assert.equal(isSiteAddress('https://www.dailymotion.com/video/x5kesuj', config.siteHosts), true);
+  assert.equal(isSiteAddress('https://artist.bandcamp.com/track/song', config.siteHosts), true);
+  assert.equal(isSiteAddress('https://notdailymotion.com/video/x', config.siteHosts), false);
+  assert.equal(isSiteAddress('https://vimeo.com/76979871', config.siteHosts), false);
+  assert.equal(parseConfig({ v: 1, type: 'config', appVersion: '5.1.0', capturedExtensions: [] }).siteHosts, null);
+});
+
+test('without a list from LDM, YouTube is the site', async () => {
+  const connection = recorder();
+  const sitePages = new SitePages(fakeApi(), connection,
+    { ready: Promise.resolve(), isEnabled: () => true, hosts: () => null, userAgent: 'UA/1' });
+  await sitePages.onUpdated(1, { url: 'https://www.dailymotion.com/video/x5kesuj' }, { url: 'https://www.dailymotion.com/video/x5kesuj' });
+  await sitePages.onUpdated(2, { url: watch('aqz-KE-bpKQ') }, { url: watch('aqz-KE-bpKQ') });
+  assert.deepEqual(connection.posted.map((m) => m.tabId), [2]);
+
+  const listed = recorder();
+  const withList = new SitePages(fakeApi(), listed,
+    { ready: Promise.resolve(), isEnabled: () => true, hosts: () => ['dailymotion.com'], userAgent: 'UA/1' });
+  await withList.onUpdated(1, { url: 'https://www.dailymotion.com/video/x5kesuj' }, { url: 'https://www.dailymotion.com/video/x5kesuj' });
+  await withList.onUpdated(2, { url: watch('aqz-KE-bpKQ') }, { url: watch('aqz-KE-bpKQ') });
+  assert.deepEqual(listed.posted.map((m) => m.tabId), [1]);
+});

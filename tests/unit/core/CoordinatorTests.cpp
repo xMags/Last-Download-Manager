@@ -1300,7 +1300,7 @@ TEST_F(CoordinatorTest, OtherStreamsHaveNoRequestCap)
 TEST_F(CoordinatorTest, ASiteVideoNeedsItsCanonicalPageAndAFormatPerTrack)
 {
     for (const char* page : {"https://youtu.be/aqz-KE-bpKQ", "https://www.youtube.com/watch?v=aqz-KE-bpKQ&list=PL1",
-                             "https://media.test/videoplayback?itag=299"}) {
+                             "http://localhost/videoplayback?itag=299"}) {
         const AddResult refused = Add(page, AddMode::StartNow, [](AddDownloadCommand& c) { c.media = SiteChoice(); });
         EXPECT_FALSE(refused.id) << page;
     }

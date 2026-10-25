@@ -1,5 +1,6 @@
 #include "ui/BrowserSessions.h"
 
+#include "core/SiteList.h"
 #include "core/Url.h"
 
 #include <algorithm>
@@ -264,6 +265,7 @@ browser::Config BrowserSessions::MakeConfig(const model::Settings& settings, bro
     config.media.minimumBytes = std::int64_t{settings.mediaMinimumKilobytes} * 1024;
     config.media.siteExceptions = lowerWords(settings.mediaSiteExceptions);
     config.sitePages = settings.siteVideosEnabled;
+    config.siteHosts = core::AutomaticSiteHosts();
     config.siteExceptions = Words(settings.captureSiteExceptions);
     // Address patterns hold no spaces, so whitespace separates them as well as line breaks do.
     config.addressExceptions = Words(settings.captureAddressExceptions);
