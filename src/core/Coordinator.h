@@ -357,6 +357,9 @@ private:
     void OnToolChecked(SiteTool tool);
     // The site lookup's answer for a site video's run that waits for fresh addresses.
     void OnSiteRefreshed(model::DownloadId id, std::int64_t epoch, const SiteLookupFinished& answer);
+    // A site video added from a list, at its first start: its tracks from `video` by its
+    // siteQuality. The reason when none fit.
+    [[nodiscard]] std::optional<std::string> ChooseSiteTracks(Entry& entry, const media::SiteVideo& video);
     void OnUpdateChecked(const UpdateCheckOutcome& outcome);
 
     // HLS playlists fetched at a stream's start or a live recording's reload, by fetch id. Their

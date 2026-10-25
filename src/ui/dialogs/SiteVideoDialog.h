@@ -29,8 +29,11 @@ public:
 
     SiteVideoDialog(const Theme& theme, browser::SiteRequest request, std::int64_t lookupId, Hooks hooks);
 
-    // The chosen stream; nothing when the user cancelled or the page offered nothing.
+    // The chosen stream; nothing when the user cancelled, the page offered nothing, or it lists
+    // several videos (TakePlaylist).
     [[nodiscard]] std::optional<StreamCapture> Run(HWND owner);
+    // The videos of the page, when it lists several: the dialog closed for them to be picked.
+    [[nodiscard]] std::optional<media::SitePlaylist> TakePlaylist() { return std::move(playlist_); }
     // An answer of the resolver; false when it is not for this dialog.
     bool OnSiteLookedUp(const core::SiteLookupFinished& finished);
 
@@ -48,6 +51,7 @@ private:
     MediaItem item_;
     std::vector<PanelAction> actions_;  // per line of the list
     std::optional<StreamCapture> result_;
+    std::optional<media::SitePlaylist> playlist_;
 };
 
 }  // namespace ldm::ui

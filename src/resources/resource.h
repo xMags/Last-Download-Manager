@@ -663,6 +663,14 @@
 #define IDC_SV_STATUS 1851
 #define IDC_SV_LIST 1852
 #define IDC_ADD_VIDEO 1853
+#define IDD_SITE_PLAYLIST 348
+#define IDC_SP_TITLE 1854
+#define IDC_SP_LIST 1855
+#define IDC_SP_COUNT 1856
+#define IDC_SP_ALL 1857
+#define IDC_SP_NONE 1858
+#define IDC_SP_QUALITY 1859
+#define IDC_SP_START 1860
 
 // The Grabber window's list menu
 #define ID_GRABBER_CHECK 40200

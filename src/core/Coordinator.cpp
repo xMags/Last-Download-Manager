@@ -8,6 +8,7 @@
 #include "core/MediaDownloads.h"
 #include "core/MediaPieces.h"
 #include "core/NetworkAddress.h"
+#include "core/QualityTracks.h"
 #include "core/SiteList.h"
 #include "core/SiteRefresh.h"
 #include "model/Cookie.h"
@@ -1926,6 +1927,18 @@ std::optional<std::string> Coordinator::ValidateMedia(const MediaChoice& media, 
     if (media.kind != model::DownloadKind::Hls && media.kind != model::DownloadKind::Dash) {
         return "Only HLS and DASH streams can be downloaded.";
     }
+    if (media.siteVideo && media.siteQuality && media.tracks.empty()) {
+        // From a list: tracks once it starts. Dash until then; the chosen tracks decide.
+        const auto page = CheckSitePage(download.url);
+        if (!page || page->address != download.url) {
+            return "A site video needs the address of its page.";
+        }
+        download.kind = model::DownloadKind::Dash;
+        download.siteVideo = true;
+        download.siteQuality = media.siteQuality;
+        download.tracks.clear();
+        return std::nullopt;
+    }
     if (media.tracks.empty() || media.tracks.size() > kMaxMediaTracks) {
         return "A stream download needs between 1 and " + std::to_string(kMaxMediaTracks) + " tracks.";
     }
@@ -1998,6 +2011,19 @@ void Coordinator::StartStream(Entry& entry)
         for (const std::uint32_t track : unlisted) {
             FetchPlaylist(entry, track, PlaylistPurpose::Initial);
         }
+        return;
+    }
+    if (d.siteVideo && d.tracks.empty()) {
+        // From a list, at its first start: the page is asked about now, its quality picked then.
+        if (!sites_) {
+            MediaFinished failed;
+            failed.failure = TransferFailure{FailureReason::UnsupportedStream, FailureClass::NeedsUser, 0,
+                                             "this LDM cannot ask video sites about their pages"};
+            OnMediaFinished(entry, failed);
+            return;
+        }
+        entry.pendingRefresh = true;
+        sites_->Refresh(d.id, d.epoch, d.url);
         return;
     }
     if (d.siteVideo && sites_ && !entry.refreshedThisRun &&
@@ -2607,6 +2633,23 @@ void Coordinator::OnSiteRefreshed(model::DownloadId id, std::int64_t epoch, cons
         OnMediaFinished(*entry, failed);
         return;
     }
+    if (d.tracks.empty()) {
+        if (auto refused = ChooseSiteTracks(*entry, *answer.video)) {
+            MediaFinished failed;
+            failed.failure = TransferFailure{FailureReason::NotFound, FailureClass::Fatal, 0, *refused};
+            OnMediaFinished(*entry, failed);
+            return;
+        }
+        std::vector<std::uint32_t> all(d.tracks.size());
+        for (std::uint32_t t = 0; t < all.size(); ++t) {
+            all[t] = t;
+        }
+        StoreTracks(*entry, all);
+        Save(*entry);
+        MarkChanged(*entry);
+        StartStream(*entry);
+        return;
+    }
     const FreshAddresses fresh = ApplyFreshAddresses(d, *answer.video);
     if (fresh.failure) {
         MediaFinished failed;
@@ -2633,6 +2676,55 @@ void Coordinator::OnSiteRefreshed(model::DownloadId id, std::int64_t epoch, cons
     entry->receivedBytes = d.DownloadedBytes();
     MarkChanged(*entry);
     StartStream(*entry);
+}
+
+std::optional<std::string> Coordinator::ChooseSiteTracks(Entry& entry, const media::SiteVideo& video)
+{
+    model::Download& d = entry.download;
+    if (video.offer.live) {
+        return "the video is live now; record it from its page";
+    }
+    const model::SiteQuality quality = d.siteQuality.value_or(model::SiteQuality::Best);
+    const media::QualityList list = media::BuildQualityList(video.offer, video.offer.seconds);
+    const auto index = PickSiteQuality(list, quality);
+    if (!index) {
+        return quality == model::SiteQuality::AudioOnly ? "the video offers no sound on its own"
+                                                        : "the video offers no quality LDM can download";
+    }
+    auto chosen = TracksForQuality(video.offer, list.entries[*index], d.url);
+    if (!chosen) {
+        return chosen.GetError().message;
+    }
+    auto kind = SiteDownloadKind(chosen.Value().tracks);
+    if (!kind) {
+        return kind.GetError().message;
+    }
+    MediaChoice media;
+    media.kind = kind.Value();
+    media.siteVideo = true;
+    media.fromPrivateNetwork = d.mediaFromPrivateNetwork;
+    media.tracks = std::move(chosen.Value().tracks);
+    if (auto refused = ValidateMedia(media, d)) {
+        return refused;
+    }
+    if (!chosen.Value().referer.empty()) {
+        d.referer = chosen.Value().referer;
+    }
+    // Cookies the site set while the resolver read the page, which it wants back with its files.
+    std::vector<model::Cookie> cookies;
+    for (const media::SiteCookie& site : video.cookies) {
+        model::Cookie cookie{site.domain, site.hostOnly, site.path, site.secure, site.expires, site.name, site.value};
+        if (model::IsValidCookie(cookie)) {
+            cookies.push_back(std::move(cookie));
+        }
+    }
+    if (!cookies.empty()) {
+        if (auto secret = ports_.secrets->Protect(model::CookiesToText(cookies))) {
+            d.cookieSecret = std::move(secret).Value();
+        }
+    }
+    entry.approximateBytes = list.entries[*index].approximateBytes;
+    return std::nullopt;
 }
 
 void Coordinator::OnUpdateChecked(const UpdateCheckOutcome& outcome)

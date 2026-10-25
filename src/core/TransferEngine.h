@@ -322,6 +322,9 @@ struct SiteLookupFinished {
     std::int64_t lookupId = 0;
     bool stopped = false;                  // SiteResolver::Cancel ended it; nothing else is set
     std::optional<media::SiteVideo> video;  // the page's video; nothing when it failed
+    // The page lists videos instead (a playlist, a channel, a page with several). `video` is then
+    // empty and `failure` says the page is not one video, for those who wanted one.
+    std::optional<media::SitePlaylist> playlist;
     std::string failure;                   // words for the user when it failed
     enum class Problem {
         None,

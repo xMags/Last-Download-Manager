@@ -268,6 +268,11 @@ ALTER TABLE downloads ADD COLUMN site_video INTEGER NOT NULL DEFAULT 0 CHECK (si
 ALTER TABLE media_tracks ADD COLUMN site_format TEXT NOT NULL DEFAULT '';
 ALTER TABLE media_tracks ADD COLUMN expected_bytes INTEGER CHECK (expected_bytes > 0);
 )sql"},
+    // Site videos added from a list (a playlist, a channel): the rule that picks their quality when
+    // they first start, since their addresses would expire before a long queue reaches them.
+    Migration{12, R"sql(
+ALTER TABLE downloads ADD COLUMN site_quality TEXT NOT NULL DEFAULT '';
+)sql"},
 };
 
 base::Result<int> CurrentVersion(Connection& connection)

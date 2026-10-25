@@ -444,6 +444,67 @@ TEST(SiteVideo, ALiveStreamOffersItsHlsPlaylistsForRecording)
     EXPECT_FALSE(list.entries[0].approximateBytes);
 }
 
+TEST(SiteVideo, APlaylistListsItsVideosPagesAndAChannelItsTabsVideos)
+{
+    const std::string playlist = R"j({"_type":"playlist","id":"PL1","title":"Stories","entries":[)j"
+        R"j({"_type":"url","ie_key":"Youtube","id":"GvgqDSnpRQM","url":"https://www.youtube.com/watch?v=GvgqDSnpRQM","title":"Andrew","duration":90},)j"
+        R"j({"_type":"url","id":"x","url":"https://www.youtube.com/watch?v=fIc_VEQ7Vo0","title":null,"duration":null},)j"
+        R"j({"_type":"url","id":"bad","url":"javascript:void"},)j"
+        R"j({"_type":"playlist","title":"Blender - Shorts","entries":[{"_type":"url","url":"https://www.youtube.com/shorts/YsKxkP_kGbE","title":"Cube"}]})j"
+        R"j(]})j";
+    const auto parsed = ldm::media::ParseSiteAnswer(playlist);
+    ASSERT_TRUE(parsed.Ok()) << parsed.GetError().message;
+    const auto* list = std::get_if<ldm::media::SitePlaylist>(&parsed.Value());
+    ASSERT_NE(list, nullptr);
+    EXPECT_EQ(list->title, "Stories");
+    ASSERT_EQ(list->entries.size(), 3u);
+    EXPECT_EQ(list->entries[0].url, "https://www.youtube.com/watch?v=GvgqDSnpRQM");
+    EXPECT_EQ(list->entries[0].title, "Andrew");
+    EXPECT_EQ(list->entries[0].seconds, 90);
+    EXPECT_TRUE(list->entries[1].title.empty());
+    EXPECT_EQ(list->entries[2].group, "Blender - Shorts");
+    EXPECT_FALSE(list->entries[0].video);
+
+    // A single video is still one.
+    const auto one = ldm::media::ParseSiteAnswer(ReadFixture("dailymotion.json"));
+    ASSERT_TRUE(one.Ok());
+    EXPECT_TRUE(std::holds_alternative<SiteVideo>(one.Value()));
+    EXPECT_EQ(Refusal(playlist), "This page is a playlist. Open one of its videos to download it.");
+}
+
+TEST(SiteVideo, AnOrdinaryPagesVideosAreGivenInFull)
+{
+    const std::string page = R"j({"_type":"playlist","id":"html5_video","title":"HTML Video","entries":[)j"
+        R"j({"id":"v-1","title":"HTML Video (1)","webpage_url":"https://www.example.test/video.html","formats":[)j"
+        R"j({"format_id":"mp4","protocol":"https","url":"https://www.example.test/bbb.mp4","ext":"mp4"}]},)j"
+        R"j({"id":"v-2","title":"Nothing","formats":[{"format_id":"x","protocol":"rtmp","url":"rtmp://x"}]}]})j";
+    const auto parsed = ldm::media::ParseSiteAnswer(page);
+    ASSERT_TRUE(parsed.Ok()) << parsed.GetError().message;
+    const auto& list = std::get<ldm::media::SitePlaylist>(parsed.Value());
+    ASSERT_EQ(list.entries.size(), 1u) << "a video with nothing LDM can download is left out";
+    ASSERT_TRUE(list.entries[0].video);
+    EXPECT_EQ(list.entries[0].url, "https://www.example.test/video.html");
+    EXPECT_EQ(VariantIds(*list.entries[0].video), (std::vector<std::string>{"mp4"}));
+
+    const auto empty = ldm::media::ParseSiteAnswer(R"({"_type":"playlist","id":"e","entries":[]})");
+    ASSERT_FALSE(empty.Ok());
+    EXPECT_EQ(empty.GetError().message, "This page lists no videos LDM can download.");
+}
+
+TEST(SiteVideo, AListLongerThanTheLimitIsCut)
+{
+    std::string page = R"({"_type":"playlist","id":"long","entries":[)";
+    for (size_t i = 0; i < ldm::media::kMaxSitePlaylistEntries + 3; ++i) {
+        page += (i == 0 ? "" : ",") + std::string(R"({"_type":"url","url":"https://v.example.test/)") + std::to_string(i) + R"("})";
+    }
+    page += "]}";
+    const auto parsed = ldm::media::ParseSiteAnswer(page);
+    ASSERT_TRUE(parsed.Ok());
+    const auto& list = std::get<ldm::media::SitePlaylist>(parsed.Value());
+    EXPECT_EQ(list.entries.size(), ldm::media::kMaxSitePlaylistEntries);
+    EXPECT_TRUE(list.truncated);
+}
+
 TEST(SiteVideo, CookieTextThatDoesNotReadIsNotTaken)
 {
     const auto cookiesOf = [](const std::string& text) {

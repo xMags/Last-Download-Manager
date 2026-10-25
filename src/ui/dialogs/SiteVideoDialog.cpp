@@ -82,6 +82,11 @@ bool SiteVideoDialog::OnSiteLookedUp(const core::SiteLookupFinished& finished)
         return false;
     }
     pending_ = false;
+    if (finished.playlist) {
+        playlist_ = finished.playlist;  // its own window lists them
+        Close(IDOK);
+        return true;
+    }
     FillSiteItem(item_, finished);
     ShowOffer();
     return true;

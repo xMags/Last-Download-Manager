@@ -128,6 +128,9 @@ struct Download {
     // as core::CheckSitePage gives it, and the tracks' addresses come from asking the site
     // resolver about that page. They expire, so they are asked for again when they do.
     bool siteVideo = false;
+    // A site video added from a list without a quality chosen yet: it has no tracks until it first
+    // starts, when it asks the resolver about its page and picks one this way. Kept afterwards.
+    std::optional<SiteQuality> siteQuality;
     std::vector<MediaTrack> tracks;  // a stream's tracks, in order; empty for a file
 
     [[nodiscard]] bool IsStream() const noexcept { return kind != DownloadKind::File; }

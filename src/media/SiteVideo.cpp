@@ -677,15 +677,9 @@ void ReadSubtitles(const Json& root, MediaOffer& offer)
     }
 }
 
-}  // namespace
-
-base::Result<SiteVideo> ParseSiteVideo(std::string_view json)
+base::Result<SiteVideo> ReadVideo(const Json& root)
 {
-    if (json.size() > kMaxSiteAnswerBytes) {
-        return Refused("The video site's answer is too large.");
-    }
-    const Json root = Json::parse(json.begin(), json.end(), nullptr, false);
-    if (root.is_discarded() || !root.is_object()) {
+    if (!root.is_object()) {
         return Unreadable();
     }
     if (const std::string type = Text(root, "_type"); !type.empty() && type != "video") {
@@ -845,6 +839,121 @@ base::Result<SiteVideo> ParseSiteVideo(std::string_view json)
     }
     ReadSubtitles(root, video.offer);
     return video;
+}
+
+std::optional<Json> ParseAnswer(std::string_view json)
+{
+    if (json.size() > kMaxSiteAnswerBytes) {
+        return std::nullopt;
+    }
+    Json root = Json::parse(json.begin(), json.end(), nullptr, false);
+    if (root.is_discarded() || !root.is_object()) {
+        return std::nullopt;
+    }
+    return root;
+}
+
+// The entries of a list, and of the lists inside it (a channel's tabs), in order. An entry is a
+// video's page to ask about later, or a video given in full (the videos of an ordinary page).
+void CollectEntries(const Json& entries, const std::string& group, int depth, SitePlaylist& playlist)
+{
+    if (!entries.is_array()) {
+        return;
+    }
+    for (const Json& entry : entries) {
+        if (playlist.entries.size() >= kMaxSitePlaylistEntries) {
+            playlist.truncated = true;
+            return;
+        }
+        if (!entry.is_object()) {
+            continue;
+        }
+        std::string title = Text(entry, "title");
+        if (!PlainText(title, 1024)) {
+            title.clear();
+        }
+        const std::string type = Text(entry, "_type");
+        if (type == "playlist") {
+            if (depth < 2) {
+                CollectEntries(entry.contains("entries") ? entry["entries"] : Json(), title.empty() ? group : title,
+                               depth + 1, playlist);
+            }
+            continue;
+        }
+        SitePlaylistEntry item;
+        item.title = std::move(title);
+        item.group = group;
+        if (const auto seconds = Number(entry, "duration"); seconds && *seconds < 10'000'000) {
+            item.seconds = seconds;
+        }
+        if (entry.contains("formats")) {
+            auto video = ReadVideo(entry);
+            if (!video) {
+                continue;
+            }
+            const std::string page = Text(entry, "webpage_url");
+            item.url = CheckedUrl(page, page).value_or(std::string());
+            item.video = std::move(video).Value();
+            playlist.entries.push_back(std::move(item));
+            continue;
+        }
+        if (!type.empty() && type != "url" && type != "url_transparent") {
+            continue;
+        }
+        const std::string url = Text(entry, "url");
+        auto checked = CheckedUrl(url, url);
+        if (!checked || checked->size() > 2048) {
+            continue;
+        }
+        item.url = std::move(*checked);
+        playlist.entries.push_back(std::move(item));
+    }
+}
+
+}  // namespace
+
+base::Result<SiteVideo> ParseSiteVideo(std::string_view json)
+{
+    if (json.size() > kMaxSiteAnswerBytes) {
+        return Refused("The video site's answer is too large.");
+    }
+    const auto root = ParseAnswer(json);
+    if (!root) {
+        return Unreadable();
+    }
+    return ReadVideo(*root);
+}
+
+base::Result<SiteAnswer> ParseSiteAnswer(std::string_view json)
+{
+    if (json.size() > kMaxSiteAnswerBytes) {
+        return Refused("The video site's answer is too large.");
+    }
+    const auto root = ParseAnswer(json);
+    if (!root) {
+        return Unreadable();
+    }
+    if (Text(*root, "_type") != "playlist") {
+        auto video = ReadVideo(*root);
+        if (!video) {
+            return video.GetError();
+        }
+        return SiteAnswer{std::move(video).Value()};
+    }
+    SitePlaylist playlist;
+    playlist.id = Text(*root, "id");
+    playlist.title = Text(*root, "title");
+    if (!PlainText(playlist.title, 1024)) {
+        playlist.title.clear();
+    }
+    if (playlist.id.size() > 256) {
+        return Unreadable();
+    }
+    CollectEntries(root->contains("entries") ? (*root)["entries"] : Json(), std::string(), 0, playlist);
+    if (playlist.entries.empty()) {
+        return Refused("This page lists no videos LDM can download.");
+    }
+    return SiteAnswer{std::move(playlist)};
 }
 
 }  // namespace ldm::media

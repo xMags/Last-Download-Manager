@@ -9,6 +9,7 @@
 #include <array>
 #include <system_error>
 #include <utility>
+#include <variant>
 
 namespace ldm::platform {
 
@@ -252,14 +253,20 @@ core::SiteLookupFinished YtDlpResolver::LookUp(const core::SiteLookupRequest& re
     if (result.outputTruncated) {
         return Failure(Problem::Video, "The video site's answer is too large.");
     }
-    auto parsed = media::ParseSiteVideo(result.output);
+    auto parsed = media::ParseSiteAnswer(result.output);
     if (!parsed) {
         // An answer LDM cannot read at all is the resolver's; one it can read but refuses is the video's.
         const bool unreadable = parsed.GetError().code == base::ErrorCode::Protocol;
         return Failure(unreadable ? Problem::Resolver : Problem::Video, parsed.GetError().message);
     }
     core::SiteLookupFinished found;
-    found.video = std::move(parsed).Value();
+    if (auto* video = std::get_if<media::SiteVideo>(&parsed.Value())) {
+        found.video = std::move(*video);
+        return found;
+    }
+    found.playlist = std::get<media::SitePlaylist>(std::move(parsed).Value());
+    found.problem = Problem::Video;
+    found.failure = "This page lists several videos, not one.";
     return found;
 }
 

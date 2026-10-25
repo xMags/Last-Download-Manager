@@ -17,6 +17,8 @@
 #include "ui/dialogs/ListDialogs.h"
 #include "ui/dialogs/MessageDialog.h"
 #include "core/SiteList.h"
+#include "core/QualityTracks.h"
+#include "ui/dialogs/SitePlaylistDialog.h"
 #include "ui/dialogs/SiteVideoDialog.h"
 
 #include <algorithm>
@@ -203,12 +205,96 @@ void AddFlow::AddSiteVideo(browser::SiteRequest request)
     SiteVideoDialog::Hooks hooks;
     hooks.lookUp = [this](core::LookUpSiteVideoCommand command) { Post(std::move(command)); };
     hooks.cancelLookup = [this](std::int64_t lookupId) { Post(core::CancelSiteLookupCommand{lookupId}); };
-    SiteVideoDialog dialog(*context_.theme, std::move(request), nextSiteLookupId_++, std::move(hooks));
+    SiteVideoDialog dialog(*context_.theme, request, nextSiteLookupId_++, std::move(hooks));
     siteDialog_ = &dialog;
     auto capture = dialog.Run(context_.owner);
     siteDialog_ = nullptr;
     if (capture) {
         AddStream(std::move(*capture));
+    } else if (auto playlist = dialog.TakePlaylist()) {
+        AddSitePlaylist(*playlist, request);
+    }
+}
+
+void AddFlow::AddSitePlaylist(const media::SitePlaylist& playlist, const browser::SiteRequest& request)
+{
+    SitePlaylistDialog dialog(*context_.theme, playlist);
+    const auto choice = dialog.Run(context_.owner);
+    if (!choice) {
+        return;
+    }
+    // Always through a queue, also to start at once: its number of downloads at a time paces the
+    // lookups, of which the core runs only a few together.
+    std::optional<QueueAnswer> queue = AskForQueue(static_cast<int>(choice->entries.size()), true);
+    if (const auto snapshot = context_.snapshot(); !queue && snapshot) {
+        for (const core::QueueView& view : snapshot->queues) {
+            if (view.queue.kind == model::QueueKind::Main) {
+                queue = QueueAnswer{view.queue.id, false};
+                break;
+            }
+        }
+    }
+    if (queue && choice->start) {
+        queue->startNow = true;
+    }
+    const bool audio = choice->quality == model::SiteQuality::AudioOnly;
+    std::vector<std::wstring> refused;
+    for (const size_t index : choice->entries) {
+        const media::SitePlaylistEntry& entry = playlist.entries[index];
+        core::AddDownloadCommand command;
+        command.token = nextToken_++;
+        command.mode = core::AddMode::Later;
+        if (queue) {
+            command.queue = queue->queue;
+        }
+        command.duplicatePolicy = model::DuplicatePolicy::AddNumbered;  // a list never stops to ask about each
+        if (!request.userAgent.empty()) {
+            command.userAgent = request.userAgent;
+        }
+        const std::string title = entry.title.empty() ? "video " + std::to_string(index + 1) : entry.title;
+        const auto page = core::CheckSitePage(entry.url);
+        core::MediaChoice media;
+        media.siteVideo = true;
+        if (entry.video) {
+            // Given in full by the page: its quality is picked now, and its page is the list's.
+            const media::MediaOffer& offer = entry.video->offer;
+            const media::QualityList list = media::BuildQualityList(offer, offer.seconds);
+            const auto picked = core::PickSiteQuality(list, choice->quality);
+            const auto listed = page ? page : core::CheckSitePage(request.url);
+            auto tracks = picked && listed ? core::TracksForQuality(offer, list.entries[*picked], listed->address)
+                                           : base::Result<core::QualityTracks>(base::MakeError(base::ErrorCode::Unsupported, ""));
+            auto kind = tracks ? core::SiteDownloadKind(tracks.Value().tracks) : base::Result<model::DownloadKind>(tracks.GetError());
+            if (!tracks || !kind) {
+                refused.push_back(base::ToUtf16(title));
+                continue;
+            }
+            command.url = listed->address;
+            media.kind = kind.Value();
+            media.tracks = std::move(tracks.Value().tracks);
+            media.approximateBytes = list.entries[*picked].approximateBytes;
+            command.fileName = core::SanitizeFileName(title) + (tracks.Value().picture ? ".mp4" : ".m4a");
+            command.referer = tracks.Value().referer.empty() ? std::optional<std::string>(listed->address)
+                                                            : std::optional<std::string>(tracks.Value().referer);
+        } else {
+            if (!page) {
+                refused.push_back(base::ToUtf16(title));
+                continue;
+            }
+            command.url = page->address;
+            media.siteQuality = choice->quality;
+            command.fileName = core::SanitizeFileName(title) + (audio ? ".m4a" : ".mp4");
+            command.referer = page->address;
+        }
+        command.media = std::move(media);
+        Post(std::move(command));
+    }
+    StartChosenQueue(queue);
+    if (!refused.empty()) {
+        std::wstring names;
+        for (size_t i = 0; i < refused.size() && i < 10; ++i) {
+            names += L"\n" + refused[i];
+        }
+        ShowError(std::to_wstring(refused.size()) + L" of the videos could not be added:" + names);
     }
 }
 
