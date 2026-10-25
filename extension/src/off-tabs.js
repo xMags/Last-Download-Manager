@@ -1,14 +1,15 @@
-// The tabs where the user turned the video panel off with the toolbar button. A tab stays off
+// The tabs where the user turned integration off with the toolbar button: their downloads are
+// left to the browser (src/off-tab-downloads.js) and LDM's video panel stays hidden. A tab stays off
 // across page loads until the button is clicked again or the tab closes. Kept in storage.session,
 // so a background script stopped while idle still knows them, and a browser restart forgets them.
 
-const STORAGE_KEY = 'panelTabs';
+const STORAGE_KEY = 'offTabs';
 
-export class PanelTabs {
+export class OffTabs {
   /** @param {object} api the extension API object */
   constructor(api) {
     this.api = api;
-    // tab id -> true when the panel is off. A tab whose button was ever clicked stays listed (with
+    // tab id -> true when integration is off. A tab whose button was ever clicked stays listed (with
     // false once on again): the browser keeps that tab's own button look until the tab closes.
     this.tabs = new Map();
     this.ready = this.load();
@@ -33,7 +34,7 @@ export class PanelTabs {
     return this.api.storage.session?.set({ [STORAGE_KEY]: [...this.tabs] }).catch(() => {});
   }
 
-  /** True when the user turned the panel off in this tab. */
+  /** True when the user turned integration off in this tab. */
   isOff(tabId) {
     return this.tabs.get(tabId) === true;
   }
@@ -43,7 +44,7 @@ export class PanelTabs {
     return [...this.tabs.keys()];
   }
 
-  /** Turns the panel off in the tab, or on again; returns true when it is now off. */
+  /** Turns integration off in the tab, or on again; returns true when it is now off. */
   async toggle(tabId) {
     await this.ready;
     const off = !this.isOff(tabId);

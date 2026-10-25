@@ -1,12 +1,12 @@
-// The toolbar button: no popup. A click hides LDM's video panel in that tab or shows it again; the
-// right-click menu turns integration on or off for the whole browser. The icon, badge and tooltip
-// show on, off and error, for the browser and per tab.
+// The toolbar button: no popup. A click turns integration off in that tab (no download capture,
+// no video panel) or on again; the right-click menu turns integration on or off for the whole
+// browser. The icon, badge and tooltip show on, off and error, for the browser and per tab.
 
 import { State } from './connection.js';
 
 const TITLE = 'Last Download Manager';
-const PANEL_HINT = '(click to hide the video panel in this tab; right-click to turn integration off)';
-const PANEL_OFF_HINT = '(click to show the video panel in this tab again)';
+const TAB_HINT = '(click to turn integration off in this tab; right-click to turn it off everywhere)';
+const TAB_OFF_HINT = '(click to turn integration on in this tab again)';
 const ENABLE_HINT = '(click to turn browser integration on)';
 
 // Absolute paths: Chrome resolves relative ones against the background script's folder (src/).
@@ -17,19 +17,23 @@ export const ICONS = {
 
 /**
  * What the button looks like.
- * @param {{enabled: boolean, connection: string, panelOff?: boolean}} status
- *   panelOff: the user turned the video panel off in the tab this look is for
+ * @param {{enabled: boolean, connection: string, tabOff?: boolean}} status
+ *   tabOff: the user turned integration off in the tab this look is for
  * @returns {{icon: 'on'|'off', badge: string, title: string}}
  */
-export function toolbarAppearance({ enabled, connection, panelOff = false }) {
+export function toolbarAppearance({ enabled, connection, tabOff = false }) {
   if (!enabled) {
     return { icon: 'off', badge: '', title: `${TITLE} [disabled]\n${ENABLE_HINT}` };
   }
   const look = connectionAppearance(connection);
-  if (!panelOff) {
-    return { ...look, title: `${look.title}\n${PANEL_HINT}` };
+  if (!tabOff) {
+    return { ...look, title: `${look.title}\n${TAB_HINT}` };
   }
-  return { icon: 'off', badge: look.badge, title: `${look.title}\nThe video panel is off in this tab.\n${PANEL_OFF_HINT}` };
+  return {
+    icon: 'off',
+    badge: look.badge,
+    title: `${look.title}\nIntegration is off in this tab: no download capture, no video panel.\n${TAB_OFF_HINT}`,
+  };
 }
 
 function connectionAppearance(connection) {

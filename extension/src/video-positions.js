@@ -3,7 +3,7 @@ import { makeVideoPosition } from './protocol.js';
 // Tells LDM where the video of each tab it has media for is (M3 design section 6). The frames of
 // the tab report their videos (src/video-finder.js); this picks the best one and adds what only
 // the background knows: whether the tab is the active one and where its window is. A tab where
-// the user turned the panel off (src/panel-tabs.js) is not followed and reports no video.
+// the user turned integration off (src/off-tabs.js) is not followed and reports no video.
 
 // A frame that has not reported for this long is gone (frames report at least every 3 seconds).
 const STALE_MS = 8000;
@@ -56,12 +56,12 @@ export class VideoPositions {
   /**
    * @param {object} api the extension API object
    * @param {{post: function(object): boolean}} connection the lasting connection to LDM
-   * @param {function(number): boolean} [isPanelOff] true for a tab where the user turned the panel off
+   * @param {function(number): boolean} [isTabOff] true for a tab where the user turned integration off
    */
-  constructor(api, connection, isPanelOff = () => false) {
+  constructor(api, connection, isTabOff = () => false) {
     this.api = api;
     this.connection = connection;
-    this.isPanelOff = isPanelOff;
+    this.isTabOff = isTabOff;
     this.tracked = new Set();  // tab ids LDM has media for
     this.frames = new Map();   // tab id -> Map(frame id -> {report, time})
     this.lastSent = new Map(); // tab id -> the last position sent, as JSON
@@ -80,14 +80,14 @@ export class VideoPositions {
   }
 
   /**
-   * The user turned the panel off or on in the tab: LDM hears the video is gone (so the panel
+   * The user turned integration off or on in the tab: LDM hears the video is gone (so the panel
    * hides at once), or sees it again once the frames report.
    */
   panelSwitched(tabId) {
     if (!this.tracked.has(tabId)) {
       return;
     }
-    if (this.isPanelOff(tabId)) {
+    if (this.isTabOff(tabId)) {
       this.send(tabId).catch(() => {});
       this.frames.delete(tabId);
     }
@@ -96,7 +96,7 @@ export class VideoPositions {
 
   /** @private True when the frames of the tab should report its video. */
   follows(tabId) {
-    return this.tracked.has(tabId) && !this.isPanelOff(tabId);
+    return this.tracked.has(tabId) && !this.isTabOff(tabId);
   }
 
   /** A frame's script started; it follows the video when its tab is tracked. */
@@ -166,7 +166,7 @@ export class VideoPositions {
     const position = makeVideoPosition({
       tabId,
       visible: Boolean(tab.active) && window.state !== 'minimized' && !top.hidden && video !== null &&
-               !this.isPanelOff(tabId),
+               !this.isTabOff(tabId),
       fullscreen: top.fullscreen || window.state === 'fullscreen',
       window: { x: window.left ?? 0, y: window.top ?? 0, width: window.width ?? 0, height: window.height ?? 0 },
       viewport: top.viewport,

@@ -116,10 +116,11 @@ function fakeConnection({ answer = 'accept' } = {}) {
   };
 }
 
-function newCapture(api, connection, { enabled = true, verdict = 'none' } = {}) {
+function newCapture(api, connection, { enabled = true, verdict = 'none', offTab = false } = {}) {
   return new DownloadCapture(api, connection, {
     ready: Promise.resolve(),
     isEnabled: () => enabled,
+    fromOffTab: async () => offTab,
     keyVerdict: () => verdict,
     rules: () => ({ capturedExtensions: ['zip'], siteExceptions: [], addressExceptions: [] }),
     userAgent: 'TestUA',
@@ -202,6 +203,14 @@ test('nothing happens when integration is off, the type is not captured, or a pr
     assert.deepEqual(calls, []);
     assert.equal(connection.sent.length, 0);
   }
+});
+
+test('a download from a switched-off tab stays in the browser, even with the force keys', async () => {
+  const { api, calls } = fakeBrowser();
+  const connection = fakeConnection();
+  assert.equal(await newCapture(api, connection, { offTab: true, verdict: 'force' }).take(ITEM, 'x.zip'), false);
+  assert.deepEqual(calls, [], 'not even paused');
+  assert.equal(connection.sent.length, 0);
 });
 
 test('the download bubble stays hidden until the last capture ends', async () => {
