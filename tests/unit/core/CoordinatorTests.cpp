@@ -996,6 +996,21 @@ TEST_F(CoordinatorTest, AFinalNameTakenMeanwhileMovesTheFileToANumberedName)
     EXPECT_EQ(View(id).download.fileName, "a (2).zip");
 }
 
+TEST_F(CoordinatorTest, StopAllEndsTheWaitForTheQuota)
+{
+    EnableQuota(*coordinator_, false);
+    const DownloadId first = *Add("http://x.test/a.dat").id;
+    Send(first, 1, Received(1100 * 1024));
+    Finish(first, 1, TransferOutcome::Stopped, {{0, std::nullopt, 1100 * 1024}});
+    ASSERT_TRUE(View(first).waitingForQuota);
+
+    coordinator_->Handle(ldm::core::StopAllCommand{});
+    EXPECT_FALSE(View(first).waitingForQuota);
+    clock_.Advance(std::chrono::hours(1));
+    coordinator_->Tick();
+    EXPECT_EQ(engine_.starts.size(), 1u) << "stopped by the user: it does not start by itself";
+}
+
 TEST_F(CoordinatorTest, QuotaWarningLetsTheUserKeepDownloading)
 {
     EnableQuota(*coordinator_, true);

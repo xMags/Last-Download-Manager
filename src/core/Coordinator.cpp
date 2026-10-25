@@ -803,6 +803,13 @@ void Coordinator::StopAll()
         StopQueue(id);
     }
     for (auto& [id, entry] : entries_) {
+        if (entry.quotaHeld) {
+            // As in Stop: stopped by the user, it no longer starts by itself when the quota allows.
+            entry.quotaHeld = false;
+            entry.download.lastResult.reset();
+            Save(entry);
+            MarkChanged(entry);
+        }
         if (entry.running) {
             RequestStop(entry);
         }
