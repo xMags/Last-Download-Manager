@@ -158,7 +158,8 @@ std::wstring FormatStatus(const core::DownloadView& view)
             return L"Recording paused, " + FormatRecordedLength(view.stream->recordedUs);
         }
         if (const auto fraction = ProgressFraction(view); fraction && *fraction > 0.0) {
-            return Printf(L"%.2f%ls", std::floor(*fraction * 10000.0) / 100.0, L"% (paused)");
+            // Capped like a running download's: a paused download is not complete.
+            return Printf(L"%.2f%ls", std::min(std::floor(*fraction * 10000.0) / 100.0, 99.99), L"% (paused)");
         }
         return L"Paused";
     }
