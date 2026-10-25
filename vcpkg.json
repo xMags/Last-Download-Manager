@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
   "name": "last-download-manager",
-  "version-semver": "5.1.0",
+  "version-semver": "5.2.0",
   "description": "Native Windows download manager",
   "license": "GPL-3.0-only",
   "supports": "windows & x64 & !uwp",
