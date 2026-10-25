@@ -435,6 +435,26 @@ TEST(SiteVideo, TheSitesRefererAndOwnHeadersAreKeptAndYtDlpsDefaultsAreNot)
     EXPECT_EQ(video.offer.variants[1].site->headers, (std::vector<std::string>{"Stream_Key: k1", "X-Playback-Session-Id: s1"}));
 }
 
+TEST(SiteVideo, AnHlsFormatKeepsTheParametersItsPiecesNeed)
+{
+    // As Loom gives them: signed CDN parameters every piece address of the playlist needs.
+    const std::string hls =
+        R"({"format_id":"hls-1500","protocol":"m3u8_native","url":"https://media.example.test/v.m3u8?Policy=p",)"
+        R"("vcodec":"avc1.640028","height":720,"extra_param_to_segment_url":"Policy=p&Signature=s~1&Key-Pair-Id=k"},)"
+        R"({"format_id":"hls-800","protocol":"m3u8_native","url":"https://media.example.test/w.m3u8",)"
+        R"("vcodec":"avc1.640028","height":480,"extra_param_to_segment_url":"bad value#"})";
+    const SiteVideo video = Parse(Answer("[" + hls + "]", R"(,"extra_param_to_key_url":"key=1")"));
+    ASSERT_EQ(video.offer.variants.size(), 2u);
+    EXPECT_EQ(video.offer.variants[0].site->segmentQuery, "Policy=p&Signature=s~1&Key-Pair-Id=k");
+    EXPECT_EQ(video.offer.variants[0].site->keyQuery, "key=1") << "the answer's own, for every format";
+    EXPECT_TRUE(video.offer.variants[1].site->segmentQuery.empty()) << "not parameters as an address takes them";
+
+    EXPECT_TRUE(ldm::media::IsSiteQuery("a=1&b=%7E"));
+    for (const char* query : {"", "a", "=1", "a=1&", "&a=1", "a=1&&b=2", "a=1#x", "a=1 b", "a=\x01"}) {
+        EXPECT_FALSE(ldm::media::IsSiteQuery(query)) << query;
+    }
+}
+
 TEST(SiteVideo, OnlyHeadersLdmDoesNotSetItselfAreSiteHeaderLines)
 {
     EXPECT_TRUE(ldm::media::IsSiteHeaderLine("X-Forwarded-For: 203.0.113.7"));

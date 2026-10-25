@@ -1346,6 +1346,59 @@ TEST_F(SiteRefreshTest, ARefusedHlsTrackReadsItsFreshPlaylistAndKeepsThePiecesOn
     EXPECT_TRUE(stored->tracks[0].pieces[0].done);
 }
 
+TEST_F(CoordinatorTest, AnHlsSiteFormatsParametersGoIntoEveryAddressItsPlaylistLists)
+{
+    const AddResult result = Add("https://www.loom.com/share/43d05f362f734614a2e81b4694a3a523", AddMode::StartNow,
+                                 [](AddDownloadCommand& c) {
+                                     c.fileName = "Loom.mp4";
+                                     ldm::core::MediaChoice media;
+                                     media.kind = ldm::model::DownloadKind::Hls;
+                                     media.siteVideo = true;
+                                     ldm::core::MediaTrackChoice video;
+                                     video.sourceUrl = "https://cdn.test/id/1/hls/media.m3u8?Policy=p&Signature=s";
+                                     video.siteFormat = "hls-raw-1500";
+                                     video.segmentQuery = "Policy=p&Signature=s";
+                                     video.keyQuery = "token=t";
+                                     media.tracks = {video};
+                                     c.media = media;
+                                 });
+    ASSERT_TRUE(result.id) << result.error.value_or("");
+    ASSERT_FALSE(engine_.fetches.empty());
+    ldm::core::FetchFinished answer;
+    answer.fetchId = engine_.fetches.back().fetchId;
+    answer.body = "#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXT-X-MAP:URI=\"init.mp4\"\n"
+                  "#EXT-X-KEY:METHOD=AES-128,URI=\"key.bin\"\n#EXTINF:4,\nseg0.m4s?n=0\n#EXTINF:4,\nseg1.m4s\n#EXT-X-ENDLIST\n";
+    Send(DownloadId{}, 0, answer);
+    ASSERT_EQ(engine_.mediaStarts.size(), 1u);
+    const auto& track = engine_.mediaStarts[0].tracks[0];
+    ASSERT_EQ(track.pieces.size(), 3u);
+    EXPECT_EQ(track.pieces[0].url, "https://cdn.test/id/1/hls/init.mp4?Policy=p&Signature=s");
+    EXPECT_EQ(track.pieces[1].url, "https://cdn.test/id/1/hls/seg0.m4s?n=0&Policy=p&Signature=s");
+    EXPECT_EQ(track.pieces[2].url, "https://cdn.test/id/1/hls/seg1.m4s?Policy=p&Signature=s");
+    ASSERT_EQ(track.keys.size(), 1u);
+    EXPECT_EQ(track.keys[0].url, "https://cdn.test/id/1/hls/key.bin?token=t") << "the key's own parameters";
+    const auto stored = Stored(*result.id);
+    ASSERT_TRUE(stored);
+    EXPECT_EQ(stored->tracks[0].segmentQuery, "Policy=p&Signature=s") << "for the next reading of the playlist";
+}
+
+TEST_F(CoordinatorTest, AddressParametersAreRefusedOutsideAnHlsSiteVideosRules)
+{
+    const AddResult result = Add("https://www.loom.com/share/x", AddMode::StartNow, [](AddDownloadCommand& c) {
+        c.fileName = "Loom.mp4";
+        ldm::core::MediaChoice media;
+        media.kind = ldm::model::DownloadKind::Hls;
+        media.siteVideo = true;
+        ldm::core::MediaTrackChoice video;
+        video.sourceUrl = "https://cdn.test/media.m3u8";
+        video.siteFormat = "hls";
+        video.segmentQuery = "a=1#fragment";
+        media.tracks = {video};
+        c.media = media;
+    });
+    EXPECT_FALSE(result.id);
+}
+
 TEST_F(SiteRefreshTest, ARefusedAddressGetsOneMoreRunWithFreshAddressesThenFails)
 {
     const DownloadId id = AddExpiring(3 * 3600);

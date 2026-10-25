@@ -27,4 +27,9 @@ struct Url {
 // Finds every http(s) or ftp(s) address in free text, in order, without duplicates (checklist A-08).
 [[nodiscard]] std::vector<std::string> ExtractUrls(std::string_view text);
 
+// `url` with the parameters of `query` ("a=1&b=2") in its query: each replaces one of the same
+// name that is there, the others stay. A fragment ("#...") stays at the end. Names are compared as
+// written, without decoding, so the parameters must come as the site wrote them.
+[[nodiscard]] std::string WithQueryParameters(std::string_view url, std::string_view query);
+
 }  // namespace ldm::core

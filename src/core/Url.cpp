@@ -137,6 +137,46 @@ std::optional<Url> ParseUrl(std::string_view text)
     return url;
 }
 
+std::string WithQueryParameters(std::string_view url, std::string_view query)
+{
+    const auto split = [](std::string_view text) {
+        std::vector<std::string_view> parts;
+        while (!text.empty()) {
+            const size_t amp = text.find('&');
+            if (const std::string_view part = text.substr(0, amp); !part.empty()) {
+                parts.push_back(part);
+            }
+            if (amp == std::string_view::npos) {
+                break;
+            }
+            text.remove_prefix(amp + 1);
+        }
+        return parts;
+    };
+    const auto name = [](std::string_view part) { return part.substr(0, part.find('=')); };
+    const std::vector<std::string_view> added = split(query);
+    if (added.empty()) {
+        return std::string(url);
+    }
+    const size_t hash = url.find('#');
+    const std::string_view fragment = hash == std::string_view::npos ? std::string_view() : url.substr(hash);
+    std::string_view rest = url.substr(0, hash);
+    const size_t mark = rest.find('?');
+    std::string address(rest.substr(0, mark));
+    std::vector<std::string_view> parts =
+        mark == std::string_view::npos ? std::vector<std::string_view>() : split(rest.substr(mark + 1));
+    std::erase_if(parts, [&](std::string_view part) {
+        return std::any_of(added.begin(), added.end(), [&](std::string_view a) { return name(a) == name(part); });
+    });
+    parts.insert(parts.end(), added.begin(), added.end());
+    for (size_t i = 0; i < parts.size(); ++i) {
+        address += i == 0 ? '?' : '&';
+        address += parts[i];
+    }
+    address += fragment;
+    return address;
+}
+
 std::vector<std::string> ExtractUrls(std::string_view text)
 {
     std::vector<std::string> result;

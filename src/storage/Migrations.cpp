@@ -274,9 +274,12 @@ ALTER TABLE media_tracks ADD COLUMN expected_bytes INTEGER CHECK (expected_bytes
 ALTER TABLE downloads ADD COLUMN site_quality TEXT NOT NULL DEFAULT '';
 )sql"},
     // A site video's other request headers (a session's key), protected like its cookies and
-    // removed with them once it completes.
+    // removed with them once it completes; and an HLS site format's parameters for every address
+    // its playlist lists.
     Migration{13, R"sql(
 ALTER TABLE downloads ADD COLUMN site_header_secret BLOB;
+ALTER TABLE media_tracks ADD COLUMN segment_query TEXT NOT NULL DEFAULT '';
+ALTER TABLE media_tracks ADD COLUMN key_query TEXT NOT NULL DEFAULT '';
 )sql"},
 };
 

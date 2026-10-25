@@ -50,6 +50,29 @@ std::int64_t RangesProgressEnd(const std::vector<model::Segment>& ranges)
     return end;
 }
 
+// The playlist's list with the track's address parameters in every address (yt-dlp's
+// extra_param_to_segment_url); as it is when the track has none.
+media::TrackSegments WithSiteQueries(const media::TrackSegments& listed, const model::MediaTrack& track)
+{
+    media::TrackSegments segments = listed;
+    if (track.segmentQuery.empty() && track.keyQuery.empty()) {
+        return segments;
+    }
+    const std::string& keyQuery = track.keyQuery.empty() ? track.segmentQuery : track.keyQuery;
+    for (media::InitSection& init : segments.inits) {
+        init.url = WithQueryParameters(init.url, track.segmentQuery);
+    }
+    for (media::Segment& segment : segments.segments) {
+        segment.url = WithQueryParameters(segment.url, track.segmentQuery);
+    }
+    for (media::EncryptionKey& key : segments.keys) {
+        if (!key.url.empty()) {
+            key.url = WithQueryParameters(key.url, keyQuery);
+        }
+    }
+    return segments;
+}
+
 }  // namespace
 
 std::vector<std::uint32_t> UnlistedTracks(const model::Download& download)
@@ -83,7 +106,7 @@ std::optional<TransferFailure> ListTrack(model::MediaTrack& track, const FetchFi
     if (segments->segments.empty() && !segments->live) {
         return TransferFailure{FailureReason::Protocol, FailureClass::Fatal, 0, "the stream's playlist lists no segments"};
     }
-    FillTrack(track, *segments);
+    FillTrack(track, WithSiteQueries(*segments, track));
     return std::nullopt;
 }
 
@@ -107,7 +130,7 @@ TrackReload ReloadTrack(model::MediaTrack& track, const FetchFinished& fetched)
         reload.failure = Unsupported("the stream became protected (DRM), which LDM does not download");
         return reload;
     }
-    reload.append = AppendTrack(track, *segments);
+    reload.append = AppendTrack(track, WithSiteQueries(*segments, track));
     return reload;
 }
 

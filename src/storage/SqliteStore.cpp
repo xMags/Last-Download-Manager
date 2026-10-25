@@ -407,7 +407,8 @@ base::Status SqliteStore::LoadTracks(std::vector<model::Download>& downloads)
 {
     const DownloadsById byId = IndexById(downloads);
     base::Result<Statement> tracks = connection_.Prepare(
-        "SELECT download_id, track, role, source_url, codecs, language, name, whole_file, live, site_format, expected_bytes "
+        "SELECT download_id, track, role, source_url, codecs, language, name, whole_file, live, site_format, expected_bytes, "
+        "segment_query, key_query "
         "FROM media_tracks "
         "ORDER BY download_id, track");
     if (!tracks) {
@@ -441,6 +442,8 @@ base::Status SqliteStore::LoadTracks(std::vector<model::Download>& downloads)
         track.live = r.Int64(8) != 0;
         track.siteFormat = r.Text(9);
         track.expectedBytes = r.OptionalInt64(10);
+        track.segmentQuery = r.Text(11);
+        track.keyQuery = r.Text(12);
         owner->tracks.push_back(std::move(track));
     }
 
@@ -591,7 +594,7 @@ base::Status SqliteStore::WriteTrack(model::DownloadId id, std::uint32_t index, 
 {
     base::Result<Statement> insertTrack = connection_.Prepare(
         "INSERT INTO media_tracks (download_id, track, role, source_url, codecs, language, name, whole_file, live, "
-        "site_format, expected_bytes) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)");
+        "site_format, expected_bytes, segment_query, key_query) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)");
     if (!insertTrack) {
         return insertTrack.GetError();
     }
@@ -607,6 +610,8 @@ base::Status SqliteStore::WriteTrack(model::DownloadId id, std::uint32_t index, 
                                 .Bind(9, track.live)
                                 .Bind(10, track.siteFormat)
                                 .Bind(11, track.expectedBytes)
+                                .Bind(12, track.segmentQuery)
+                                .Bind(13, track.keyQuery)
                                 .Run();
     if (!inserted) {
         return inserted;

@@ -62,6 +62,11 @@ struct SiteVideo {
 // (SiteFormat::headers holds only such lines).
 [[nodiscard]] bool IsSiteHeaderLine(std::string_view line);
 
+// Whether `query` is parameters LDM adds to a site's addresses as they stand (SiteFormat's
+// segmentQuery and keyQuery): "name=value" pairs joined by '&', in characters an address's query
+// takes as they are, at most 4096 of them.
+[[nodiscard]] bool IsSiteQuery(std::string_view query);
+
 // The most videos LDM lists of one page.
 inline constexpr size_t kMaxSitePlaylistEntries = 5000;
 
