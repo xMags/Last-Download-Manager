@@ -119,6 +119,8 @@ const MAX_URL = 16 * 1024;
 const MAX_COOKIES = 300;
 const CONTROL = /[\u0000-\u001f\u007f]/;
 const HOST = /^[A-Za-z0-9_][A-Za-z0-9._-]{0,252}$/;
+// An IPv6 address, as LDM keeps a host: without the brackets the browser may put around it.
+const IPV6_HOST = /^[0-9A-Fa-f:.]{2,45}$/;
 
 /** True for an address LDM accepts: http, https, ftp or ftps, without spaces or control characters. */
 export function isDownloadAddress(url) {
@@ -131,17 +133,21 @@ export function isDownloadAddress(url) {
  * model::IsValidCookie).
  */
 export function toLdmCookie(cookie) {
-  const domain = String(cookie.domain ?? '').replace(/^\./, '');
+  const domain = String(cookie.domain ?? '').replace(/^\./, '').replace(/^\[(.*)\]$/, '$1');
+  const hostOnly = Boolean(cookie.hostOnly);
+  const ipv6 = domain.includes(':');
   const result = {
     domain,
-    hostOnly: Boolean(cookie.hostOnly),
+    hostOnly,
     path: String(cookie.path ?? '/'),
     secure: Boolean(cookie.secure),
     expires: cookie.session || !Number.isFinite(cookie.expirationDate) ? 0 : Math.max(0, Math.floor(cookie.expirationDate)),
     name: String(cookie.name ?? ''),
     value: String(cookie.value ?? ''),
   };
-  const valid = HOST.test(domain) && result.path.startsWith('/') && result.path.length <= 2048 &&
+  // An address has no subdomains, so its cookies are always for that host only.
+  const validHost = ipv6 ? hostOnly && IPV6_HOST.test(domain) : HOST.test(domain);
+  const valid = validHost && result.path.startsWith('/') && result.path.length <= 2048 &&
     !CONTROL.test(result.path) && result.name.length > 0 && result.name.length <= 4096 && !CONTROL.test(result.name) &&
     result.value.length <= 8192 && !CONTROL.test(result.value);
   return valid ? result : null;

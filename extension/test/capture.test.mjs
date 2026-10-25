@@ -58,6 +58,9 @@ test('browser cookies are converted and unsafe ones dropped', () => {
     toLdmCookie({ domain: '.a.test', hostOnly: false, path: '/', secure: true, session: false, expirationDate: 1900000000.7, name: 'n', value: 'v' }),
     { domain: 'a.test', hostOnly: false, path: '/', secure: true, expires: 1900000000, name: 'n', value: 'v' });
   assert.equal(toLdmCookie({ domain: 'a.test', hostOnly: true, path: '/', session: true, name: 'n', value: 'a\nb' }), null);
+  // An IPv6 address loses its brackets, as LDM keeps hosts; it cannot cover subdomains.
+  assert.equal(toLdmCookie({ domain: '[fd00::1]', hostOnly: true, path: '/', session: true, name: 'n', value: 'v' })?.domain, 'fd00::1');
+  assert.equal(toLdmCookie({ domain: 'fd00::1', hostOnly: false, path: '/', session: true, name: 'n', value: 'v' }), null);
   assert.equal(toLdmCookie({ domain: 'a test', hostOnly: true, path: '/', session: true, name: 'n', value: 'v' }), null);
   assert.equal(toLdmCookie({ domain: 'a.test', hostOnly: true, path: '/', session: true, name: '', value: 'v' }), null);
 });
