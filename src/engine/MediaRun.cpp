@@ -134,6 +134,7 @@ void MediaRun::Begin(Clock::time_point now)
                 file.knownSize = end;
                 file.resumable = true;
             }
+            file.maxRequestBytes = track.maxRequestBytes;
             file.maxConnections = std::max(1, request_.maxConnections / wholeFileTracks);
             file.maxAttemptsPerSegment = request_.maxAttemptsPerSegment;
             file.refusePrivateAddresses = request_.refusePrivateAddresses;

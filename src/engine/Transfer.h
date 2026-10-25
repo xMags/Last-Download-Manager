@@ -136,6 +136,8 @@ private:
         ResponseHeaders headers;
         bool accepted = false;
         bool reachedEnd = false;     // stopped on purpose at the segment end
+        // Exclusive end of a request capped by TransferRequest::maxRequestBytes, short of the segment's.
+        std::optional<std::int64_t> cappedEnd;
         bool rangeRejected = false;  // server answered 200 to a range request
         std::optional<core::TransferFailure> failure;
 

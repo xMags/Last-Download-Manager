@@ -189,6 +189,9 @@ MediaRequest BuildMediaRequest(const model::Download& download, const std::files
             trackRequest.url = track.pieces.empty() ? track.sourceUrl : track.pieces.front().url;
             trackRequest.path = WholeFilePath(parts, t, track);
             trackRequest.ranges = track.ranges;
+            if (download.siteVideo) {
+                trackRequest.maxRequestBytes = kSiteVideoRequestBytes;
+            }
             request.tracks.push_back(std::move(trackRequest));
             continue;
         }

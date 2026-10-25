@@ -21,6 +21,10 @@ namespace ldm::core {
 // The extension of the parts folder that holds a stream's pieces while it downloads.
 inline constexpr std::string_view kPartsFolderExtension = ".ldmparts";
 
+// The most a site video's track asks for in one request. YouTube served 10 MiB ranges at full
+// speed and slowed a 50 MiB one to about 1 MB/s (video-sites design, step 1).
+inline constexpr std::int64_t kSiteVideoRequestBytes = 10 * 1024 * 1024;
+
 // The tracks whose lists are not known yet: HLS media playlists to fetch before the first run.
 [[nodiscard]] std::vector<std::uint32_t> UnlistedTracks(const model::Download& download);
 

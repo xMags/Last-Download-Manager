@@ -212,6 +212,33 @@ TEST_F(EngineTest, SegmentedDownloadMatchesPayloadWithPlainGetThenRanges)
     EXPECT_TRUE(info->validators.etag.has_value());
 }
 
+// A site video's track: capped requests from the very first, so no request ever asks for the
+// whole file or more than the cap (video sites slow such requests down).
+TEST_F(EngineTest, CappedRequestsCoverTheFileInPartsOfAtMostTheCap)
+{
+    const std::int64_t size = server_->Size();
+    const std::int64_t cap = std::max<std::int64_t>(size / 7, 64 * 1024);
+    auto request = Request("/range.bin");
+    request.maxRequestBytes = cap;
+    const auto finished = Run(std::move(request));
+    ASSERT_EQ(finished.outcome, TransferOutcome::Completed) << (finished.failure ? finished.failure->message : "");
+    EXPECT_TRUE(HoldsPayload(PartialPath(), size));
+
+    const auto requests = Requests("/range.bin");
+    ASSERT_GE(static_cast<std::int64_t>(requests.size()), size / cap);
+    for (const auto& logged : requests) {
+        ASSERT_TRUE(logged.at("range").is_string()) << "never the whole file";
+        const std::string range = logged.at("range");
+        const size_t dash = range.find('-');
+        ASSERT_NE(dash, std::string::npos);
+        ASSERT_NE(range.back(), '-') << "every request is bounded: " << range;
+        const std::int64_t first = std::stoll(range.substr(6, dash - 6));  // after "bytes="
+        const std::int64_t last = std::stoll(range.substr(dash + 1));
+        // A request that ends its segment may reach a little into the next one (ENG-03).
+        EXPECT_LE(last - first + 1, cap + 64) << range;
+    }
+}
+
 TEST_F(EngineTest, ConnectionLimitIsHonored)
 {
     auto request = Request("/range.bin");
