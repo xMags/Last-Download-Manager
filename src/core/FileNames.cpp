@@ -13,9 +13,9 @@ constexpr std::string_view kFallbackName = "download";
 // Leaves room for " (999)" and the ".ldmpart" suffix inside the 255 UTF-16 unit component limit.
 constexpr size_t kMaxNameUnits = 200;
 
-constexpr std::array<std::wstring_view, 22> kDeviceNames{
-    L"CON",  L"PRN",  L"AUX",  L"NUL",  L"COM1", L"COM2", L"COM3", L"COM4", L"COM5", L"COM6", L"COM7",
-    L"COM8", L"COM9", L"LPT1", L"LPT2", L"LPT3", L"LPT4", L"LPT5", L"LPT6", L"LPT7", L"LPT8", L"LPT9",
+constexpr std::array<std::wstring_view, 24> kDeviceNames{
+    L"CON",  L"PRN",  L"AUX",  L"NUL",  L"CONIN$", L"CONOUT$", L"COM1", L"COM2", L"COM3", L"COM4", L"COM5", L"COM6",
+    L"COM7", L"COM8", L"COM9", L"LPT1", L"LPT2", L"LPT3", L"LPT4", L"LPT5", L"LPT6",   L"LPT7",    L"LPT8", L"LPT9",
 };
 
 int HexValue(char c) noexcept
@@ -85,9 +85,14 @@ std::string SanitizeFileName(std::string_view name)
         }
         clean.push_back(c);
     }
-    while (!clean.empty() && (clean.back() == L' ' || clean.back() == L'.')) {
-        clean.pop_back();
-    }
+    const auto trimEnd = [&clean] {
+        // Windows drops trailing dots and spaces, but not through the \\?\ paths LDM opens files
+        // with, so a name ending in one would be a file Explorer cannot open or delete.
+        while (!clean.empty() && (clean.back() == L' ' || clean.back() == L'.')) {
+            clean.pop_back();
+        }
+    };
+    trimEnd();
     const size_t first = clean.find_first_not_of(L' ');
     clean.erase(0, first == std::wstring::npos ? clean.size() : first);
     if (clean.empty()) {
@@ -106,6 +111,10 @@ std::string SanitizeFileName(std::string_view name)
             --keep;
         }
         clean = clean.substr(0, keep) + extension;
+        trimEnd();  // the cut can end the name in a dot or space
+        if (clean.empty()) {
+            return std::string(kFallbackName);
+        }
     }
     return base::ToUtf8(clean);
 }

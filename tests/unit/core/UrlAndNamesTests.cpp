@@ -95,6 +95,12 @@ TEST(FileNames, SanitizesForWindows)
     const std::string clipped = SanitizeFileName(longName);
     EXPECT_EQ(clipped.size(), 200u);
     EXPECT_TRUE(clipped.ends_with(".iso"));
+
+    // The cut to 200 units must not leave a trailing space or dot either.
+    const std::string spaced = std::string(199, 'y') + "  tail";
+    EXPECT_EQ(SanitizeFileName(spaced), std::string(199, 'y'));
+    EXPECT_EQ(SanitizeFileName(std::string(250, '.') + std::string(20, 'x')), "download");
+    EXPECT_EQ(SanitizeFileName("CONOUT$.log"), "_CONOUT$.log");
 }
 
 TEST(FileNames, ExtensionAndNumbering)
