@@ -182,11 +182,13 @@ test('Chrome settles the name only after LDM refused, so it asks where to save o
 });
 
 test('the name is settled when the decision fails', async () => {
-  const { api } = fakeBrowser();
+  const { api, calls } = fakeBrowser();
   api.downloads.search = async () => { throw new Error('broken'); };
   let suggested = 0;
   await assert.rejects(newCapture(api, fakeConnection()).takeBeforeNaming({ ...ITEM, filename: 'x.zip' }, () => { suggested += 1; }));
   assert.equal(suggested, 1);
+  assert.deepEqual(calls.filter(([name]) => name === 'pause' || name === 'resume'), [['pause', 7], ['resume', 7]],
+    'the browser keeps the download, so it is not left paused');
 });
 
 test('nothing happens when integration is off, the type is not captured, or a private window has no cookie store', async () => {

@@ -81,6 +81,11 @@ export class DownloadCapture {
       await this.api.downloads.cancel(item.id).catch(() => {});
       await this.api.downloads.erase({ id: item.id }).catch(() => {});
       return true;
+    } catch (error) {
+      // Something failed before LDM took it: the browser keeps the download, so it must not stay
+      // paused. Resuming one that never paused does nothing.
+      await this.resume(item.id);
+      throw error;
     } finally {
       this.showDownloadUi();
     }
