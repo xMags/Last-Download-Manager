@@ -87,6 +87,13 @@ struct Resolution {
     int height = 0;
 };
 
+// A format of a video site's page, as the site resolver named it (SiteVideo.h): what to ask for
+// again when the format's address has expired, and how to tell that the same bytes came back.
+struct SiteFormat {
+    std::string id;                     // the resolver's format id, such as "299"
+    std::optional<std::int64_t> bytes;  // the exact length, when the site states one
+};
+
 // One quality of the video, or of the whole stream when it has no video (an audio-only HLS
 // variant, say). An HLS variant may carry its own audio; its codecs say so.
 struct Variant {
@@ -101,6 +108,7 @@ struct Variant {
     std::string audioGroup;
     std::string subtitleGroup;
     SegmentSource source;
+    std::optional<SiteFormat> site;  // set only in a site's offer
 };
 
 // An alternative audio track or a subtitle track.
@@ -116,6 +124,7 @@ struct Rendition {
     std::string mimeType;  // DASH only
     // None for an HLS audio rendition without URI: that audio is inside the variant's own segments.
     std::optional<SegmentSource> source;
+    std::optional<SiteFormat> site;  // set only in a site's offer
 };
 
 enum class StreamFormat {

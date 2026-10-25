@@ -14,6 +14,7 @@ add_executable(ldm_unit_tests
     core/QuotaTests.cpp
     core/SchedulerTests.cpp
     core/SegmentPlannerTests.cpp
+    core/SiteListTests.cpp
     core/UpdateCheckTests.cpp
     core/UrlAndNamesTests.cpp
     engine/Aes128CbcTests.cpp
@@ -30,6 +31,7 @@ add_executable(ldm_unit_tests
     media/M3uListTests.cpp
     media/NumberTextTests.cpp
     media/QualityListTests.cpp
+    media/SiteVideoTests.cpp
     media/UrlReferenceTests.cpp
     model/DownloadTests.cpp
     model/SettingsTests.cpp
