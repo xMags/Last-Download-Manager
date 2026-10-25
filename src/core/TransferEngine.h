@@ -2,6 +2,7 @@
 
 #include "core/Commands.h"
 #include "core/MediaProgress.h"
+#include "core/SiteTools.h"
 #include "media/SiteVideo.h"
 #include "model/Download.h"
 #include "model/Ids.h"
@@ -326,9 +327,21 @@ struct SiteLookupFinished {
     Problem problem = Problem::None;
 };
 
+// The tool installer's answer (core/ToolInstaller.h): one per Install or Remove.
+struct ToolInstalled {
+    enum class Action {
+        Install,
+        Remove,  // every tool and the cache are gone; `tool` means nothing
+    };
+    Action action = Action::Install;
+    SiteTool tool = SiteTool::YtDlp;
+    std::string version;
+    std::optional<std::string> failure;  // words for the user; the tools folder is as it was
+};
+
 using EnginePayload = std::variant<ResponseInfo, ProgressInfo, TransferFinished, FinalizeFinished, ProxyResolved,
                                    FetchFinished, MediaProgress, MediaFinished, MuxFinished, DescribeFinished,
-                                   SiteLookupFinished>;
+                                   SiteLookupFinished, ToolInstalled>;
 
 struct EngineEvent {
     model::DownloadId id;

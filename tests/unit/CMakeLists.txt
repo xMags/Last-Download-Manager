@@ -16,6 +16,8 @@ add_executable(ldm_unit_tests
     core/SegmentPlannerTests.cpp
     core/SiteListTests.cpp
     core/SiteLookupsTests.cpp
+    core/SiteToolsTests.cpp
+    core/ToolUpdatesTests.cpp
     core/UpdateCheckTests.cpp
     core/UrlAndNamesTests.cpp
     engine/Aes128CbcTests.cpp
@@ -73,5 +75,6 @@ target_link_libraries(ldm_unit_tests PRIVATE
     bcrypt)
 target_compile_definitions(ldm_unit_tests PRIVATE
     LDM_CAPTURE_CASES="${PROJECT_SOURCE_DIR}/extension/test/capture-cases.json"
-    LDM_MEDIA_FIXTURES="${PROJECT_SOURCE_DIR}/tests/fixtures/media")
+    LDM_MEDIA_FIXTURES="${PROJECT_SOURCE_DIR}/tests/fixtures/media"
+    LDM_SITE_TOOLS_FIXTURES="${PROJECT_SOURCE_DIR}/tests/fixtures/site-tools")
 gtest_discover_tests(ldm_unit_tests DISCOVERY_MODE PRE_TEST)

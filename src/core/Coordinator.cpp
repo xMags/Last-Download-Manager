@@ -167,6 +167,9 @@ Coordinator::Coordinator(const CoordinatorPorts& ports, CoordinatorConfig config
                                                      config_.appVersion, ports_.clock->Steady());
         }
     }
+    if (ports_.tools != nullptr && ports_.engine != nullptr && ports_.proxy != nullptr) {
+        tools_ = std::make_unique<ToolUpdates>(*ports_.engine, *ports_.proxy, *ports_.tools);
+    }
     if (ports_.sites != nullptr && ports_.proxy != nullptr && ports_.observer != nullptr && ports_.clock != nullptr) {
         // Refreshes of expired addresses are asked for once downloads use them; nothing asks yet.
         sites_ = std::make_unique<SiteLookups>(*ports_.sites, *ports_.proxy, *ports_.observer, *ports_.clock,
@@ -425,7 +428,13 @@ void Coordinator::Handle(Command command)
                     Notify(UpdateCheckFinished{true, std::nullopt, {}, std::string("this build does not check for updates")});
                 }
             } else if constexpr (std::is_same_v<T, LookUpSiteVideoCommand>) {
-                if (sites_) {
+                if (sites_ && !settings_.siteVideosEnabled) {
+                    SiteLookupFinished off;
+                    off.lookupId = typed.lookupId;
+                    off.problem = SiteLookupFinished::Problem::ToolsMissing;
+                    off.failure = "Downloading videos from sites is turned off in Options.";
+                    Notify(std::move(off));
+                } else if (sites_) {
                     sites_->LookUp(typed);
                 } else {
                     SiteLookupFinished missing;
@@ -437,6 +446,16 @@ void Coordinator::Handle(Command command)
             } else if constexpr (std::is_same_v<T, CancelSiteLookupCommand>) {
                 if (sites_) {
                     sites_->Cancel(typed.lookupId);
+                }
+            } else if constexpr (std::is_same_v<T, CheckSiteToolsCommand>) {
+                if (tools_) {
+                    tools_->CheckNow();
+                    snapshotDirty_ = true;
+                }
+            } else if constexpr (std::is_same_v<T, RemoveSiteToolsCommand>) {
+                if (tools_) {
+                    tools_->Remove();
+                    snapshotDirty_ = true;
                 }
             } else {
                 static_assert(sizeof(T) == 0, "unhandled command");
@@ -1162,6 +1181,9 @@ void Coordinator::ReassignCategory(model::CategoryId id)
 
 void Coordinator::UpdateSettings(model::Settings settings)
 {
+    // The checks' times are the core's: a dialog opened before a check must not set them back.
+    settings.siteVideosYtDlpCheckUnixMs = std::max(settings.siteVideosYtDlpCheckUnixMs, settings_.siteVideosYtDlpCheckUnixMs);
+    settings.siteVideosDenoCheckUnixMs = std::max(settings.siteVideosDenoCheckUnixMs, settings_.siteVideosDenoCheckUnixMs);
     // A round trip through the stored form applies the same validation as loading does.
     const model::SettingsMap map = model::SettingsToMap(settings);
     model::SettingsLoadResult validated = model::SettingsFromMap(map);
@@ -1235,6 +1257,33 @@ void Coordinator::ReplaceServerLimits(std::vector<model::ServerLimit> limits)
 
 void Coordinator::OnEngineEvent(EngineEvent event)
 {
+    // The site video components: their fetches, proxy answers and installs have their own ids.
+    if (event.id.value == kToolEventId) {
+        if (const auto* installed = std::get_if<ToolInstalled>(&event.payload); installed && tools_) {
+            tools_->OnInstalled(*installed, ports_.clock->Steady());
+            snapshotDirty_ = true;
+        }
+        return;
+    }
+    const auto* toolFetch = std::get_if<FetchFinished>(&event.payload);
+    if (toolFetch != nullptr && !IsToolFetchId(toolFetch->fetchId)) {
+        toolFetch = nullptr;
+    }
+    if (toolFetch == nullptr && IsToolFetchId(event.id.value)) {
+        if (const auto* resolved = std::get_if<ProxyResolved>(&event.payload); resolved && tools_) {
+            tools_->OnProxyResolved(event.id.value, resolved->proxy);
+        }
+        return;
+    }
+    if (const auto* fetched = toolFetch) {
+        if (tools_) {
+            if (const auto checked = tools_->OnFetched(*fetched, ports_.clock->Steady())) {
+                OnToolChecked(*checked);
+            }
+            snapshotDirty_ = true;
+        }
+        return;
+    }
     // Manifest fetches are not downloads: their answers and proxy lookups go to their own owner.
     if (event.id.value == kUpdateFetchId) {
         if (const auto* resolved = std::get_if<ProxyResolved>(&event.payload); resolved && updates_) {
@@ -1263,6 +1312,9 @@ void Coordinator::OnEngineEvent(EngineEvent event)
             if (const auto* resolved = std::get_if<ProxyResolved>(&event.payload)) {
                 sites_->OnProxyResolved(event.id, resolved->proxy);
             } else if (const auto* looked = std::get_if<SiteLookupFinished>(&event.payload)) {
+                if (looked->problem == SiteLookupFinished::Problem::Resolver && tools_) {
+                    tools_->ResolverTrouble(ports_.clock->Steady());  // a newer yt-dlp may fix it
+                }
                 sites_->OnFinished(event.id, *looked);
             }
         }
@@ -1301,8 +1353,8 @@ void Coordinator::OnEngineEvent(EngineEvent event)
                 OnMuxFinished(*entry, payload);
             } else if constexpr (std::is_same_v<T, DescribeFinished>) {
                 OnDescribeFinished(*entry, payload);
-            } else if constexpr (std::is_same_v<T, SiteLookupFinished>) {
-                // handled above: lookups have their own ids
+            } else if constexpr (std::is_same_v<T, SiteLookupFinished> || std::is_same_v<T, ToolInstalled>) {
+                // handled above: lookups and the tools have their own ids
             } else {
                 static_assert(sizeof(T) == 0, "unhandled engine event");
             }
@@ -2470,9 +2522,26 @@ void Coordinator::Tick()
     if (updates_ && !shuttingDown_) {
         updates_->Tick(now, ports_.clock->NowUnixMs(), settings_);
     }
+    if (tools_ && !shuttingDown_) {
+        const auto before = tools_->View().state;
+        tools_->Tick(now, ports_.clock->NowUnixMs(), settings_);
+        if (tools_->View().state != before) {
+            snapshotDirty_ = true;
+        }
+    }
     if (snapshotDirty_ && now - lastSnapshot_ >= config_.snapshotInterval) {
         PublishSnapshot();
     }
+}
+
+void Coordinator::OnToolChecked(SiteTool tool)
+{
+    const std::int64_t now = ports_.clock->NowUnixMs();
+    (tool == SiteTool::YtDlp ? settings_.siteVideosYtDlpCheckUnixMs : settings_.siteVideosDenoCheckUnixMs) = now;
+    if (base::Status saved = ports_.store->SaveSettings(model::SettingsToMap(settings_)); !saved) {
+        ReportError("Settings could not be saved: " + saved.GetError().message);
+    }
+    snapshotDirty_ = true;
 }
 
 void Coordinator::OnUpdateChecked(const UpdateCheckOutcome& outcome)
@@ -2532,6 +2601,9 @@ std::chrono::steady_clock::time_point Coordinator::NextDeadline() const
     }
     if (updates_ && !shuttingDown_) {  // Tick no longer checks then, so its deadline would never move
         deadline = std::min(deadline, updates_->NextDeadline(settings_));
+    }
+    if (tools_ && !shuttingDown_) {
+        deadline = std::min(deadline, tools_->NextDeadline(ports_.clock->Steady(), ports_.clock->NowUnixMs(), settings_));
     }
     return deadline;
 }
@@ -2727,6 +2799,9 @@ void Coordinator::PublishSnapshot()
         snapshot->siteLogins.push_back(SiteLoginView{login.pattern, login.username});
     }
     snapshot->speedLimiterOn = speedLimiterOn_;
+    if (tools_) {
+        snapshot->siteTools = tools_->View();
+    }
     const auto now = ports_.clock->Steady();
     if (settings_.quota.enabled) {
         snapshot->quotaLimitBytes = std::int64_t{settings_.quota.megabytes} * 1024 * 1024;

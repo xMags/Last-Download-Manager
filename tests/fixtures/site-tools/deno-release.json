@@ -1,0 +1,287 @@
+{
+ "tag_name": "v2.9.8",
+ "draft": false,
+ "prerelease": false,
+ "assets": [
+  {
+   "name": "deno-aarch64-apple-darwin.from-2.9.7.bsdiff",
+   "size": 6157420,
+   "browser_download_url": "https://github.com/denoland/deno/releases/download/v2.9.8/deno-aarch64-apple-darwin.from-2.9.7.bsdiff"
+  },
+  {
+   "name": "deno-aarch64-apple-darwin.from-2.9.7.bsdiff.sha256sum",
+   "size": 110,
+   "browser_download_url": "https://github.com/denoland/deno/releases/download/v2.9.8/deno-aarch64-apple-darwin.from-2.9.7.bsdiff.sha256sum"
+  },
+  {
+   "name": "deno-aarch64-apple-darwin.sha256sum",
+   "size": 71,
+   "browser_download_url": "https://github.com/denoland/deno/releases/download/v2.9.8/deno-aarch64-apple-darwin.sha256sum"
+  },
+  {
+   "name": "deno-aarch64-apple-darwin.zip",
+   "size": 38770795,
+   "browser_download_url": "https://github.com/denoland/deno/releases/download/v2.9.8/deno-aarch64-apple-darwin.zip"
+  },
+  {
+   "name": "deno-aarch64-apple-darwin.zip.sha256sum",
+   "size": 96,
+   "browser_download_url": "https://github.com/denoland/deno/releases/download/v2.9.8/deno-aarch64-apple-darwin.zip.sha256sum"
+  },
+  {
+   "name": "deno-aarch64-pc-windows-msvc.from-2.9.7.bsdiff",
+   "size": 4669648,
+   "browser_download_url": "https://github.com/denoland/deno/releases/download/v2.9.8/deno-aarch64-pc-windows-msvc.from-2.9.7.bsdiff"
+  },
+  {
+   "name": "deno-aarch64-pc-windows-msvc.from-2.9.7.bsdiff.sha256sum",
+   "size": 192,
+   "browser_download_url": "https://github.com/denoland/deno/releases/download/v2.9.8/deno-aarch64-pc-windows-msvc.from-2.9.7.bsdiff.sha256sum"
+  },
+  {
+   "name": "deno-aarch64-pc-windows-msvc.sha256sum",
+   "size": 154,
+   "browser_download_url": "https://github.com/denoland/deno/releases/download/v2.9.8/deno-aarch64-pc-windows-msvc.sha256sum"
+  },
+  {
+   "name": "deno-aarch64-pc-windows-msvc.zip",
+   "size": 41163152,
+   "browser_download_url": "https://github.com/denoland/deno/releases/download/v2.9.8/deno-aarch64-pc-windows-msvc.zip"
+  },
+  {
+   "name": "deno-aarch64-pc-windows-msvc.zip.sha256sum",
+   "size": 178,
+   "browser_download_url": "https://github.com/denoland/deno/releases/download/v2.9.8/deno-aarch64-pc-windows-msvc.zip.sha256sum"
+  },
+  {
+   "name": "deno-aarch64-unknown-linux-gnu.from-2.9.7.bsdiff",
+   "size": 5752271,
+   "browser_download_url": "https://github.com/denoland/deno/releases/download/v2.9.8/deno-aarch64-unknown-linux-gnu.from-2.9.7.bsdiff"
+  },
+  {
+   "name": "deno-aarch64-unknown-linux-gnu.from-2.9.7.bsdiff.sha256sum",
+   "size": 115,
+   "browser_download_url": "https://github.com/denoland/deno/releases/download/v2.9.8/deno-aarch64-unknown-linux-gnu.from-2.9.7.bsdiff.sha256sum"
+  },
+  {
+   "name": "deno-aarch64-unknown-linux-gnu.sha256sum",
+   "size": 71,
+   "browser_download_url": "https://github.com/denoland/deno/releases/download/v2.9.8/deno-aarch64-unknown-linux-gnu.sha256sum"
+  },
+  {
+   "name": "deno-aarch64-unknown-linux-gnu.zip",
+   "size": 40120596,
+   "browser_download_url": "https://github.com/denoland/deno/releases/download/v2.9.8/deno-aarch64-unknown-linux-gnu.zip"
+  },
+  {
+   "name": "deno-aarch64-unknown-linux-gnu.zip.sha256sum",
+   "size": 101,
+   "browser_download_url": "https://github.com/denoland/deno/releases/download/v2.9.8/deno-aarch64-unknown-linux-gnu.zip.sha256sum"
+  },
+  {
+   "name": "deno-x86_64-apple-darwin.from-2.9.7.bsdiff",
+   "size": 4438003,
+   "browser_download_url": "https://github.com/denoland/deno/releases/download/v2.9.8/deno-x86_64-apple-darwin.from-2.9.7.bsdiff"
+  },
+  {
+   "name": "deno-x86_64-apple-darwin.from-2.9.7.bsdiff.sha256sum",
+   "size": 109,
+   "browser_download_url": "https://github.com/denoland/deno/releases/download/v2.9.8/deno-x86_64-apple-darwin.from-2.9.7.bsdiff.sha256sum"
+  },
+  {
+   "name": "deno-x86_64-apple-darwin.sha256sum",
+   "size": 71,
+   "browser_download_url": "https://github.com/denoland/deno/releases/download/v2.9.8/deno-x86_64-apple-darwin.sha256sum"
+  },
+  {
+   "name": "deno-x86_64-apple-darwin.zip",
+   "size": 42797031,
+   "browser_download_url": "https://github.com/denoland/deno/releases/download/v2.9.8/deno-x86_64-apple-darwin.zip"
+  },
+  {
+   "name": "deno-x86_64-apple-darwin.zip.sha256sum",
+   "size": 95,
+   "browser_download_url": "https://github.com/denoland/deno/releases/download/v2.9.8/deno-x86_64-apple-darwin.zip.sha256sum"
+  },
+  {
+   "name": "deno-x86_64-pc-windows-msvc.from-2.9.7.bsdiff",
+   "size": 4005358,
+   "browser_download_url": "https://github.com/denoland/deno/releases/download/v2.9.8/deno-x86_64-pc-windows-msvc.from-2.9.7.bsdiff"
+  },
+  {
+   "name": "deno-x86_64-pc-windows-msvc.from-2.9.7.bsdiff.sha256sum",
+   "size": 191,
+   "browser_download_url": "https://github.com/denoland/deno/releases/download/v2.9.8/deno-x86_64-pc-windows-msvc.from-2.9.7.bsdiff.sha256sum"
+  },
+  {
+   "name": "deno-x86_64-pc-windows-msvc.sha256sum",
+   "size": 154,
+   "browser_download_url": "https://github.com/denoland/deno/releases/download/v2.9.8/deno-x86_64-pc-windows-msvc.sha256sum"
+  },
+  {
+   "name": "deno-x86_64-pc-windows-msvc.zip",
+   "size": 42917472,
+   "browser_download_url": "https://github.com/denoland/deno/releases/download/v2.9.8/deno-x86_64-pc-windows-msvc.zip"
+  },
+  {
+   "name": "deno-x86_64-pc-windows-msvc.zip.sha256sum",
+   "size": 177,
+   "browser_download_url": "https://github.com/denoland/deno/releases/download/v2.9.8/deno-x86_64-pc-windows-msvc.zip.sha256sum"
+  },
+  {
+   "name": "deno-x86_64-unknown-linux-gnu.from-2.9.7.bsdiff",
+   "size": 4097434,
+   "browser_download_url": "https://github.com/denoland/deno/releases/download/v2.9.8/deno-x86_64-unknown-linux-gnu.from-2.9.7.bsdiff"
+  },
+  {
+   "name": "deno-x86_64-unknown-linux-gnu.from-2.9.7.bsdiff.sha256sum",
+   "size": 114,
+   "browser_download_url": "https://github.com/denoland/deno/releases/download/v2.9.8/deno-x86_64-unknown-linux-gnu.from-2.9.7.bsdiff.sha256sum"
+  },
+  {
+   "name": "deno-x86_64-unknown-linux-gnu.sha256sum",
+   "size": 71,
+   "browser_download_url": "https://github.com/denoland/deno/releases/download/v2.9.8/deno-x86_64-unknown-linux-gnu.sha256sum"
+  },
+  {
+   "name": "deno-x86_64-unknown-linux-gnu.zip",
+   "size": 41963064,
+   "browser_download_url": "https://github.com/denoland/deno/releases/download/v2.9.8/deno-x86_64-unknown-linux-gnu.zip"
+  },
+  {
+   "name": "deno-x86_64-unknown-linux-gnu.zip.sha256sum",
+   "size": 100,
+   "browser_download_url": "https://github.com/denoland/deno/releases/download/v2.9.8/deno-x86_64-unknown-linux-gnu.zip.sha256sum"
+  },
+  {
+   "name": "denort-aarch64-apple-darwin.zip",
+   "size": 29038595,
+   "browser_download_url": "https://github.com/denoland/deno/releases/download/v2.9.8/denort-aarch64-apple-darwin.zip"
+  },
+  {
+   "name": "denort-aarch64-apple-darwin.zip.sha256sum",
+   "size": 98,
+   "browser_download_url": "https://github.com/denoland/deno/releases/download/v2.9.8/denort-aarch64-apple-darwin.zip.sha256sum"
+  },
+  {
+   "name": "denort-aarch64-pc-windows-msvc.zip",
+   "size": 31515608,
+   "browser_download_url": "https://github.com/denoland/deno/releases/download/v2.9.8/denort-aarch64-pc-windows-msvc.zip"
+  },
+  {
+   "name": "denort-aarch64-pc-windows-msvc.zip.sha256sum",
+   "size": 180,
+   "browser_download_url": "https://github.com/denoland/deno/releases/download/v2.9.8/denort-aarch64-pc-windows-msvc.zip.sha256sum"
+  },
+  {
+   "name": "denort-aarch64-unknown-linux-gnu.zip",
+   "size": 34610940,
+   "browser_download_url": "https://github.com/denoland/deno/releases/download/v2.9.8/denort-aarch64-unknown-linux-gnu.zip"
+  },
+  {
+   "name": "denort-aarch64-unknown-linux-gnu.zip.sha256sum",
+   "size": 103,
+   "browser_download_url": "https://github.com/denoland/deno/releases/download/v2.9.8/denort-aarch64-unknown-linux-gnu.zip.sha256sum"
+  },
+  {
+   "name": "denort-x86_64-apple-darwin.zip",
+   "size": 32080734,
+   "browser_download_url": "https://github.com/denoland/deno/releases/download/v2.9.8/denort-x86_64-apple-darwin.zip"
+  },
+  {
+   "name": "denort-x86_64-apple-darwin.zip.sha256sum",
+   "size": 97,
+   "browser_download_url": "https://github.com/denoland/deno/releases/download/v2.9.8/denort-x86_64-apple-darwin.zip.sha256sum"
+  },
+  {
+   "name": "denort-x86_64-pc-windows-msvc.zip",
+   "size": 32979811,
+   "browser_download_url": "https://github.com/denoland/deno/releases/download/v2.9.8/denort-x86_64-pc-windows-msvc.zip"
+  },
+  {
+   "name": "denort-x86_64-pc-windows-msvc.zip.sha256sum",
+   "size": 179,
+   "browser_download_url": "https://github.com/denoland/deno/releases/download/v2.9.8/denort-x86_64-pc-windows-msvc.zip.sha256sum"
+  },
+  {
+   "name": "denort-x86_64-unknown-linux-gnu.zip",
+   "size": 34819668,
+   "browser_download_url": "https://github.com/denoland/deno/releases/download/v2.9.8/denort-x86_64-unknown-linux-gnu.zip"
+  },
+  {
+   "name": "denort-x86_64-unknown-linux-gnu.zip.sha256sum",
+   "size": 102,
+   "browser_download_url": "https://github.com/denoland/deno/releases/download/v2.9.8/denort-x86_64-unknown-linux-gnu.zip.sha256sum"
+  },
+  {
+   "name": "deno_src.tar.gz",
+   "size": 37035922,
+   "browser_download_url": "https://github.com/denoland/deno/releases/download/v2.9.8/deno_src.tar.gz"
+  },
+  {
+   "name": "lib.deno.d.ts",
+   "size": 721335,
+   "browser_download_url": "https://github.com/denoland/deno/releases/download/v2.9.8/lib.deno.d.ts"
+  },
+  {
+   "name": "libdenort-aarch64-apple-darwin.zip",
+   "size": 29219001,
+   "browser_download_url": "https://github.com/denoland/deno/releases/download/v2.9.8/libdenort-aarch64-apple-darwin.zip"
+  },
+  {
+   "name": "libdenort-aarch64-apple-darwin.zip.sha256sum",
+   "size": 101,
+   "browser_download_url": "https://github.com/denoland/deno/releases/download/v2.9.8/libdenort-aarch64-apple-darwin.zip.sha256sum"
+  },
+  {
+   "name": "libdenort-aarch64-pc-windows-msvc.zip",
+   "size": 31728378,
+   "browser_download_url": "https://github.com/denoland/deno/releases/download/v2.9.8/libdenort-aarch64-pc-windows-msvc.zip"
+  },
+  {
+   "name": "libdenort-aarch64-pc-windows-msvc.zip.sha256sum",
+   "size": 183,
+   "browser_download_url": "https://github.com/denoland/deno/releases/download/v2.9.8/libdenort-aarch64-pc-windows-msvc.zip.sha256sum"
+  },
+  {
+   "name": "libdenort-aarch64-unknown-linux-gnu.zip",
+   "size": 30422088,
+   "browser_download_url": "https://github.com/denoland/deno/releases/download/v2.9.8/libdenort-aarch64-unknown-linux-gnu.zip"
+  },
+  {
+   "name": "libdenort-aarch64-unknown-linux-gnu.zip.sha256sum",
+   "size": 106,
+   "browser_download_url": "https://github.com/denoland/deno/releases/download/v2.9.8/libdenort-aarch64-unknown-linux-gnu.zip.sha256sum"
+  },
+  {
+   "name": "libdenort-x86_64-apple-darwin.zip",
+   "size": 32278358,
+   "browser_download_url": "https://github.com/denoland/deno/releases/download/v2.9.8/libdenort-x86_64-apple-darwin.zip"
+  },
+  {
+   "name": "libdenort-x86_64-apple-darwin.zip.sha256sum",
+   "size": 100,
+   "browser_download_url": "https://github.com/denoland/deno/releases/download/v2.9.8/libdenort-x86_64-apple-darwin.zip.sha256sum"
+  },
+  {
+   "name": "libdenort-x86_64-pc-windows-msvc.zip",
+   "size": 33201486,
+   "browser_download_url": "https://github.com/denoland/deno/releases/download/v2.9.8/libdenort-x86_64-pc-windows-msvc.zip"
+  },
+  {
+   "name": "libdenort-x86_64-pc-windows-msvc.zip.sha256sum",
+   "size": 182,
+   "browser_download_url": "https://github.com/denoland/deno/releases/download/v2.9.8/libdenort-x86_64-pc-windows-msvc.zip.sha256sum"
+  },
+  {
+   "name": "libdenort-x86_64-unknown-linux-gnu.zip",
+   "size": 31824779,
+   "browser_download_url": "https://github.com/denoland/deno/releases/download/v2.9.8/libdenort-x86_64-unknown-linux-gnu.zip"
+  },
+  {
+   "name": "libdenort-x86_64-unknown-linux-gnu.zip.sha256sum",
+   "size": 105,
+   "browser_download_url": "https://github.com/denoland/deno/releases/download/v2.9.8/libdenort-x86_64-unknown-linux-gnu.zip.sha256sum"
+  }
+ ]
+}

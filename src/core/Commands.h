@@ -293,6 +293,10 @@ struct CancelSiteLookupCommand {
     std::int64_t lookupId = 0;
 };
 
+// Options: check for newer site video components now, or delete them.
+struct CheckSiteToolsCommand {};
+struct RemoveSiteToolsCommand {};
+
 using Command = std::variant<AddDownloadCommand, ConfirmDownloadCommand, ResumeCommand, StopCommand, StopAllCommand,
                              FinishRecordingCommand, DeleteCommand, DeleteCompletedCommand, RedownloadCommand, SetDownloadSpeedLimitCommand,
                              SetSpeedLimiterCommand, UpdateDownloadCommand, MoveDownloadCommand, SaveCategoryCommand,
@@ -301,7 +305,8 @@ using Command = std::variant<AddDownloadCommand, ConfirmDownloadCommand, ResumeC
                              QuotaDecisionCommand, WaitForAddressCommand, ReplaceAddressCommand, FetchManifestCommand,
                              SaveQueueCommand, DeleteQueueCommand, SetQueueCommand, ReorderQueueCommand,
                              StartQueueCommand, StopQueueCommand, ClockChangedCommand, SetListedCommand,
-                             CheckForUpdatesCommand, LookUpSiteVideoCommand, CancelSiteLookupCommand>;
+                             CheckForUpdatesCommand, LookUpSiteVideoCommand, CancelSiteLookupCommand,
+                             CheckSiteToolsCommand, RemoveSiteToolsCommand>;
 
 // Where front ends send commands. Thread-safe; returns at once.
 class CommandSink {
