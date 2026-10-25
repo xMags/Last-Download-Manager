@@ -216,9 +216,15 @@ base::Result<model::GrabberProjectDefinition> ParseDefinition(std::string_view j
         return invalid();
     }
     const auto version = document.find("version");
-    if (version == document.end() || !version->is_number_integer() || version->get<std::int64_t>() != kVersion) {
+    if (version == document.end() || !version->is_number_integer()) {
+        return invalid();
+    }
+    if (version->get<std::int64_t>() > kVersion) {
         return base::MakeError(base::ErrorCode::Unsupported,
                                "The Grabber project was made by a newer version of Last Download Manager.");
+    }
+    if (version->get<std::int64_t>() != kVersion) {
+        return invalid();
     }
 
     bool valid = true;
