@@ -1022,6 +1022,14 @@ void GrabberExplorer::StartDownload(Project& project, Item& item)
         if (Offline(project)) {
             // Saved where the pages' links expect it.
             const std::filesystem::path planned = *root / PathFromUtf8(LocalRelativePath(*url, false, definition.keepSiteFolders));
+            if (!definition.overwrite && ports_.fileSystem->Exists(planned)) {
+                // Kept, as "overwrite" is off: a copy under a numbered name is a file no saved
+                // page links to.
+                item.data.state = model::GrabberItemState::Done;
+                item.data.localPath = PathToUtf8(planned);
+                Changed(project, item);
+                return;
+            }
             add.saveDir = PathToUtf8(planned.parent_path());
             add.fileName = PathToUtf8(planned.filename());
         } else if (definition.keepSiteFolders) {
