@@ -597,10 +597,16 @@ TEST_F(CoordinatorTest, InconsistentServerRestartsOnceWithOneConnection)
     EXPECT_EQ(engine_.starts.back().maxConnections, 1);
     EXPECT_TRUE(engine_.starts.back().segments.empty()) << "bytes from two answers must never be mixed";
 
-    Finish(id, 2, TransferOutcome::Failed, {}, inconsistent, 100);
+    Finish(id, 2, TransferOutcome::Failed, {{0, 100, 30}}, inconsistent, 100);
     EXPECT_EQ(engine_.starts.size(), 2u);
     EXPECT_EQ(View(id).download.status, DownloadStatus::Failed);
     EXPECT_EQ(observer_.All<ldm::core::DownloadFailed>().size(), 1u);
+    EXPECT_TRUE(Stored(id)->segments.empty()) << "the disputed bytes are not kept for a later resume";
+
+    coordinator_->Handle(ldm::core::ResumeCommand{{id}});
+    ASSERT_EQ(engine_.starts.size(), 3u);
+    EXPECT_TRUE(engine_.starts.back().segments.empty());
+    EXPECT_EQ(engine_.starts.back().maxConnections, 1);
 }
 
 TEST_F(CoordinatorTest, FailureIsStoredForProperties)
