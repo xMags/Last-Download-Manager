@@ -113,6 +113,7 @@ TEST(FfmpegCommands, ProbeOutputBecomesADescription)
               "320x240, 25 fps, VP9; 1:02:05");
     EXPECT_EQ(ldm::platform::DescribeProbe("not json"), "");
     EXPECT_EQ(ldm::platform::DescribeProbe(R"({"streams":"x"})"), "");
+    EXPECT_EQ(ldm::platform::DescribeProbe(R"({"streams":[{"codec_type":7,"width":"wide"}]})"), "");
 }
 
 }  // namespace
