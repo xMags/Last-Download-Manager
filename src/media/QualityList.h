@@ -29,6 +29,7 @@ struct QualityEntry {
     std::string language;    // of the audio track, when it is a separate one
     std::uint64_t bitsPerSecond = 0;  // picture and sound together, as the manifest states them
     std::optional<std::int64_t> approximateBytes;  // from bitsPerSecond and the length, when known
+    bool statedVideo = false;  // the variant's MIME type says it is a video, whatever else it names
 };
 
 struct QualityList {
