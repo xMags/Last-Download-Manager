@@ -274,6 +274,16 @@ TEST_F(EngineTest, ServerWithoutRangesGetsExactlyOneConnection)
     EXPECT_FALSE(info->resumable);
 }
 
+TEST_F(EngineTest, ServerThatIgnoresRangesSilentlyIsReadThroughOneConnection)
+{
+    // Without Accept-Ranges the run splits at once; the extra connections' 200 answers must give
+    // their ranges back to the first connection, which may already be at a split point.
+    const auto finished = Run(Request("/quiet-no-range.bin"));
+    ASSERT_EQ(finished.outcome, TransferOutcome::Completed) << (finished.failure ? finished.failure->message : "");
+    EXPECT_TRUE(HoldsPayload(PartialPath(), server_->Size()));
+    EXPECT_GT(Requests("/quiet-no-range.bin").size(), 1u) << "it did try more connections";
+}
+
 TEST_F(EngineTest, RedirectReportsFinalUrlAndServerName)
 {
     const auto finished = Run(Request("/redirect"));

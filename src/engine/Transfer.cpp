@@ -398,6 +398,11 @@ size_t Transfer::OnData(Connection& connection, const char* data, size_t size)
     if (!connection.accepted && !AcceptResponse(connection)) {
         return 0;
     }
+    if (WaitsForRangeAnswer(connection, static_cast<std::int64_t>(size))) {
+        // Nothing of this chunk is taken: libcurl delivers it again once unpaused.
+        connection.pausedForRanges = true;
+        return CURL_WRITEFUNC_PAUSE;
+    }
     const Clock::time_point now = Clock::now();
     if (!CanTake(now)) {
         connection.pausedForRate = true;
@@ -507,6 +512,9 @@ bool Transfer::AcceptResponse(Connection& connection)
     const bool accepted =
         connection.probe ? AcceptFirstResponse(connection, *segment) : AcceptExtraResponse(connection, *segment);
     connection.accepted = accepted;
+    if (accepted && (!http_ || connection.headers.status == 206)) {
+        rangesProven_ = true;  // FTP keeps its REST handling (ENG-13) and never waits
+    }
     return accepted;
 }
 
@@ -835,8 +843,36 @@ void Transfer::UnpauseConnections(Clock::time_point now)
         } else if (connection.pausedForMemory) {
             connection.pausedForMemory = false;
             curl_easy_pause(connection.easy.get(), CURLPAUSE_CONT);
+        } else if (connection.pausedForRanges) {
+            Segment* segment = FindSegment(connection.segmentKey);
+            Segment* next = segment != nullptr && segment->end ? SegmentStartingAt(*segment->end) : nullptr;
+            if (!rangesProven_ && next != nullptr && !next->busy && next->position == next->start) {
+                // Its connection ended without an answer either way (it waits to retry): this
+                // connection takes the range back rather than wait.
+                segment->end = next->end;
+                const std::uint32_t key = next->key;
+                segments_.erase(std::remove_if(segments_.begin(), segments_.end(),
+                                               [key](const Segment& s) { return s.key == key; }),
+                                segments_.end());
+            }
+            if (!WaitsForRangeAnswer(connection, 1)) {
+                connection.pausedForRanges = false;
+                curl_easy_pause(connection.easy.get(), CURLPAUSE_CONT);
+            }
         }
     }
+}
+
+bool Transfer::WaitsForRangeAnswer(const Connection& connection, std::int64_t chunk)
+{
+    if (rangesProven_ || !http_) {
+        return false;
+    }
+    Segment* segment = FindSegment(connection.segmentKey);
+    if (segment == nullptr || !segment->end || connection.position + chunk <= *segment->end) {
+        return false;
+    }
+    return SegmentStartingAt(*segment->end) != nullptr;
 }
 
 void Transfer::Service(Clock::time_point now)
@@ -1035,6 +1071,9 @@ Transfer::Clock::time_point Transfer::NextDeadline(Clock::time_point now) const
         }
         if (connection->pausedForRate) {
             deadline = std::min(deadline, now + std::chrono::milliseconds(10));
+        }
+        if (connection->pausedForRanges) {
+            deadline = std::min(deadline, now + std::chrono::milliseconds(20));
         }
     }
     return deadline;

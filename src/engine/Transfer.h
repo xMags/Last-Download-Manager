@@ -147,6 +147,9 @@ private:
         std::vector<std::byte> overlap;  // bytes past the segment end
         bool pausedForRate = false;
         bool pausedForMemory = false;
+        // At the start of a split range while the server has not shown it serves ranges: waits
+        // for that range's connection, so a server that ignores ranges can still be read through.
+        bool pausedForRanges = false;
     };
 
     size_t OnData(Connection& connection, const char* data, size_t size);
@@ -161,6 +164,9 @@ private:
     void CheckOverlap(Segment& previous, Segment& next);
     void FillSlots(Clock::time_point now);
     void UnpauseConnections(Clock::time_point now);
+    // True when `connection` reached the end of its segment while the next segment's connection
+    // has not shown that the server serves ranges.
+    [[nodiscard]] bool WaitsForRangeAnswer(const Connection& connection, std::int64_t chunk);
     void HandleFailure(Segment& segment, core::TransferFailure failure, std::optional<int> retryAfter,
                        Clock::time_point now);
     void Fail(core::TransferFailure failure);
@@ -206,6 +212,9 @@ private:
     std::optional<std::int64_t> totalSize_;
     bool rangesPossible_ = false;
     bool resumable_ = false;
+    // An HTTP server answered a range request with 206 in this run. Until then Accept-Ranges is
+    // only a claim, and the first connection does not stop at a split point (ENG-05).
+    bool rangesProven_ = false;
     model::Validators validators_;
     std::optional<std::string> contentType_;
     std::optional<std::string> fileName_;
