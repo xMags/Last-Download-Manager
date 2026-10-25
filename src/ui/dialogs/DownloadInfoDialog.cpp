@@ -143,12 +143,18 @@ void DownloadInfoDialog::Update(const core::DownloadView& view)
     if (d.contentType) {
         SetText(IDC_INFO_TYPE, L"Type: " + base::ToUtf16(*d.contentType));
     }
-    SHFILEINFOW info{};
-    const std::wstring probe = L"file." + base::ToUtf16(core::FileExtension(d.fileName));
-    if (::SHGetFileInfoW(probe.c_str(), FILE_ATTRIBUTE_NORMAL, &info, sizeof(info),
-                         SHGFI_USEFILEATTRIBUTES | SHGFI_ICON | SHGFI_LARGEICON) != 0) {
-        fileIcon_.reset(info.hIcon);
-        ::SendMessageW(Item(IDC_INFO_ICON), STM_SETICON, reinterpret_cast<WPARAM>(fileIcon_.get()), 0);
+    // Updates come several times a second; the icon changes only with the type.
+    const std::wstring extension = base::ToUtf16(core::FileExtension(d.fileName));
+    if (!fileIcon_ || extension != fileIconExtension_) {
+        SHFILEINFOW info{};
+        const std::wstring probe = L"file." + extension;
+        if (::SHGetFileInfoW(probe.c_str(), FILE_ATTRIBUTE_NORMAL, &info, sizeof(info),
+                             SHGFI_USEFILEATTRIBUTES | SHGFI_ICON | SHGFI_LARGEICON) != 0) {
+            // Set before the old icon is destroyed, so the control never shows a freed one.
+            ::SendMessageW(Item(IDC_INFO_ICON), STM_SETICON, reinterpret_cast<WPARAM>(info.hIcon), 0);
+            fileIcon_.reset(info.hIcon);
+            fileIconExtension_ = extension;
+        }
     }
 }
 

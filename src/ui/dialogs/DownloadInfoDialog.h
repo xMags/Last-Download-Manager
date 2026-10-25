@@ -70,6 +70,7 @@ private:
     bool folderEdited_ = false;
     bool settingText_ = false;
     UniqueIcon fileIcon_;
+    std::wstring fileIconExtension_;  // the type fileIcon_ shows
 };
 
 }  // namespace ldm::ui
