@@ -88,7 +88,7 @@ std::vector<PanelMenuItem> StreamLines(const MediaItem& item)
         return lines;
     }
     const bool live = item.offer && item.offer->live;
-    if (live && item.kind == browser::MediaKind::Dash) {
+    if (live && item.kind == browser::MediaKind::Dash && !item.siteVideo) {  // a site's live video is HLS
         lines.push_back(Notice(L"This is a live DASH stream, which LDM cannot record"));
         return lines;
     }

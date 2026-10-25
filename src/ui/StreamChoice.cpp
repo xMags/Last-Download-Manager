@@ -92,7 +92,7 @@ base::Result<StreamCapture> BuildStreamCapture(const TabMedia& tab, const MediaI
     }
     const media::MediaOffer& offer = *item.offer;
     // A live HLS stream is recorded; a live DASH stream is not (M3 design, known limits).
-    if (offer.live && item.kind == browser::MediaKind::Dash) {
+    if (offer.live && item.kind == browser::MediaKind::Dash && !item.siteVideo) {
         return Refused("LDM records live HLS streams only. This is a live DASH stream.");
     }
     if (item.qualities.drm || offer.drm) {

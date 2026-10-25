@@ -145,7 +145,7 @@ TEST(SiteVideo, PlaylistsLiveAndUpcomingVideosAreRefusedWithWordsToShow)
               "This page is a playlist. Open one of its videos to download it.");
     EXPECT_EQ(Refusal(R"({"_type":"url","id":"x"})"), "This page is not a single video.");
     EXPECT_EQ(Refusal(Answer("[" + Format("1", "avc1.4d401e", "none", R"(,"height":360)") + "]", R"(,"is_live":true)")),
-              "Live streams from this site cannot be downloaded yet.");
+              "This live stream offers no way of recording it that LDM has.");
     EXPECT_EQ(Refusal(Answer("[]", R"(,"live_status":"is_upcoming")")), "This video has not started yet.");
 }
 
@@ -426,6 +426,22 @@ TEST(SiteVideo, SubtitlesAreTheUploadersAndTheAutomaticOnesInTheVideosLanguage)
         }
     }
     EXPECT_EQ(BuildQualityList(video.offer, video.seconds).subtitles.size(), 4u);
+}
+
+TEST(SiteVideo, ALiveStreamOffersItsHlsPlaylistsForRecording)
+{
+    const std::string formats = "[" +
+        std::string(R"({"format_id":"95","protocol":"m3u8_native","url":"https://live.example.test/720.m3u8","vcodec":"avc1.4d401f","acodec":"mp4a.40.2","height":720},)") +
+        R"({"format_id":"300","protocol":"m3u8_native","url":"https://live.example.test/720p60.m3u8","vcodec":"avc1.4d4020","acodec":"mp4a.40.2","height":720,"fps":60},)" +
+        R"({"format_id":"137","protocol":"http_dash_segments_generator","url":"https://live.example.test/dash","vcodec":"avc1.640028","acodec":"none","height":1080},)" +
+        Format("18", "avc1.42001e", "mp4a.40.2", R"(,"height":360)") + "]";
+    const SiteVideo video = Parse(Answer(formats, R"(,"live_status":"is_live","is_live":true)"));
+    EXPECT_TRUE(video.offer.live);
+    EXPECT_FALSE(video.offer.seconds) << "a recording's length depends on how long it runs";
+    EXPECT_EQ(VariantIds(video), (std::vector<std::string>{"300", "95"})) << "no files of a stream that has no end";
+    const auto list = BuildQualityList(video.offer, video.offer.seconds);
+    ASSERT_EQ(list.entries.size(), 2u);
+    EXPECT_FALSE(list.entries[0].approximateBytes);
 }
 
 TEST(SiteVideo, CookieTextThatDoesNotReadIsNotTaken)
