@@ -169,7 +169,11 @@ std::string AttributeSafeAddress(std::string_view address)
     out.reserve(address.size());
     for (const char c : address) {
         const auto byte = static_cast<unsigned char>(c);
-        if (byte <= 0x20 || byte >= 0x7F || c == '"' || c == '\'' || c == '<' || c == '>' || c == '&' || c == ',') {
+        if (c == '&') {
+            // An entity, not %26: the address must reach the server as it was, and %26 would join
+            // two query parameters into one.
+            out += "&amp;";
+        } else if (byte <= 0x20 || byte >= 0x7F || c == '"' || c == '\'' || c == '<' || c == '>' || c == ',') {
             AppendEncoded(out, c);
         } else {
             out.push_back(c);

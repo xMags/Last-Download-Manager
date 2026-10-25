@@ -23,8 +23,8 @@ namespace ldm::grabber {
 // The text with its valid "%XX" escapes decoded; others stay as written.
 [[nodiscard]] std::string PercentDecode(std::string_view text);
 
-// Percent-encodes an address for an attribute: spaces, quotes, '<', '>', '&' and ',' (srcset
-// separates its candidates with commas), and bytes outside ASCII.
+// Makes an address safe in an attribute: '&' becomes "&amp;"; spaces, quotes, '<', '>', ','
+// (srcset separates its candidates with commas) and bytes outside ASCII are percent-encoded.
 [[nodiscard]] std::string AttributeSafeAddress(std::string_view address);
 
 }  // namespace ldm::grabber
