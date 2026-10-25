@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.30)
 
 project(LastDownloadManager
-    VERSION 5.1.0
+    VERSION 5.2.0
     DESCRIPTION "Native Windows download manager"
     LANGUAGES C CXX)
 
