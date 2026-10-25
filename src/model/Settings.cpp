@@ -11,8 +11,6 @@ namespace ldm::model {
 
 namespace {
 
-constexpr size_t kMaxStringLength = 32 * 1024;
-
 template <typename Enum, size_t N>
 using EnumNames = std::array<std::pair<Enum, std::string_view>, N>;
 
@@ -160,8 +158,14 @@ public:
         if (text == nullptr) {
             return;
         }
-        if (text->size() > kMaxStringLength) {
+        if (text->size() > kMaxSettingTextBytes) {
             Warn(key);
+            // A list of lines (a history, exceptions) keeps the leading lines that fit; a single
+            // value has no line break to cut at and keeps its default.
+            const size_t cut = std::string_view(*text).substr(0, kMaxSettingTextBytes + 1).rfind('\n');
+            if (cut != std::string::npos && cut > 0) {
+                field = text->substr(0, cut);
+            }
             return;
         }
         field = *text;
@@ -173,7 +177,7 @@ public:
         if (text == nullptr) {
             return;
         }
-        if (text->size() > kMaxStringLength || !DecodeHex(*text, field)) {
+        if (text->size() > kMaxSettingTextBytes || !DecodeHex(*text, field)) {
             Warn(key);
         }
     }

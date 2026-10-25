@@ -1,5 +1,7 @@
 #include "ui/History.h"
 
+#include "model/Settings.h"
+
 #include <algorithm>
 
 namespace ldm::ui {
@@ -46,6 +48,16 @@ std::string PushHistory(std::string_view stored, std::string_view entry, size_t 
     entries.insert(entries.begin(), std::string(entry));
     if (entries.size() > limit) {
         entries.resize(limit);
+    }
+    // Long addresses (signed video links) could pass the length a setting is read back with; the
+    // oldest go first. The newest always stays, as a setting of its own size would.
+    size_t bytes = 0;
+    for (size_t i = 0; i < entries.size(); ++i) {
+        bytes += entries[i].size() + (i == 0 ? 0 : 1);
+        if (i > 0 && bytes > model::kMaxSettingTextBytes) {
+            entries.resize(i);
+            break;
+        }
     }
     std::string result;
     for (const std::string& e : entries) {
