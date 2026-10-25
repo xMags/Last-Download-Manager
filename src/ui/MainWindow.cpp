@@ -936,6 +936,7 @@ LRESULT MainWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
             services_.grabberBridge->Attach(nullptr);
             grabber_->CloseAll();
         }
+        destroyed_ = true;
         ::PostQuitMessage(0);
         return 0;
     default:
