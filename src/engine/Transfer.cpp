@@ -987,6 +987,13 @@ void Transfer::ReportProgress(Clock::time_point now)
     }
     progress.bytesPerSecond = bytesPerSecond;
     progress.lastRetry = lastRetry_;
+    // Reported at least once; once no segment waits to retry any more, the run has recovered and
+    // the next report no longer says it is retrying.
+    const bool anyWaiting = std::any_of(segments_.begin(), segments_.end(),
+                                        [](const Segment& segment) { return !segment.busy && segment.retryAt; });
+    if (!anyWaiting) {
+        lastRetry_.reset();
+    }
     services_.listener->OnEngineEvent(core::EngineEvent{request_.id, request_.epoch, std::move(progress)});
 }
 

@@ -880,6 +880,14 @@ void MediaRun::ReportProgress(Clock::time_point now)
     progress.bytesPerSecond = bytesPerSecond + wholeFileSpeed;
     progress.connections = connections;
     progress.lastRetry = lastRetry_;
+    // As in Transfer::Report: cleared once nothing waits to retry. A whole-file track that still
+    // waits reports its retry again with its next progress.
+    const bool anyWaiting =
+        std::any_of(pieces_.begin(), pieces_.end(), [](const Piece& piece) { return piece.retryAt.has_value(); }) ||
+        std::any_of(keys_.begin(), keys_.end(), [](const auto& slot) { return slot.second.retryAt.has_value(); });
+    if (!anyWaiting) {
+        lastRetry_.reset();
+    }
     services_.listener->OnEngineEvent(core::EngineEvent{request_.id, request_.epoch, std::move(progress)});
 }
 
