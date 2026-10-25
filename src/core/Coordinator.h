@@ -8,6 +8,8 @@
 #include "core/Ports.h"
 #include "core/QueueRunner.h"
 #include "core/Quota.h"
+#include "core/SiteLookups.h"
+#include "core/SiteResolver.h"
 #include "core/Snapshot.h"
 #include "core/Store.h"
 #include "core/TransferEngine.h"
@@ -43,6 +45,8 @@ struct CoordinatorPorts {
     TimeZone* timeZone = nullptr;
     // Wakes the computer for a scheduled start; optional.
     WakeTimer* wakeTimer = nullptr;
+    // Looks up video pages of supported sites; without it they cannot be downloaded.
+    SiteResolver* sites = nullptr;
 };
 
 struct CoordinatorConfig {
@@ -331,6 +335,8 @@ private:
     std::unique_ptr<ManifestFetches> manifests_;
     // The update check; set when there is a feed to ask as well.
     std::unique_ptr<UpdateCheck> updates_;
+    // Lookups of site video pages; set when the ports have a site resolver.
+    std::unique_ptr<SiteLookups> sites_;
     void OnUpdateChecked(const UpdateCheckOutcome& outcome);
 
     // HLS playlists fetched at a stream's start or a live recording's reload, by fetch id. Their

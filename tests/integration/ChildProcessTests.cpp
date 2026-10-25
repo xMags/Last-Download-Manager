@@ -71,6 +71,38 @@ TEST(ChildProcessTest, ReportsExitCodeAndOutput)
     EXPECT_FALSE(result.Value().outputTruncated);
 }
 
+TEST(ChildProcessTest, StandardErrorIsMixedInUnlessKeptApart)
+{
+    const std::vector<std::wstring> script{L"echo", L"data&", L"echo", L"warning", L"1>&2"};
+    const auto mixed = RunChildProcess(CmdRequest(script));
+    ASSERT_TRUE(mixed) << mixed.GetError().message;
+    EXPECT_NE(mixed.Value().output.find("warning"), std::string::npos);
+    EXPECT_TRUE(mixed.Value().errors.empty());
+
+    auto request = CmdRequest(script);
+    request.separateErrors = true;
+    const auto apart = RunChildProcess(request);
+    ASSERT_TRUE(apart) << apart.GetError().message;
+    EXPECT_EQ(apart.Value().output, "data\r\n");
+    EXPECT_EQ(apart.Value().errors, "warning \r\n");
+}
+
+// Errors beyond their own limit are drained too, while the output is kept whole.
+TEST(ChildProcessTest, ErrorsBeyondTheirLimitAreDroppedWithoutStallingTheProgram)
+{
+    auto request = CmdRequest({L"(for", L"/l", L"%i", L"in", L"(1,1,20000)", L"do", L"@echo", L"0123456789", L"1>&2)",
+                               L"&", L"echo", L"done"});
+    request.separateErrors = true;
+    request.limits.maxErrorBytes = 500;
+    request.limits.timeout = std::chrono::seconds(60);
+    const auto result = RunChildProcess(request);
+    ASSERT_TRUE(result) << result.GetError().message;
+    EXPECT_EQ(result.Value().end, ChildProcessEnd::Exited);
+    EXPECT_EQ(result.Value().errors.size(), 500u);
+    EXPECT_TRUE(result.Value().errorsTruncated);
+    EXPECT_EQ(result.Value().output, "done\r\n");
+}
+
 TEST(ChildProcessTest, RefusesARelativeProgramPath)
 {
     ChildProcessRequest request;

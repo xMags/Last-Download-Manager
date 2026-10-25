@@ -2,6 +2,7 @@
 
 #include "core/Commands.h"
 #include "core/MediaProgress.h"
+#include "media/SiteVideo.h"
 #include "model/Download.h"
 #include "model/Ids.h"
 #include "model/Media.h"
@@ -304,8 +305,26 @@ struct FetchFinished {
     bool fromPrivateNetwork = false;
 };
 
+// The site resolver's answer to a SiteLookupRequest (core/SiteResolver.h): exactly one per
+// request. Also the notification the front end gets for its own lookups, under its own id.
+struct SiteLookupFinished {
+    std::int64_t lookupId = 0;
+    bool stopped = false;                  // SiteResolver::Cancel ended it; nothing else is set
+    std::optional<media::SiteVideo> video;  // the page's video; nothing when it failed
+    std::string failure;                   // words for the user when it failed
+    enum class Problem {
+        None,
+        Video,         // this video cannot be downloaded (gone, private, protected, live, ...)
+        ToolsMissing,  // the resolver's programs are not installed
+        Resolver,      // the resolver failed in a way that a newer version may fix
+        Busy,          // too many lookups at once; LDM did not ask
+    };
+    Problem problem = Problem::None;
+};
+
 using EnginePayload = std::variant<ResponseInfo, ProgressInfo, TransferFinished, FinalizeFinished, ProxyResolved,
-                                   FetchFinished, MediaProgress, MediaFinished, MuxFinished, DescribeFinished>;
+                                   FetchFinished, MediaProgress, MediaFinished, MuxFinished, DescribeFinished,
+                                   SiteLookupFinished>;
 
 struct EngineEvent {
     model::DownloadId id;
