@@ -1,7 +1,8 @@
 #include "ui/MediaPanelWindow.h"
 
-#include "resource.h"
 #include "ui/Dpi.h"
+#include "ui/GlyphIcons.h"
+#include "ui/MediaPanelMenuPainter.h"
 
 #include <dwmapi.h>
 #include <shellscalingapi.h>
@@ -15,18 +16,41 @@ namespace ldm::ui {
 namespace {
 
 constexpr wchar_t kClassName[] = L"LdmMediaPanel";
+// Icon font glyphs (GlyphIcons).
+constexpr wchar_t kDownloadGlyph = 0xE896;     // Download
+constexpr wchar_t kLockGlyph = 0xE72E;         // Lock
+constexpr wchar_t kChevronDownGlyph = 0xE70D;  // ChevronDown
+constexpr wchar_t kMinimizeGlyph = 0xE921;     // ChromeMinimize
+constexpr wchar_t kCloseGlyph = 0xE8BB;        // ChromeClose
 constexpr UINT_PTR kTimerId = 1;
 constexpr std::wstring_view kDownloadText = L"Download this video";
 constexpr std::wstring_view kProtectedText = L"Protected video";
 
 // Sizes at 96 DPI.
-constexpr int kHeight96 = 28;
-constexpr int kPadding96 = 8;
+constexpr int kHeight96 = 32;
+constexpr int kPadding96 = 10;
 constexpr int kIcon96 = 16;
-constexpr int kGap96 = 6;
-constexpr int kArrow96 = 9;
-constexpr int kSideButton96 = 22;
+constexpr int kGap96 = 8;
+constexpr int kArrow96 = 10;
+constexpr int kSideButton96 = 30;
+constexpr int kDividerInset96 = 8;
 constexpr int kTextSlack96 = 4;
+
+// The panel sits on a web video, not in LDM's window, so it has one look in light and dark
+// mode: a blue strong enough for white text (contrast about 5:1), or slate for a protected video
+// that offers nothing to download.
+constexpr COLORREF kBlue = RGB(0x1F, 0x6F, 0xD1);
+constexpr COLORREF kBlueBorder = RGB(0x17, 0x58, 0xA8);
+constexpr COLORREF kSlate = RGB(0x4A, 0x55, 0x63);
+constexpr COLORREF kSlateBorder = RGB(0x3A, 0x43, 0x4F);
+constexpr COLORREF kInk = RGB(0xFF, 0xFF, 0xFF);
+
+COLORREF Blend(COLORREF from, COLORREF to, int percent)
+{
+    const auto mix = [percent](int a, int b) { return a + (b - a) * percent / 100; };
+    return RGB(mix(GetRValue(from), GetRValue(to)), mix(GetGValue(from), GetGValue(to)),
+               mix(GetBValue(from), GetBValue(to)));
+}
 
 UINT DpiAt(POINT point)
 {
@@ -37,6 +61,18 @@ UINT DpiAt(POINT point)
         return USER_DEFAULT_SCREEN_DPI;
     }
     return dpiX;
+}
+
+// The message font in semibold, for the button's text.
+UniqueFont CreateLabelFont(UINT dpi)
+{
+    const UniqueFont message = CreateMessageFont(dpi);
+    LOGFONTW font{};
+    if (::GetObjectW(message.get(), sizeof(font), &font) == 0) {
+        return CreateMessageFont(dpi);
+    }
+    font.lfWeight = FW_SEMIBOLD;
+    return UniqueFont(::CreateFontIndirectW(&font));
 }
 
 int TextWidth(HFONT font, std::wstring_view text)
@@ -50,10 +86,10 @@ int TextWidth(HFONT font, std::wstring_view text)
     return size.cx;
 }
 
-void DrawLine(HDC dc, int x1, int y1, int x2, int y2)
+void DrawGlyph(HDC dc, HFONT font, wchar_t glyph, RECT rect)
 {
-    ::MoveToEx(dc, x1, y1, nullptr);
-    ::LineTo(dc, x2, y2);
+    const SelectObjectScope select(dc, font);
+    ::DrawTextW(dc, &glyph, 1, &rect, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
 }
 
 }  // namespace
@@ -63,12 +99,11 @@ MediaPanelWindow::~MediaPanelWindow()
     Destroy();
 }
 
-bool MediaPanelWindow::Create(const Theme& theme, Callbacks callbacks)
+bool MediaPanelWindow::Create(Callbacks callbacks)
 {
     if (window_ != nullptr) {
         return true;
     }
-    theme_ = &theme;
     callbacks_ = std::move(callbacks);
     static const ATOM atom = [] {
         WNDCLASSEXW windowClass{sizeof(windowClass)};
@@ -86,8 +121,11 @@ bool MediaPanelWindow::Create(const Theme& theme, Callbacks callbacks)
     if (window_ == nullptr) {
         return false;
     }
-    const DWM_WINDOW_CORNER_PREFERENCE corners = DWMWCP_ROUNDSMALL;
+    // Windows 11 rounds the corners with smooth edges; older Windows ignores both attributes.
+    const DWM_WINDOW_CORNER_PREFERENCE corners = DWMWCP_ROUND;
     ::DwmSetWindowAttribute(window_, DWMWA_WINDOW_CORNER_PREFERENCE, &corners, sizeof(corners));
+    const COLORREF border = kBlueBorder;
+    ::DwmSetWindowAttribute(window_, DWMWA_BORDER_COLOR, &border, sizeof(border));
     UpdateFont(DpiOf(window_));
     return true;
 }
@@ -107,11 +145,9 @@ void MediaPanelWindow::Destroy()
 void MediaPanelWindow::UpdateFont(UINT dpi)
 {
     dpi_ = dpi;
-    font_ = CreateMessageFont(dpi);
-    const int iconSize = Scale(kIcon96, dpi);
-    HICON icon = nullptr;
-    ::LoadIconWithScaleDown(::GetModuleHandleW(nullptr), MAKEINTRESOURCEW(IDI_LDM), iconSize, iconSize, &icon);
-    icon_.reset(icon);
+    font_ = CreateLabelFont(dpi);
+    glyphs_ = CreateIconFont(Scale(kIcon96, dpi));
+    smallGlyphs_ = CreateIconFont(Scale(kArrow96, dpi));
 }
 
 SIZE MediaPanelWindow::SizeForDpi(UINT dpi) const
@@ -121,7 +157,7 @@ SIZE MediaPanelWindow::SizeForDpi(UINT dpi) const
         return SIZE{Scale(kPadding96 + kIcon96 + kGap96 + kArrow96 + kPadding96, dpi), height};
     }
     const std::wstring_view text = protected_ ? kProtectedText : kDownloadText;
-    const UniqueFont measuring = dpi == dpi_ ? UniqueFont() : CreateMessageFont(dpi);
+    const UniqueFont measuring = dpi == dpi_ ? UniqueFont() : CreateLabelFont(dpi);
     const int textWidth = TextWidth(measuring ? measuring.get() : font_.get(), text);
     // A few pixels of slack: the parts are scaled one by one when drawn, and their rounding must
     // never cut the text short.
@@ -162,6 +198,7 @@ void MediaPanelWindow::Hide()
     }
     visible_ = false;
     hot_ = Part::None;
+    pressed_ = Part::None;
 }
 
 void MediaPanelWindow::SetContent(bool protectedVideo)
@@ -171,6 +208,8 @@ void MediaPanelWindow::SetContent(bool protectedVideo)
     }
     protected_ = protectedVideo;
     if (window_ != nullptr) {
+        const COLORREF border = protected_ ? kSlateBorder : kBlueBorder;
+        ::DwmSetWindowAttribute(window_, DWMWA_BORDER_COLOR, &border, sizeof(border));
         ::InvalidateRect(window_, nullptr, FALSE);
     }
 }
@@ -253,6 +292,14 @@ void MediaPanelWindow::SetHot(Part part)
     }
 }
 
+void MediaPanelWindow::SetPressed(Part part)
+{
+    if (pressed_ != part) {
+        pressed_ = part;
+        ::InvalidateRect(window_, nullptr, FALSE);
+    }
+}
+
 LRESULT CALLBACK MediaPanelWindow::WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam)
 {
     if (message == WM_NCCREATE) {
@@ -286,18 +333,49 @@ LRESULT MediaPanelWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lPar
         tracking_ = false;
         SetHot(Part::None);
         return 0;
+    case WM_LBUTTONDOWN:
+        // Captured, so a release outside the panel is seen too (and does nothing).
+        SetPressed(HitTest(POINT{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)}));
+        ::SetCapture(window_);
+        return 0;
+    case WM_CAPTURECHANGED:
+        SetPressed(Part::None);
+        return 0;
     case WM_LBUTTONUP: {
+        const Part pressed = pressed_;
+        // Released before acting: the menu runs its own loop and needs the mouse.
+        ::ReleaseCapture();
+        SetPressed(Part::None);
         const Part part = HitTest(POINT{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)});
+        if (part != pressed) {
+            return 0;
+        }
         if (part == Part::Main && callbacks_.openMenu) {
             RECT rect{};
             ::GetWindowRect(window_, &rect);
-            callbacks_.openMenu(POINT{rect.left, rect.bottom});
+            callbacks_.openMenu(POINT{rect.left, rect.bottom + Scale(2, dpi_)});
         } else if (part == Part::Small) {
             SetMini(true);
         } else if (part == Part::Close && callbacks_.close) {
             callbacks_.close();
         }
         return 0;
+    }
+    case WM_MEASUREITEM: {
+        auto* measure = reinterpret_cast<MEASUREITEMSTRUCT*>(lParam);  // the message's documented type
+        if (menuPainter_ != nullptr && measure->CtlType == ODT_MENU) {
+            menuPainter_->Measure(*measure);
+            return TRUE;
+        }
+        return ::DefWindowProcW(window_, message, wParam, lParam);
+    }
+    case WM_DRAWITEM: {
+        const auto* draw = reinterpret_cast<const DRAWITEMSTRUCT*>(lParam);  // the message's documented type
+        if (menuPainter_ != nullptr && draw->CtlType == ODT_MENU) {
+            menuPainter_->Draw(*draw);
+            return TRUE;
+        }
+        return ::DefWindowProcW(window_, message, wParam, lParam);
     }
     case WM_TIMER:
         if (wParam == kTimerId && callbacks_.tick) {
@@ -317,60 +395,71 @@ LRESULT MediaPanelWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lPar
 void MediaPanelWindow::Paint()
 {
     PAINTSTRUCT paint{};
-    const HDC dc = ::BeginPaint(window_, &paint);
+    const HDC windowDc = ::BeginPaint(window_, &paint);
     RECT client{};
     ::GetClientRect(window_, &client);
-    const Palette& colors = theme_->Colors();
-    UniqueBrush background(::CreateSolidBrush(colors.panel));
-    UniqueBrush hot(::CreateSolidBrush(colors.hot));
-    UniqueBrush border(::CreateSolidBrush(colors.accent));
-    ::FillRect(dc, &client, background.get());
-    if (hot_ != Part::None) {
-        const RECT hotRect = PartRect(hot_);
-        ::FillRect(dc, &hotRect, hot.get());
-    }
-    ::FrameRect(dc, &client, border.get());
-
-    const int padding = Scale(kPadding96, dpi_);
-    const int iconSize = Scale(kIcon96, dpi_);
-    const int gap = Scale(kGap96, dpi_);
-    const int arrow = Scale(kArrow96, dpi_);
-    const int middle = (client.top + client.bottom) / 2;
-    ::DrawIconEx(dc, padding, middle - iconSize / 2, icon_.get(), iconSize, iconSize, 0, nullptr, DI_NORMAL);
-
-    const RECT main = PartRect(Part::Main);
-    int x = padding + iconSize + gap;
-    if (!mini_) {
-        const SelectObjectScope font(dc, font_.get());
-        ::SetBkMode(dc, TRANSPARENT);
-        ::SetTextColor(dc, colors.text);
-        const std::wstring_view text = protected_ ? kProtectedText : kDownloadText;
-        RECT textRect{x, client.top, main.right - padding - arrow - gap, client.bottom};
-        ::DrawTextW(dc, text.data(), static_cast<int>(text.size()), &textRect,
-                    DT_SINGLELINE | DT_VCENTER | DT_LEFT | DT_NOPREFIX | DT_END_ELLIPSIS);
-        x = main.right - padding - arrow;
-    }
-
-    // The menu arrow: a small filled triangle pointing down.
-    UniqueBrush ink(::CreateSolidBrush(colors.text));
-    UniquePen pen(::CreatePen(PS_SOLID, std::max(1, Scale(1, dpi_)), colors.text));
-    {
-        const SelectObjectScope selectBrush(dc, ink.get());
-        const SelectObjectScope selectPen(dc, pen.get());
-        const int half = arrow / 2;
-        const POINT triangle[3] = {{x, middle - half / 2}, {x + arrow, middle - half / 2}, {x + half, middle + half / 2 + 1}};
-        ::Polygon(dc, triangle, 3);
-        if (!mini_) {
-            const RECT shrink = PartRect(Part::Small);
-            const RECT close = PartRect(Part::Close);
-            const int mark = Scale(4, dpi_);
-            const int shrinkMiddle = (shrink.left + shrink.right) / 2;
-            DrawLine(dc, shrinkMiddle - mark, middle, shrinkMiddle + mark + 1, middle);
-            const int closeMiddle = (close.left + close.right) / 2;
-            DrawLine(dc, closeMiddle - mark, middle - mark, closeMiddle + mark + 1, middle + mark + 1);
-            DrawLine(dc, closeMiddle + mark, middle - mark, closeMiddle - mark - 1, middle + mark + 1);
+    // Drawn off screen first, so hovering never shows a half-painted panel.
+    const HDC dc = ::CreateCompatibleDC(windowDc);
+    UniqueBitmap bitmap(::CreateCompatibleBitmap(windowDc, client.right, client.bottom));
+    if (dc == nullptr || !bitmap) {
+        if (dc != nullptr) {
+            ::DeleteDC(dc);
         }
+        ::EndPaint(window_, &paint);
+        return;
     }
+    {
+        const SelectObjectScope selectBitmap(dc, bitmap.get());
+        const COLORREF base = protected_ ? kSlate : kBlue;
+        UniqueBrush background(::CreateSolidBrush(base));
+        ::FillRect(dc, &client, background.get());
+        for (const Part part : {Part::Main, Part::Small, Part::Close}) {
+            if (part != hot_ && part != pressed_) {
+                continue;
+            }
+            // Pressed darkens; under the mouse lightens. The rounded window corners clip both.
+            const COLORREF fill = part == pressed_ ? Blend(base, RGB(0, 0, 0), 18) : Blend(base, kInk, 14);
+            UniqueBrush brush(::CreateSolidBrush(fill));
+            const RECT rect = PartRect(part);
+            ::FillRect(dc, &rect, brush.get());
+        }
+
+        const int padding = Scale(kPadding96, dpi_);
+        const int iconSize = Scale(kIcon96, dpi_);
+        const int gap = Scale(kGap96, dpi_);
+        const int arrow = Scale(kArrow96, dpi_);
+        ::SetBkMode(dc, TRANSPARENT);
+        ::SetTextColor(dc, kInk);
+        DrawGlyph(dc, glyphs_.get(), protected_ ? kLockGlyph : kDownloadGlyph,
+                  RECT{padding, client.top, padding + iconSize, client.bottom});
+
+        const RECT main = PartRect(Part::Main);
+        int x = padding + iconSize + gap;
+        if (!mini_) {
+            const SelectObjectScope font(dc, font_.get());
+            const std::wstring_view text = protected_ ? kProtectedText : kDownloadText;
+            RECT textRect{x, client.top, main.right - padding - arrow - gap, client.bottom};
+            ::DrawTextW(dc, text.data(), static_cast<int>(text.size()), &textRect,
+                        DT_SINGLELINE | DT_VCENTER | DT_LEFT | DT_NOPREFIX | DT_END_ELLIPSIS);
+            x = main.right - padding - arrow;
+        }
+        DrawGlyph(dc, smallGlyphs_.get(), kChevronDownGlyph, RECT{x, client.top, x + arrow, client.bottom});
+
+        if (!mini_) {
+            // A faint line between the button and the two small ones, unless one of them is lit.
+            if (hot_ == Part::None && pressed_ == Part::None) {
+                const int inset = Scale(kDividerInset96, dpi_);
+                const RECT rule{main.right, client.top + inset, main.right + std::max(1, Scale(1, dpi_)),
+                                client.bottom - inset};
+                UniqueBrush line(::CreateSolidBrush(Blend(base, kInk, 35)));
+                ::FillRect(dc, &rule, line.get());
+            }
+            DrawGlyph(dc, smallGlyphs_.get(), kMinimizeGlyph, PartRect(Part::Small));
+            DrawGlyph(dc, smallGlyphs_.get(), kCloseGlyph, PartRect(Part::Close));
+        }
+        ::BitBlt(windowDc, 0, 0, client.right, client.bottom, dc, 0, 0, SRCCOPY);
+    }
+    ::DeleteDC(dc);
     ::EndPaint(window_, &paint);
 }
 

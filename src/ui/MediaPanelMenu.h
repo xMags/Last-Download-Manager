@@ -25,9 +25,26 @@ struct PanelAction {
     size_t entry = 0;
 };
 
+// The small picture at the start of a menu line.
+enum class PanelGlyph {
+    None,
+    Download,
+    Video,
+    Audio,
+    Subtitles,
+    Smaller,
+    Bigger,
+    Hide,
+    Info,
+    Lock,
+};
+
 // One line of the menu: a command, a disabled notice, a separator or a submenu.
 struct PanelMenuItem {
     std::wstring text;  // a tab separates the size, which menus show on the right
+    PanelGlyph glyph = PanelGlyph::None;
+    std::wstring badge;          // a short mark after the text, such as "4K" or "HD"
+    bool quietDetail = false;    // the words after the first one are details, drawn quieter
     bool enabled = true;
     bool separator = false;
     std::optional<PanelAction> action;

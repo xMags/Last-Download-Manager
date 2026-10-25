@@ -53,4 +53,7 @@ struct GradientIcon {
 // A single glyph as an icon, for windows and tray entries that need an HICON.
 [[nodiscard]] UniqueIcon CreateGlyphIcon(const Glyph& glyph, int sizePx);
 
+// The icon font itself, glyphs `sizePx` high, for drawing glyphs as text in any color.
+[[nodiscard]] UniqueFont CreateIconFont(int sizePx);
+
 }  // namespace ldm::ui

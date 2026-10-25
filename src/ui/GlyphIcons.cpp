@@ -394,4 +394,14 @@ UniqueIcon CreateGlyphIcon(const Glyph& glyph, int sizePx)
     return UniqueIcon(::CreateIconIndirect(&info));
 }
 
+UniqueFont CreateIconFont(int sizePx)
+{
+    LOGFONTW logFont{};
+    logFont.lfHeight = -sizePx;
+    logFont.lfQuality = CLEARTYPE_QUALITY;
+    logFont.lfCharSet = DEFAULT_CHARSET;
+    wcsncpy_s(logFont.lfFaceName, IconFontFace(), _TRUNCATE);
+    return UniqueFont(::CreateFontIndirectW(&logFont));
+}
+
 }  // namespace ldm::ui

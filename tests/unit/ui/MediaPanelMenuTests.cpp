@@ -123,6 +123,29 @@ TEST(MediaPanelMenu, StreamSubmenusSayWhenTheyAreProtectedOrLive)
     EXPECT_FALSE(menu[2].children[0].enabled);
 }
 
+TEST(MediaPanelMenu, LinesCarryTheirIconAndQualityBadge)
+{
+    MediaItem stream = Stream(7);
+    stream.qualities.entries.front().height = 2160;
+    ldm::media::QualityEntry small = stream.qualities.entries.front();
+    small.height = 480;
+    stream.qualities.entries.insert(stream.qualities.entries.begin() + 1, small);
+    const auto menu = BuildPanelMenu({&stream}, false);
+    ASSERT_GE(menu.size(), 2u);
+    EXPECT_EQ(menu[0].badge, L"4K");
+    EXPECT_TRUE(menu[0].quietDetail) << "the codec after the picture size is a detail";
+    EXPECT_EQ(menu[0].glyph, ldm::ui::PanelGlyph::Download);
+    EXPECT_EQ(menu[1].badge, L"") << "no mark below 720p";
+    EXPECT_EQ(Named(menu, L"Video only")->glyph, ldm::ui::PanelGlyph::Video);
+    EXPECT_EQ(Named(menu, L"Video only")->children[0].badge, L"") << "only the lines with sound get marks";
+    EXPECT_EQ(Named(menu, L"Audio only")->glyph, ldm::ui::PanelGlyph::Audio);
+    EXPECT_EQ(Named(menu, L"Hide the panel for this page")->glyph, ldm::ui::PanelGlyph::Hide);
+
+    stream.qualities.entries.clear();
+    stream.qualities.drm = ldm::media::DrmInfo{{"Widevine"}};
+    EXPECT_EQ(BuildPanelMenu({&stream}, false)[0].glyph, ldm::ui::PanelGlyph::Lock);
+}
+
 TEST(MediaPanelMenu, AProtectedStreamIsANoticeOnly)
 {
     MediaItem stream = Stream(4);
