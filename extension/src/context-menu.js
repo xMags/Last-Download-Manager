@@ -7,6 +7,8 @@ export const MenuId = Object.freeze({
   Page: 'ldm-page',            // the page itself, e.g. a file the browser shows
   Selected: 'ldm-selected',
   All: 'ldm-all',
+  VideoPage: 'ldm-video-page',  // the video on the page, found by LDM's site resolver
+  VideoLink: 'ldm-video-link',  // the video on the page a link leads to
 });
 
 const WEB_PAGES = ['http://*/*', 'https://*/*'];
@@ -14,8 +16,9 @@ const WEB_PAGES = ['http://*/*', 'https://*/*'];
 /**
  * The menu items to create, as contextMenus.create options. Nothing is added to links in Chrome's
  * downloads page: current Chrome shows no link for a running download there, and a finished one
- * links to the file on disk.
- * @param {{downloadLink: boolean, downloadAll: boolean}} menu
+ * links to the file on disk. The video items appear while LDM takes site requests (site videos
+ * on, in an LDM that sends its list of sites).
+ * @param {{downloadLink: boolean, downloadAll: boolean, videos?: boolean}} menu
  */
 export function menuItems(menu) {
   const items = [];
@@ -32,7 +35,23 @@ export function menuItems(menu) {
     items.push({ id: MenuId.All, title: 'Download all links with LDM', contexts: ['page', 'frame'],
       documentUrlPatterns: [...WEB_PAGES, 'file:///*'] });
   }
+  if (menu.videos) {
+    items.push(
+      { id: MenuId.VideoPage, title: 'Download video with LDM', contexts: ['page', 'frame', 'video'],
+        documentUrlPatterns: WEB_PAGES },
+      { id: MenuId.VideoLink, title: 'Download video from this link with LDM', contexts: ['link'],
+        documentUrlPatterns: WEB_PAGES, targetUrlPatterns: WEB_PAGES },
+    );
+  }
   return items;
+}
+
+/** The page a "Download video" click is about: the link's target, or the page (frame) itself. */
+export function clickedVideoPage(info) {
+  if (info.menuItemId === MenuId.VideoLink) {
+    return info.linkUrl;
+  }
+  return info.frameUrl || info.pageUrl;
 }
 
 /** The address a "Download with LDM" click is about, from contextMenus.onClicked's info. */

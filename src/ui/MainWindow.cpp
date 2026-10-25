@@ -113,6 +113,7 @@ MainWindow::MainWindow(const Services& services) : services_(services)
                 mediaPanel_->OnSitePage(connection, std::move(page));
             }
         };
+        handlers.onSiteRequest = [this](browser::SiteRequest request) { QueueExternalInput(std::move(request)); };
         handlers.onVideoPosition = [this](BrowserConnectionId connection, browser::VideoPosition position) {
             if (mediaPanel_) {
                 mediaPanel_->OnVideoPosition(connection, position);
@@ -474,6 +475,8 @@ void MainWindow::DrainExternalInput()
             controller_->AskAboutUpdatesOnce();
         } else if (auto* stream = std::get_if<StreamCapture>(&*next)) {
             controller_->OnStreamCapture(std::move(*stream));
+        } else if (auto* site = std::get_if<browser::SiteRequest>(&*next)) {
+            controller_->OnSiteRequest(std::move(*site));
         } else {
             controller_->OnDroppedUrls(std::move(std::get<std::vector<std::string>>(*next)));
         }

@@ -8,8 +8,8 @@
 
 namespace ldm::ui {
 
-AddUrlDialog::AddUrlDialog(const Theme& theme, std::vector<std::string> history, std::string initialUrl)
-    : Dialog(IDD_ADD_URL, theme), history_(std::move(history)), initialUrl_(std::move(initialUrl))
+AddUrlDialog::AddUrlDialog(const Theme& theme, std::vector<std::string> history, std::string initialUrl, bool siteVideos)
+    : Dialog(IDD_ADD_URL, theme), history_(std::move(history)), initialUrl_(std::move(initialUrl)), siteVideos_(siteVideos)
 {
 }
 
@@ -28,6 +28,7 @@ bool AddUrlDialog::OnInit()
     SetText(IDC_ADD_URL, base::ToUtf16(initialUrl_));
     ComboBox_SetEditSel(combo, 0, -1);
     UpdateAuthControls();
+    Show(IDC_ADD_VIDEO, siteVideos_);
     ::SetFocus(combo);
     return false;  // focus set explicitly
 }
@@ -46,8 +47,16 @@ bool AddUrlDialog::OnCommand(int id, int code, HWND control)
         UpdateAuthControls();
         return true;
     }
-    if (id == IDOK) {
+    if (id == IDOK || (id == IDC_ADD_VIDEO && code == BN_CLICKED)) {
         const std::string url = base::ToUtf8(Text(IDC_ADD_URL));
+        if (id == IDC_ADD_VIDEO) {
+            const auto parsed = core::ParseUrl(url);
+            if (!parsed || (parsed->scheme != "http" && parsed->scheme != "https")) {
+                Warn(L"Enter the address of a web page, which starts with http:// or https://.");
+                ::SetFocus(Item(IDC_ADD_URL));
+                return true;
+            }
+        }
         if (!core::ParseUrl(url)) {
             Warn(L"Enter a valid address that starts with http://, https://, ftp:// or ftps://.");
             ::SetFocus(Item(IDC_ADD_URL));
@@ -55,6 +64,7 @@ bool AddUrlDialog::OnCommand(int id, int code, HWND control)
         }
         AddUrlInput input;
         input.url = url;
+        input.findVideo = id == IDC_ADD_VIDEO;
         if (Checked(IDC_ADD_AUTH)) {
             const std::string user = base::ToUtf8(Text(IDC_ADD_USER));
             if (!user.empty()) {

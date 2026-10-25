@@ -506,6 +506,35 @@ std::optional<Cookies> ParseCookiesAnswer(const nlohmann::json& object)
     return answer;
 }
 
+std::optional<SiteRequest> ParseSiteRequest(const nlohmann::json& object)
+{
+    const auto url = object.find("url");
+    const auto incognito = Boolean(object, "incognito");
+    if (!incognito || url == object.end() || !url->is_string() || !IsWebAddress(url->get_ref<const std::string&>())) {
+        return std::nullopt;
+    }
+    SiteRequest request;
+    request.url = url->get<std::string>();
+    request.incognito = *incognito;
+    if (!OptionalField(object, "referrer", IsWebAddress, request.referrer)) {
+        return std::nullopt;
+    }
+    std::optional<std::string> title;
+    const auto plainTitle = [](const std::string& text) {
+        return !text.empty() && text.size() <= kMaxPageTitle && HasNoControlCharacters(text);
+    };
+    if (!OptionalField(object, "pageTitle", plainTitle, title)) {
+        return std::nullopt;
+    }
+    request.pageTitle = title.value_or(std::string());
+    auto userAgent = Text(object, "userAgent", kMaxUserAgent);
+    if (!userAgent || userAgent->empty()) {
+        return std::nullopt;
+    }
+    request.userAgent = std::move(*userAgent);
+    return request;
+}
+
 std::optional<SitePage> ParseSitePage(const nlohmann::json& object)
 {
     const auto tabId = BrowserId(object, "tabId");
@@ -656,6 +685,10 @@ std::optional<ParsedMessage> ParseMessage(std::string_view json)
     } else if (type == "site-page") {
         if (auto page = ParseSitePage(message)) {
             return ParsedMessage{std::move(id), std::move(*page)};
+        }
+    } else if (type == "site-request") {
+        if (auto request = ParseSiteRequest(message)) {
+            return ParsedMessage{std::move(id), std::move(*request)};
         }
     } else if (type == "media-reset") {
         if (const auto reset = ParseMediaReset(message)) {

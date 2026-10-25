@@ -6,6 +6,7 @@
 #include "media/M3uList.h"
 #include "model/Cookie.h"
 #include "ui/BrowserLink.h"
+#include "ui/StreamChoice.h"
 #include "ui/Theme.h"
 
 #include <windows.h>
@@ -23,6 +24,7 @@ namespace ldm::ui {
 
 class AllLinksDialog;
 class DownloadInfoDialog;
+class SiteVideoDialog;
 
 // What the browser sent along with a captured download.
 struct BrowserRequest {
@@ -80,6 +82,14 @@ public:
 
     void AddUrl(std::string initialUrl);
     void AddAddress(const ExternalAdd& add);
+    // A stream picked in the media panel or the Download video dialog: the Download File Info
+    // dialog for it, as for a captured download the user chose.
+    void AddStream(StreamCapture capture);
+    // The video of a page the user named (video-sites round 2, section 2.2): the Download video
+    // dialog, then AddStream with the chosen quality. Says so when site videos are off.
+    void AddSiteVideo(browser::SiteRequest request);
+    // The site resolver's answer for the open Download video dialog; false when it is not its.
+    bool OnSiteLookedUp(const core::SiteLookupFinished& finished);
     // Adds every entry stopped, without questions: duplicates get numbered names (checklist A-11).
     void AddImported(const std::vector<ImportedEntry>& entries);
     void AddBatch();
@@ -178,6 +188,10 @@ private:
     // The open Download All Links dialog and the connection that feeds it.
     BrowserConnectionId linksConnection_ = 0;
     AllLinksDialog* linksDialog_ = nullptr;
+    // The open Download video dialog. Its lookups have ids far above the media panel's, which
+    // count from 1, so an answer is never taken for the other's.
+    SiteVideoDialog* siteDialog_ = nullptr;
+    std::int64_t nextSiteLookupId_ = 1'000'000'000'000;
 };
 
 }  // namespace ldm::ui

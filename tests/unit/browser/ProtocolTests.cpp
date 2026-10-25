@@ -390,6 +390,34 @@ TEST(BrowserProtocol, ParsesSitePages)
     EXPECT_FALSE(ldm::browser::ParseMessage(with("Bunny - YouTube", "Bunny\n")));
 }
 
+TEST(BrowserProtocol, ParsesSiteRequests)
+{
+    const std::string json = R"({"v":1,"id":"r1","type":"site-request","url":"https://www.dailymotion.com/video/x5kesuj",)"
+                             R"("referrer":"https://news.example.test/","incognito":true,"pageTitle":"A page",)"
+                             R"("userAgent":"Mozilla/5.0"})";
+    const auto parsed = ldm::browser::ParseMessage(json);
+    ASSERT_TRUE(parsed);
+    const auto* request = std::get_if<ldm::browser::SiteRequest>(&parsed->message);
+    ASSERT_NE(request, nullptr);
+    EXPECT_EQ(request->url, "https://www.dailymotion.com/video/x5kesuj");
+    EXPECT_EQ(request->referrer, "https://news.example.test/");
+    EXPECT_TRUE(request->incognito);
+    EXPECT_EQ(request->pageTitle, "A page");
+    EXPECT_EQ(request->userAgent, "Mozilla/5.0");
+
+    const auto with = [&json](const std::string& from, const std::string& to) {
+        std::string changed = json;
+        changed.replace(changed.find(from), from.size(), to);
+        return changed;
+    };
+    EXPECT_TRUE(ldm::browser::ParseMessage(with(R"("referrer":"https://news.example.test/",)", "")));
+    EXPECT_FALSE(ldm::browser::ParseMessage(with("https://www.dailymotion.com/video/x5kesuj", "file:///C:/x")));
+    EXPECT_FALSE(ldm::browser::ParseMessage(with("https://news.example.test/", "javascript:void")));
+    EXPECT_FALSE(ldm::browser::ParseMessage(with(R"("incognito":true,)", "")));
+    EXPECT_FALSE(ldm::browser::ParseMessage(with(R"(,"userAgent":"Mozilla/5.0")", "")));
+    EXPECT_FALSE(ldm::browser::ParseMessage(with("A page", "A\npage")));
+}
+
 TEST(BrowserHostManifest, ChromiumManifestAllowsOnlyLdmExtension)
 {
     const auto json = nlohmann::json::parse(

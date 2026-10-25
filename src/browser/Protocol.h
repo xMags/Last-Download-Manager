@@ -183,8 +183,19 @@ struct SitePage {
     std::string userAgent;
 };
 
+// The user asked for the video of a page (the right-click menu's "Download video", or an address
+// in Add URL): LDM asks its site resolver about `url` and lets the user pick a quality. The
+// extension sends it only to an LDM that sent a list of sites (Config::siteHosts).
+struct SiteRequest {
+    std::string url;                      // http or https: the page, or where a link leads
+    std::optional<std::string> referrer;  // the page the link was on
+    bool incognito = false;
+    std::string pageTitle;
+    std::string userAgent;  // the browser's; empty for Add URL, which uses LDM's own
+};
+
 using Message = std::variant<HostInfo, Hello, Capture, Links, LinkInfo, MediaFound, MediaReset, VideoPosition, Cookies,
-                             SitePage>;
+                             SitePage, SiteRequest>;
 
 struct ParsedMessage {
     std::string id;  // echoed in answers

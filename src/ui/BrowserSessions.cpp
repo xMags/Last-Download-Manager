@@ -139,6 +139,11 @@ void BrowserSessions::OnEvent(BrowserEvent event, const model::Settings& setting
         if (handlers_.onSitePage && settings.siteVideosEnabled) {
             handlers_.onSitePage(event.connection, std::move(*page));
         }
+    } else if (auto* request = std::get_if<browser::SiteRequest>(&parsed.message)) {
+        // The menu item shows only while site videos are on; one clicked just before is dropped.
+        if (handlers_.onSiteRequest && settings.siteVideosEnabled) {
+            handlers_.onSiteRequest(std::move(*request));
+        }
     } else if (const auto* position = std::get_if<browser::VideoPosition>(&parsed.message)) {
         if (handlers_.onVideoPosition) {
             handlers_.onVideoPosition(event.connection, *position);

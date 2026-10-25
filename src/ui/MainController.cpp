@@ -389,14 +389,12 @@ void MainController::OnBrowserCapture(browser::Capture capture)
 
 void MainController::OnStreamCapture(StreamCapture capture)
 {
-    ExternalAdd add;
-    add.url = std::move(capture.manifestUrl);
-    add.fileName = std::move(capture.fileName);
-    // Picked by the user: cancelling it says nothing about the capture rules.
-    add.browser = BrowserRequest{std::move(capture.pageUrl), std::move(capture.userAgent), std::move(capture.cookies),
-                                 std::nullopt, std::nullopt, true};
-    add.media = std::move(capture.media);
-    adds_.AddAddress(add);
+    adds_.AddStream(std::move(capture));
+}
+
+void MainController::OnSiteRequest(browser::SiteRequest request)
+{
+    adds_.AddSiteVideo(std::move(request));
 }
 
 void MainController::WarnElevated()
@@ -523,6 +521,8 @@ void MainController::OnNotifications(std::vector<core::Notification> notificatio
     for (const core::Notification& notification : notifications) {
         if (const auto* added = std::get_if<core::AddResult>(&notification)) {
             adds_.OnAddResult(*added);
+        } else if (const auto* looked = std::get_if<core::SiteLookupFinished>(&notification)) {
+            (void)adds_.OnSiteLookedUp(*looked);  // the media panel took its own before
         } else if (const auto* completed = std::get_if<core::DownloadCompleted>(&notification)) {
             transfers_.OnCompleted(*completed);
             playlists_.OnCompleted(*completed);

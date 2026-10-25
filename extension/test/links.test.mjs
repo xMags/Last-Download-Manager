@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { clickedAddress, menuItems, MenuId } from '../src/context-menu.js';
+import { clickedAddress, clickedVideoPage, menuItems, MenuId } from '../src/context-menu.js';
+import { makeSiteRequest } from '../src/protocol.js';
 import { detailsFromHeaders, fileNameFromDisposition, LinkChecker } from '../src/link-check.js';
 import {
   cleanPageText, isLinksDone, linksAccepted, makeLinkInfo, makeLinks, MAX_PAGE_LINKS, parseConfig, utf8Length,
@@ -95,6 +96,30 @@ test('menu items follow the settings', () => {
   assert.deepEqual(ids({ downloadLink: true, downloadAll: false }), [MenuId.Link, MenuId.Page, MenuId.Selected]);
   const all = menuItems({ downloadLink: true, downloadAll: true });
   assert.ok(all.every((item) => item.title.endsWith('with LDM')));
+});
+
+test('the video items appear only when LDM takes site requests', () => {
+  const ids = (menu) => menuItems(menu).map((item) => item.id);
+  assert.deepEqual(ids({ downloadLink: false, downloadAll: false, videos: true }), [MenuId.VideoPage, MenuId.VideoLink]);
+  assert.deepEqual(ids({ downloadLink: false, downloadAll: false, videos: false }), []);
+  const [page, link] = menuItems({ downloadLink: false, downloadAll: false, videos: true });
+  assert.deepEqual(page.contexts, ['page', 'frame', 'video']);
+  assert.deepEqual(link.contexts, ['link']);
+  assert.equal(clickedVideoPage({ menuItemId: MenuId.VideoLink, linkUrl: 'https://v.test/1', pageUrl: 'https://a.test/' }),
+    'https://v.test/1');
+  assert.equal(clickedVideoPage({ menuItemId: MenuId.VideoPage, pageUrl: 'https://a.test/', frameUrl: 'https://p.test/e' }),
+    'https://p.test/e');
+});
+
+test('a site request carries only web addresses', () => {
+  const request = makeSiteRequest({ url: 'https://v.test/1', referrer: 'https://a.test/', pageTitle: 'T', userAgent: 'UA/1' });
+  assert.equal(request.type, 'site-request');
+  assert.equal(request.url, 'https://v.test/1');
+  assert.equal(request.referrer, 'https://a.test/');
+  assert.equal(request.incognito, false);
+  assert.equal(makeSiteRequest({ url: 'https://v.test/1', referrer: 'blob:https://a.test/x' }).referrer, undefined);
+  assert.equal(makeSiteRequest({ url: 'file:///C:/x' }), null);
+  assert.equal(makeSiteRequest({ url: undefined }), null);
 });
 
 test('a menu click is about the link, else the picture, else the page', () => {

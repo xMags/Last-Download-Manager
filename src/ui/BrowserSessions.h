@@ -43,6 +43,7 @@ public:
         std::function<void(BrowserConnectionId, browser::MediaFound)> onMedia;
         std::function<void(BrowserConnectionId, int tabId)> onMediaReset;
         std::function<void(BrowserConnectionId, browser::SitePage)> onSitePage;
+        std::function<void(browser::SiteRequest)> onSiteRequest;
         std::function<void(BrowserConnectionId, browser::VideoPosition)> onVideoPosition;
     };
 
