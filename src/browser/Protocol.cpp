@@ -743,6 +743,13 @@ std::string EncodeHostInfo(const HostInfo& info)
     return message.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
 }
 
+std::string EncodeHostError(std::string_view reason)
+{
+    nlohmann::json message = Envelope("host", "host-error");
+    message["reason"] = reason;
+    return message.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
+}
+
 std::string EncodeConfig(const Config& config, std::string_view replyTo)
 {
     nlohmann::json message = Envelope(replyTo, "config");

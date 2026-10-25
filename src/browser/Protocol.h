@@ -221,6 +221,11 @@ struct ParsedMessage {
 
 [[nodiscard]] std::string EncodeHostInfo(const HostInfo& info);
 
+// For ldm-host.exe: the one message it sends the extension when it cannot reach LDM for a reason
+// other than LDM not running. "ldm-elevated": LDM runs as administrator, and the browser's
+// helper may not connect to it.
+[[nodiscard]] std::string EncodeHostError(std::string_view reason);
+
 // Capture rules LDM pushes to the extension; the extension decides locally from them (M3 design
 // decision 2). Grows with each capture feature.
 // The media panel's rules (checklists B-07, B-09); the extension reports only what passes them.

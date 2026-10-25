@@ -8,12 +8,14 @@ import { HOST_NAME, makeHello, parseConfig } from './protocol.js';
  * - connected: LDM answered with its rules
  * - not-running: the host started but LDM is not running (or exited)
  * - error: the browser cannot start the host at all (LDM never ran, or it was moved or removed)
+ * - elevated: LDM runs as administrator, so the host may not connect to it
  */
 export const State = Object.freeze({
   Connecting: 'connecting',
   Connected: 'connected',
   NotRunning: 'not-running',
   Error: 'error',
+  Elevated: 'elevated',
 });
 
 /** Chrome, Edge and Firefox wordings for "this host is not registered or not allowed". */
@@ -220,7 +222,12 @@ export class LdmConnection {
         return;
       }
       this.port = port;
+      let hostError = null;  // what the host said before it disconnected
       port.onMessage.addListener((message) => {
+        if (message?.type === 'host-error') {
+          hostError = message.reason === 'ldm-elevated' ? State.Elevated : null;
+          return;
+        }
         const config = parseConfig(message);
         if (config) {
           this.setState(State.Connected);
@@ -239,7 +246,7 @@ export class LdmConnection {
       port.onDisconnect.addListener((disconnected) => {
         // Chrome reports through runtime.lastError, Firefox through port.error.
         const text = this.api.runtime.lastError?.message ?? disconnected?.error?.message ?? '';
-        this.closed(classifyDisconnect(text));
+        this.closed(hostError ?? classifyDisconnect(text));
         resolve(false);
       });
       port.postMessage(makeHello(helloFields));

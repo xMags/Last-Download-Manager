@@ -73,8 +73,11 @@ bool StartLdm()
     return true;
 }
 
-ldm::platform::OwnedHandle ConnectToLdm(bool startIfMissing)
+// `refusedError` is the Windows error of a connection LDM's pipe refused, such as access denied
+// when LDM runs elevated; 0 when LDM was simply not there.
+ldm::platform::OwnedHandle ConnectToLdm(bool startIfMissing, DWORD& refusedError)
 {
+    refusedError = 0;
     const std::wstring name = ldm::platform::BrowserPipeName();
     bool started = false;
     const ULONGLONG deadline = ::GetTickCount64() + kStartupWaitMs;
@@ -96,7 +99,8 @@ ldm::platform::OwnedHandle ConnectToLdm(bool startIfMissing)
                 return {};
             }
         } else if (error != ERROR_FILE_NOT_FOUND && error != ERROR_PIPE_BUSY) {
-            return {};  // for example, access denied when LDM runs elevated
+            refusedError = error;  // for example, access denied when LDM runs elevated
+            return {};
         }
         if (::GetTickCount64() >= deadline) {
             return {};
@@ -227,7 +231,13 @@ int WINAPI wWinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int)
     if (!ldm::browser::IsValidEnvelope(*first)) {
         return static_cast<int>(ExitCode::ProtocolError);
     }
-    const ldm::platform::OwnedHandle pipe = ConnectToLdm(ldm::browser::HelloAsksToStartLdm(*first));
+    DWORD refusedError = 0;
+    const ldm::platform::OwnedHandle pipe = ConnectToLdm(ldm::browser::HelloAsksToStartLdm(*first), refusedError);
+    if (!pipe.Valid() && refusedError == ERROR_ACCESS_DENIED) {
+        // A disconnect alone would read as "LDM is not running"; the extension says what is wrong.
+        (void)WriteNativeMessage(output, ldm::browser::EncodeHostError("ldm-elevated"));
+        return static_cast<int>(ExitCode::NoLdm);
+    }
     if (!pipe.Valid() ||
         !ldm::platform::WriteFrame(pipe.Get(), ldm::browser::EncodeHostInfo(*host), ldm::browser::kMaxInboundBytes, nullptr) ||
         !ldm::platform::WriteFrame(pipe.Get(), *first, ldm::browser::kMaxInboundBytes, nullptr)) {

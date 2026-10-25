@@ -247,3 +247,14 @@ test('messages LDM sends unasked on the lasting connection reach onMessage', asy
   api.ports[0].receive({ v: 1, id: 'open-page', type: 'open-page', url: 'https://a.test/page' });
   assert.deepEqual(received, ['open-page']);
 });
+
+test('a host that says LDM runs as administrator leaves the elevated state, not not-running', async () => {
+  const api = fakeApi();
+  const { connection } = newConnection(api);
+  const ready = connection.connect();
+  await new Promise((resolve) => setImmediate(resolve));
+  api.ports[0].receive({ v: 1, id: 'host', type: 'host-error', reason: 'ldm-elevated' });
+  api.ports[0].disconnect(api, 'Native host has exited.');
+  assert.equal(await ready, false);
+  assert.equal(connection.state, State.Elevated);
+});
