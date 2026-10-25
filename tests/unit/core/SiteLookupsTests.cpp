@@ -201,7 +201,7 @@ TEST_F(SiteLookupsTest, ALookupWaitsForItsProxyAndOneDroppedMeanwhileIsNeverAske
 
 TEST_F(SiteLookupsTest, PagesThatAreNotVideosAndTooManyLookupsAreRefusedAtOnce)
 {
-    LookUp(1, "https://www.youtube.com/playlist?list=PL1");
+    LookUp(1, "http://localhost/video");  // never asked about
     ASSERT_EQ(observer_.answers.size(), 1u);
     EXPECT_EQ(observer_.answers[0].problem, Problem::Video);
     EXPECT_TRUE(resolver_.asked.empty());

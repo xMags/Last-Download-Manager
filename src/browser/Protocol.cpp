@@ -726,6 +726,7 @@ std::string EncodeConfig(const Config& config, std::string_view replyTo)
                         {"minimumBytes", config.media.minimumBytes},
                         {"siteExceptions", config.media.siteExceptions}};
     message["sitePages"] = config.sitePages;
+    message["siteHosts"] = config.siteHosts;
     return message.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
 }
 

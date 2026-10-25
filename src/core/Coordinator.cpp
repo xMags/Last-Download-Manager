@@ -1931,9 +1931,9 @@ std::optional<std::string> Coordinator::ValidateMedia(const MediaChoice& media, 
     }
     const auto clip = [](const std::string& text) { return text.substr(0, 200); };
     if (media.siteVideo) {
-        // The page must be one LDM builds itself, so a refresh asks the resolver about exactly it.
-        const auto page = FindSiteVideo(download.url);
-        if (!page || page->canonicalUrl != download.url) {
+        // The page must be as LDM checks it, so a refresh asks the resolver about exactly it.
+        const auto page = CheckSitePage(download.url);
+        if (!page || page->address != download.url) {
             return "A site video needs the address of its page.";
         }
     }

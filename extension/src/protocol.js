@@ -78,7 +78,21 @@ export function parseConfig(message) {
     media: mediaSettings(message.media),
     // Site videos are on in LDM, which then takes site-page messages; older versions say nothing.
     sitePages: message.sitePages === true,
+    // The sites whose pages LDM wants; LDM 5.1 sends no list and wants YouTube's.
+    siteHosts: hostList(message.siteHosts),
   };
+}
+
+const MAX_SITE_HOSTS = 64;
+const HOST_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/;
+
+/** Lower-case host names with at least one dot; anything else is dropped. Null without a list. */
+function hostList(value) {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+  return value.filter((entry) => typeof entry === 'string' && entry.length <= 253 && HOST_PATTERN.test(entry))
+    .slice(0, MAX_SITE_HOSTS);
 }
 
 /** The media panel's rules; an LDM that sends none gets no types, so nothing is reported. */

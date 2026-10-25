@@ -46,8 +46,8 @@ struct MediaItem {
     std::optional<double> seconds;           // the stream's length, when known
     media::QualityList qualities;            // what the panel lists for a stream
     std::string failure;                     // why it failed, for the log
-    // A video of a supported site (video-sites design): `url` is its page as core::FindSiteVideo
-    // builds it, and the offer is the site resolver's. Offered while it is looked up and when that
+    // A video of a supported site (video-sites design): `url` is its page as core::CheckSitePage
+    // gives it, and the offer is the site resolver's. Offered while it is looked up and when that
     // failed too, so the panel can say so; `failure` is then shown.
     bool siteVideo = false;
     std::string siteTitle;      // the video's own title, once known
@@ -63,7 +63,7 @@ struct TabMedia {
     bool incognito = false;
     std::string userAgent;
     std::vector<MediaItem> items;
-    // Set while the tab shows a video of a supported site: its page as core::FindSiteVideo builds
+    // Set while the tab shows a video of a listed site: its page as core::CheckSitePage gives
     // it. The tab's items are then that video alone; what its player loads is parts of it.
     std::optional<std::string> sitePage;
 };

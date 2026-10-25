@@ -125,7 +125,7 @@ struct Download {
     bool mediaFromPrivateNetwork = false;
     // A video of a supported site (a Dash stream of whole-file or piece-list tracks, or an Hls
     // stream of playlists): `url` is the video's page,
-    // as core::FindSiteVideo builds it, and the tracks' addresses come from asking the site
+    // as core::CheckSitePage gives it, and the tracks' addresses come from asking the site
     // resolver about that page. They expire, so they are asked for again when they do.
     bool siteVideo = false;
     std::vector<MediaTrack> tracks;  // a stream's tracks, in order; empty for a file

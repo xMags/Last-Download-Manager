@@ -30,19 +30,19 @@ void SiteLookups::LookUp(const LookUpSiteVideoCommand& command)
     if (command.lookupId <= 0) {
         return;  // no id to answer under
     }
-    const auto page = FindSiteVideo(command.pageUrl);
+    const auto page = CheckSitePage(command.pageUrl);
     if (!page) {
         AnswerPanel(command.lookupId,
-                    Failed(SiteLookupFinished::Problem::Video, "This page is not a video LDM can download."));
+                    Failed(SiteLookupFinished::Problem::Video, "This page is not one LDM can look for videos on."));
         return;
     }
-    if (const Cached* cached = Recent(page->canonicalUrl, kPanelReuse)) {
+    if (const Cached* cached = Recent(page->address, kPanelReuse)) {
         SiteLookupFinished answer;
         answer.video = cached->video;
         AnswerPanel(command.lookupId, std::move(answer));
         return;
     }
-    Pending* pending = Join(page->canonicalUrl);
+    Pending* pending = Join(page->address);
     if (pending == nullptr) {
         AnswerPanel(command.lookupId, Failed(SiteLookupFinished::Problem::Busy, "Too many videos are being looked up at once."));
         return;
@@ -64,18 +64,18 @@ void SiteLookups::Cancel(std::int64_t panelLookupId)
 
 void SiteLookups::Refresh(model::DownloadId id, std::int64_t epoch, const std::string& pageUrl)
 {
-    const auto page = FindSiteVideo(pageUrl);
+    const auto page = CheckSitePage(pageUrl);
     if (!page) {
         refreshed_(id, epoch, Failed(SiteLookupFinished::Problem::Video, "The download has no video page to ask again."));
         return;
     }
-    if (const Cached* cached = Recent(page->canonicalUrl, kRefreshReuse)) {
+    if (const Cached* cached = Recent(page->address, kRefreshReuse)) {
         SiteLookupFinished answer;
         answer.video = cached->video;
         refreshed_(id, epoch, answer);
         return;
     }
-    Pending* pending = Join(page->canonicalUrl);
+    Pending* pending = Join(page->address);
     if (pending == nullptr) {
         refreshed_(id, epoch, Failed(SiteLookupFinished::Problem::Busy, "Too many videos are being looked up at once."));
         return;

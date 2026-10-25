@@ -111,7 +111,10 @@ void MediaCatalog::OnConnectionClosed(BrowserConnectionId connection)
 
 void MediaCatalog::OnSitePage(BrowserConnectionId connection, browser::SitePage page)
 {
-    const auto video = core::FindSiteVideo(page.url);
+    auto video = core::CheckSitePage(page.url);
+    if (video && !video->automatic) {
+        video.reset();  // looked up only when the user asks for it
+    }
     const TabKey key{connection, page.tabId};
     auto existing = tabs_.find(key);
     if (!video) {
@@ -131,17 +134,17 @@ void MediaCatalog::OnSitePage(BrowserConnectionId connection, browser::SitePage 
     tab.pageTitle = page.pageTitle;
     tab.incognito = page.incognito;
     tab.userAgent = page.userAgent;
-    if (tab.sitePage == video->canonicalUrl) {
+    if (tab.sitePage == video->address) {
         return;  // the same video; its title may have changed, nothing else
     }
     DropSiteVideo(tab);
     tab.items.clear();  // what the player loaded so far belongs to this video, or the one before
-    tab.sitePage = video->canonicalUrl;
+    tab.sitePage = video->address;
     MediaItem item;
     item.key = ++lastKey_;
     item.kind = browser::MediaKind::Dash;
-    item.url = video->canonicalUrl;
-    item.finalUrl = video->canonicalUrl;
+    item.url = video->address;
+    item.finalUrl = video->address;
     item.siteVideo = true;
     item.state = MediaItem::State::Fetching;
     item.lookupId = ++lastLookupId_;
@@ -149,7 +152,7 @@ void MediaCatalog::OnSitePage(BrowserConnectionId connection, browser::SitePage 
     const std::int64_t lookupId = item.lookupId;
     tab.items.push_back(std::move(item));
     if (hooks_.lookUp) {
-        hooks_.lookUp(core::LookUpSiteVideoCommand{lookupId, video->canonicalUrl});
+        hooks_.lookUp(core::LookUpSiteVideoCommand{lookupId, video->address});
     }
     if (hooks_.changed) {
         hooks_.changed(connection, page.tabId);
