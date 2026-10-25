@@ -1,5 +1,7 @@
 #include "ui/dialogs/OptionsDialog.h"
 
+#include "ui/dialogs/MessageDialog.h"
+
 #include "base/Utf.h"
 #include "resource.h"
 #include "ui/FileDialogs.h"
@@ -29,7 +31,7 @@ struct PageInfo {
 // one modal Options dialog exists at a time, on the UI thread.
 thread_local OptionsDialog* pageKeyTarget = nullptr;
 
-constexpr std::array<PageInfo, 8> kPages{{
+constexpr std::array<PageInfo, 9> kPages{{
     {IDD_OPTIONS_GENERAL, L"General"},
     {IDD_OPTIONS_FILETYPES, L"File types"},
     {IDD_OPTIONS_SAVE, L"Save to"},
@@ -38,7 +40,17 @@ constexpr std::array<PageInfo, 8> kPages{{
     {IDD_OPTIONS_PROXY, L"Proxy / Socks"},
     {IDD_OPTIONS_LOGINS, L"Site logins"},
     {IDD_OPTIONS_SOUNDS, L"Sounds"},
+    {IDD_OPTIONS_SITEVIDEOS, L"Site videos"},
 }};
+
+// The Site videos page follows the components while the dialog is open.
+constexpr UINT_PTR kSiteToolsTimer = 1;
+constexpr UINT kSiteToolsInterval = 500;
+
+std::wstring ToolLine(std::wstring_view name, const std::optional<std::string>& version)
+{
+    return std::wstring(name) + L": " + (version ? base::ToUtf16(*version) : std::wstring(L"not installed"));
+}
 
 constexpr std::array<std::pair<model::DuplicatePolicy, const wchar_t*>, 4> kDuplicateChoices{{
     {model::DuplicatePolicy::Ask, L"Ask me"},
@@ -255,6 +267,8 @@ bool OptionsDialog::OnInit()
     }
     Load();
     ShowPage(0);
+    ShowSiteTools();
+    ::SetTimer(Handle(), kSiteToolsTimer, kSiteToolsInterval, nullptr);
     pageKeyTarget = this;
     pageKeyHook_ = ::SetWindowsHookExW(WH_MSGFILTER, &OptionsDialog::PageKeyFilter, nullptr, ::GetCurrentThreadId());
     return true;
@@ -262,6 +276,7 @@ bool OptionsDialog::OnInit()
 
 void OptionsDialog::OnDestroying()
 {
+    ::KillTimer(Handle(), kSiteToolsTimer);
     if (pageKeyHook_ != nullptr) {
         ::UnhookWindowsHookEx(pageKeyHook_);
         pageKeyHook_ = nullptr;
@@ -362,6 +377,7 @@ void OptionsDialog::Load()
     const model::Settings& s = input_.settings;
     Check(IDC_OPT_STARTUP, input_.launchOnStartup);
     Check(IDC_OPT_CLIPBOARD, s.monitorClipboard);
+    Check(IDC_OPT_SITEVIDEOS, s.siteVideosEnabled);
 
     captureKeys_ = s.captureKeys;
     browserMenus_ = BrowserMenus{s.chromiumMenu, s.firefoxMenu};
@@ -575,6 +591,55 @@ void OptionsDialog::UpdateQuotaControls()
     }
 }
 
+bool OptionsDialog::OnMessage(UINT message, WPARAM wParam, LPARAM lParam, LRESULT& result)
+{
+    (void)lParam;
+    if (message == WM_TIMER && wParam == kSiteToolsTimer) {
+        ShowSiteTools();
+        result = 0;
+        return true;
+    }
+    return false;
+}
+
+void OptionsDialog::ShowSiteTools()
+{
+    if (!input_.siteTools) {
+        return;
+    }
+    const core::SiteToolsView view = input_.siteTools();
+    const std::wstring tool = base::ToUtf16(core::SiteToolName(view.tool));
+    std::wstring text;
+    switch (view.state) {
+    case core::SiteToolsView::State::Checking:
+        text = L"Checking for a newer " + tool + L"...";
+        break;
+    case core::SiteToolsView::State::Downloading:
+        text = L"Downloading " + tool + L" (" + std::to_wstring((view.archiveBytes + 512 * 1024) / (1024 * 1024)) + L" MB)...";
+        break;
+    case core::SiteToolsView::State::Installing:
+        text = L"Installing " + tool + L"...";
+        break;
+    case core::SiteToolsView::State::Removing:
+        text = L"Removing the components...";
+        break;
+    case core::SiteToolsView::State::Idle:
+        text = ToolLine(L"yt-dlp", view.ytDlpVersion) + L"\n" + ToolLine(L"Deno", view.denoVersion);
+        break;
+    }
+    if (!view.lastError.empty()) {
+        text += L"\nLast attempt: " + base::ToUtf16(view.lastError);
+    }
+    if (text != siteToolsText_) {
+        siteToolsText_ = text;
+        Put(IDC_OPT_SITETOOLS_STATUS, text);
+    }
+    const bool idle = view.state == core::SiteToolsView::State::Idle;
+    ::EnableWindow(Control(IDC_OPT_SITETOOLS_CHECK), idle && IsChecked(IDC_OPT_SITEVIDEOS));
+    ::EnableWindow(Control(IDC_OPT_SITETOOLS_REMOVE),
+                   view.state != core::SiteToolsView::State::Removing && (view.ytDlpVersion || view.denoVersion));
+}
+
 void OptionsDialog::ShowAddressExceptionCount()
 {
     const size_t count = addressExceptions_.size();
@@ -604,6 +669,25 @@ void OptionsDialog::OnPageCommand(int id, int code)
         MediaPanelDialog dialog(CurrentTheme(), mediaPanel_);
         if (auto edited = dialog.Run(Handle())) {
             mediaPanel_ = std::move(*edited);
+        }
+        break;
+    }
+    case IDC_OPT_SITEVIDEOS:
+        ShowSiteTools();
+        break;
+    case IDC_OPT_SITETOOLS_CHECK:
+        if (input_.checkSiteTools) {
+            input_.checkSiteTools();
+        }
+        break;
+    case IDC_OPT_SITETOOLS_REMOVE: {
+        const MessageRequest question{L"Delete yt-dlp and Deno from LDM's tools folder?\n\nDownloading videos from sites "
+                                      L"is turned off. Turning it on again downloads them again.",
+                                      MessageKind::Question, MessageButtons::YesNo};
+        if (input_.removeSiteTools && ShowMessage(Handle(), CurrentTheme(), question) == IDYES) {
+            Check(IDC_OPT_SITEVIDEOS, false);  // the core turns it off with the removal
+            input_.removeSiteTools();
+            ShowSiteTools();
         }
         break;
     }
@@ -791,6 +875,7 @@ bool OptionsDialog::Store()
     s.mediaMinimumKilobytes = mediaPanel_.minimumKilobytes;
     s.mediaSiteExceptions = mediaPanel_.siteExceptions;
     s.mediaDrmNotice = mediaPanel_.drmNotice;
+    s.siteVideosEnabled = IsChecked(IDC_OPT_SITEVIDEOS);
 
     StoreCategory(currentCategory_);
     for (const model::Category& category : categories_) {
@@ -925,6 +1010,7 @@ void OptionsDialog::ApplyEditedFields(const model::Settings& edited, model::Sett
     current.mediaMinimumKilobytes = edited.mediaMinimumKilobytes;
     current.mediaSiteExceptions = edited.mediaSiteExceptions;
     current.mediaDrmNotice = edited.mediaDrmNotice;
+    current.siteVideosEnabled = edited.siteVideosEnabled;
     current.temporaryDirectory = edited.temporaryDirectory;
     current.setFileDateFromServer = edited.setFileDateFromServer;
     current.showStartDialog = edited.showStartDialog;

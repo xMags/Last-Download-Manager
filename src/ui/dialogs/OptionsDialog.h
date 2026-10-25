@@ -9,6 +9,7 @@
 #include "ui/dialogs/CaptureDialogs.h"
 
 #include <array>
+#include <functional>
 #include <optional>
 #include <string>
 #include <vector>
@@ -27,6 +28,11 @@ public:
         std::vector<core::SiteLoginView> siteLogins;
         bool launchOnStartup = false;
         std::vector<browser::Hello> connectedBrowsers;  // shown on General; read only
+        // Site videos: the components' state now, and what the page's buttons do. The buttons act
+        // at once, not on OK; the state is asked for again while the dialog is open.
+        std::function<core::SiteToolsView()> siteTools;
+        std::function<void()> checkSiteTools;
+        std::function<void()> removeSiteTools;
     };
 
     struct Output {
@@ -45,12 +51,13 @@ public:
     static void ApplyEditedFields(const model::Settings& edited, model::Settings& current);
 
 private:
-    static constexpr int kPageCount = 8;
+    static constexpr int kPageCount = 9;
 
     bool OnInit() override;
     bool OnCommand(int id, int code, HWND control) override;
     bool OnNotify(const NMHDR& header, LRESULT& result) override;
     void OnDestroying() override;
+    bool OnMessage(UINT message, WPARAM wParam, LPARAM lParam, LRESULT& result) override;
 
     // Ctrl+Tab, Ctrl+Shift+Tab, Ctrl+PgDn and Ctrl+PgUp switch pages, as in Windows property
     // sheets. A modal dialog's keys never reach the app's message loop, so a message filter hook
@@ -83,6 +90,8 @@ private:
     void UpdateProxyControls();
     void UpdateStartDialogControls();
     void UpdateQuotaControls();
+    // The Site videos page's status and buttons, from the components' state now.
+    void ShowSiteTools();
 
     Input input_;
     std::vector<std::wstring> addressExceptions_;  // edited in their own dialog
@@ -100,6 +109,7 @@ private:
     std::vector<core::SiteLoginInput> logins_;
     bool loginsEdited_ = false;
     std::optional<Output> result_;
+    std::wstring siteToolsText_;  // shown now, so the timer only redraws on a change
 };
 
 }  // namespace ldm::ui

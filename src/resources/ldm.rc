@@ -527,6 +527,19 @@ BEGIN
     LTEXT "The download button LDM shows over videos in the browser", -1, 72, 185, 221, 8
 END
 
+IDD_OPTIONS_SITEVIDEOS DIALOGEX 0, 0, 300, 200
+STYLE DS_SETFONT | DS_CONTROL | WS_CHILD
+FONT 9, "Segoe UI", 400, 0, 0x1
+BEGIN
+    AUTOCHECKBOX "&Download videos from supported sites (YouTube)", IDC_OPT_SITEVIDEOS, 7, 7, 286, 10, WS_TABSTOP
+    LTEXT "On a video page, the media panel offers the video's qualities. LDM asks yt-dlp, a free program, what the page offers, then downloads the video itself.", -1, 7, 22, 286, 26
+    LTEXT "Turning this on downloads yt-dlp, and Deno, which yt-dlp needs for YouTube, from their GitHub pages: about 61 MB, 125 MB on disk. LDM keeps them up to date.", -1, 7, 50, 286, 26
+    GROUPBOX "Components", -1, 7, 82, 286, 74
+    LTEXT "", IDC_OPT_SITETOOLS_STATUS, 14, 95, 272, 36
+    PUSHBUTTON "&Check for updates", IDC_OPT_SITETOOLS_CHECK, 14, 135, 80, 14, WS_TABSTOP
+    PUSHBUTTON "&Remove components", IDC_OPT_SITETOOLS_REMOVE, 100, 135, 80, 14, WS_TABSTOP
+END
+
 IDD_OPTIONS_FILETYPES DIALOGEX 0, 0, 300, 200
 STYLE DS_SETFONT | DS_CONTROL | WS_CHILD
 FONT 9, "Segoe UI", 400, 0, 0x1
