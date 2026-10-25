@@ -102,9 +102,17 @@ void MediaRun::Begin(Clock::time_point now)
     nextProgressAt_ = now + services_.tuning->progressInterval;
 
     int wholeFileTracks = 0;
+    bool pieceTracks = false;
     for (const core::MediaTrackRequest& track : request_.tracks) {
         wholeFileTracks += track.wholeFile ? 1 : 0;
+        pieceTracks = pieceTracks || !track.wholeFile;
     }
+    // The run's connections are shared: each whole-file track takes a share, and the pieces of
+    // all other tracks together take one, so the run never has more than maxConnections (at
+    // least one each).
+    const int maxConnections = std::max(1, request_.maxConnections);
+    const int share = std::max(1, maxConnections / std::max(1, wholeFileTracks + (pieceTracks ? 1 : 0)));
+    pieceConnections_ = std::max(1, maxConnections - share * wholeFileTracks);
     // Pieces of all tracks in playback order: each track's pieces spread evenly over [0, 1).
     std::vector<std::pair<double, Piece>> ordered;
     for (size_t t = 0; t < request_.tracks.size(); ++t) {
@@ -143,7 +151,7 @@ void MediaRun::Begin(Clock::time_point now)
                 file.resumable = true;
             }
             file.maxRequestBytes = track.maxRequestBytes;
-            file.maxConnections = std::max(1, request_.maxConnections / wholeFileTracks);
+            file.maxConnections = share;
             file.maxAttemptsPerSegment = request_.maxAttemptsPerSegment;
             file.refusePrivateAddresses = request_.refusePrivateAddresses;
             wholeFile->transfer = std::make_unique<Transfer>(inner, std::move(file), nextFile_++);
@@ -636,7 +644,7 @@ void MediaRun::FillSlots(Clock::time_point now)
     if (phase_ != Phase::Running || closeRequested_) {
         return;
     }
-    const auto limit = static_cast<size_t>(std::max(1, request_.maxConnections));
+    const auto limit = static_cast<size_t>(pieceConnections_);
     while (firstWaiting_ < pieces_.size() && pieces_[firstWaiting_].state != PieceState::Waiting) {
         ++firstWaiting_;
     }
