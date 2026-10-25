@@ -3,6 +3,7 @@
 
 #include <gtest/gtest.h>
 
+#include <filesystem>
 #include <string>
 
 namespace {
@@ -491,13 +492,15 @@ TEST(SqliteStore, QueueMembershipRoundTrips)
     EXPECT_EQ(loaded.queueFailures, 0);
 }
 
-TEST(SqliteStore, SettingsReplaceWholeMap)
+TEST(SqliteStore, SettingsUpdateNamedKeysAndKeepOthers)
 {
     SqliteStore store = OpenMemoryStore();
     ASSERT_TRUE(store.SaveSettings({{"a", "1"}, {"b", "2"}}).Ok());
+    // An older version saves only the keys it knows; "a" stands for one of a newer version.
     ASSERT_TRUE(store.SaveSettings({{"b", "3"}}).Ok());
     const auto settings = store.LoadSettings().Value();
-    ASSERT_EQ(settings.size(), 1u);
+    ASSERT_EQ(settings.size(), 2u);
+    EXPECT_EQ(settings.at("a"), "1");
     EXPECT_EQ(settings.at("b"), "3");
 }
 
@@ -661,6 +664,35 @@ TEST(SqliteStore, ASiteVideoFromAListKeepsItsQualityRule)
     d.siteQuality.reset();
     ASSERT_TRUE(store.SaveDownload(d).Ok());
     EXPECT_FALSE(store.LoadDownloads().Value().front().siteQuality);
+}
+
+TEST(SqliteStore, AQualityOfANewerVersionStillLoadsTheList)
+{
+    const std::filesystem::path path = std::filesystem::temp_directory_path() / "ldm-quality-test.sqlite";
+    std::filesystem::remove(path);
+    {
+        auto store = SqliteStore::Open(path.string());
+        ASSERT_TRUE(store.Ok()) << store.GetError().message;
+        Download listed = SampleDownload("listed");
+        listed.siteVideo = true;
+        listed.siteQuality = ldm::model::SiteQuality::UpTo720;
+        ASSERT_TRUE(store.Value().InsertDownload(listed).Ok());
+    }
+    {
+        // What a later version could write: the column takes any text.
+        auto connection = ldm::storage::Connection::Open(path.string());
+        ASSERT_TRUE(connection.Ok());
+        ASSERT_TRUE(connection.Value().Execute("UPDATE downloads SET site_quality = 'upto4320'").Ok());
+    }
+    {
+        auto store = SqliteStore::Open(path.string());
+        ASSERT_TRUE(store.Ok()) << store.GetError().message;
+        const auto downloads = store.Value().LoadDownloads();
+        ASSERT_TRUE(downloads.Ok()) << downloads.GetError().message;
+        ASSERT_EQ(downloads.Value().size(), 1u);
+        EXPECT_EQ(downloads.Value().front().siteQuality, ldm::model::SiteQuality::Best);
+    }
+    std::filesystem::remove(path);
 }
 
 TEST(SqliteStore, StreamProgressIsWrittenPieceByPiece)

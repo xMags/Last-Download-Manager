@@ -58,7 +58,9 @@ public:
     [[nodiscard]] virtual base::Status DeleteQueue(model::QueueId id) = 0;
 
     [[nodiscard]] virtual base::Result<model::SettingsMap> LoadSettings() = 0;
-    // Replaces every stored setting with the given map.
+    // Stores every setting of the map, replacing its earlier value. Stored keys the map does not
+    // name are kept: they belong to a newer version of LDM (model::SettingsToMap names every key
+    // this version knows).
     [[nodiscard]] virtual base::Status SaveSettings(const model::SettingsMap& settings) = 0;
 
     [[nodiscard]] virtual base::Result<std::vector<model::SiteLogin>> LoadSiteLogins() = 0;
