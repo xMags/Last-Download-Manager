@@ -241,6 +241,7 @@ if (api.downloads.onDeterminingFilename) {
 const FORM_FILTER = { urls: ['<all_urls>'], types: ['main_frame', 'sub_frame'] };
 api.webRequest.onBeforeRequest.addListener((details) => forms.onBeforeRequest(details), FORM_FILTER, ['requestBody']);
 api.webRequest.onSendHeaders.addListener((details) => forms.onSendHeaders(details), FORM_FILTER, ['requestHeaders']);
+api.webRequest.onHeadersReceived.addListener((details) => forms.onHeadersReceived(details), FORM_FILTER, ['responseHeaders']);
 
 // Media for the panel over web players (M3 design section 6): responses are only observed.
 // A tab that loads another page starts with nothing to offer, decided on the page's answer before

@@ -49,3 +49,18 @@ test('the capture message carries the form', () => {
   const unsafe = makeCapture({ url: 'https://a.test/get', userAgent: 'UA', cookies: [], post: { contentType: 'text/plain' + String.fromCharCode(13, 10) + 'X: 1', body: 'YQ==' } });
   assert.equal(unsafe.post, undefined);
 });
+
+test('a submission answered with a page is forgotten, one answered with a file is kept', () => {
+  const forms = new FormPosts(() => 0);
+  const submit = (id, url) => {
+    forms.onBeforeRequest({ requestId: id, method: 'POST', url, requestBody: { formData: { a: ['1'] } } });
+    forms.onSendHeaders({ requestId: id, requestHeaders: [{ name: 'Content-Type', value: 'application/x-www-form-urlencoded' }] });
+  };
+  submit('1', 'https://a.test/export');
+  forms.onHeadersReceived({ requestId: '1', statusCode: 200, responseHeaders: [{ name: 'Content-Type', value: 'text/html' }] });
+  assert.equal(forms.postFor('https://a.test/export'), null, 'a later link to the same address is not the form');
+  submit('2', 'https://a.test/report');
+  forms.onHeadersReceived({ requestId: '2', statusCode: 200, responseHeaders: [{ name: 'Content-Type', value: 'application/pdf' },
+    { name: 'Content-Disposition', value: 'attachment; filename=r.pdf' }] });
+  assert.notEqual(forms.postFor('https://a.test/report'), null);
+});
