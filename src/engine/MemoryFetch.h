@@ -40,6 +40,7 @@ private:
 
     CURLM* multi_;
     core::FetchRequest request_;
+    CurlSlist headers_;  // before easy_: the handle uses it until it is gone
     CurlEasy easy_;
     std::string body_;
     bool tooLarge_ = false;

@@ -272,6 +272,7 @@ void AddFlow::AddSitePlaylist(const media::SitePlaylist& playlist, const browser
             command.url = listed->address;
             media.kind = kind.Value();
             media.tracks = std::move(tracks.Value().tracks);
+            media.siteHeaders = tracks.Value().headers;
             media.approximateBytes = list.entries[*picked].approximateBytes;
             command.fileName = core::SanitizeFileName(title) + (tracks.Value().picture ? ".mp4" : ".m4a");
             command.referer = tracks.Value().referer.empty() ? std::optional<std::string>(listed->address)

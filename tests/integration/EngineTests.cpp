@@ -465,6 +465,18 @@ TEST_F(EngineTest, BrowserCookiesReachOnlyTheirOwnHostOnEveryConnection)
     EXPECT_TRUE(HoldsPayload(PartialPath(2), server_->Size()));
 }
 
+TEST_F(EngineTest, ASitesOwnHeadersGoWithEveryConnection)
+{
+    const auto denied = Run(Request("/site-header.bin", 1));
+    ASSERT_EQ(denied.outcome, TransferOutcome::Failed);
+
+    auto request = Request("/site-header.bin", 1, 2);
+    request.headers = {"X-Stream-Key: k1"};
+    const auto finished = Run(std::move(request));
+    ASSERT_EQ(finished.outcome, TransferOutcome::Completed) << (finished.failure ? finished.failure->message : "");
+    EXPECT_TRUE(HoldsPayload(PartialPath(2), server_->Size()));
+}
+
 // Manifest fetches (M3 design section 6): small GETs into memory beside the downloads.
 ldm::core::FetchRequest FetchOf(const std::string& url, std::size_t maxBytes)
 {
@@ -530,6 +542,17 @@ TEST_F(EngineTest, FetchSendsCookiesAndReportsHttpErrors)
     ASSERT_TRUE(allowed);
     EXPECT_FALSE(allowed->failure) << allowed->failure->message;
     EXPECT_EQ(allowed->body.size(), static_cast<size_t>(server_->Size()));
+}
+
+TEST_F(EngineTest, FetchSendsASitesOwnHeaders)
+{
+    auto request = FetchOf(server_->Url("/site-header.bin"), 8 * 1024 * 1024);
+    request.headers = {"X-Stream-Key: k1"};
+    engine_->Fetch(std::move(request));
+    const auto fetched = listener_.WaitFor<ldm::core::FetchFinished>(DownloadId{}, 0, 60s);
+    ASSERT_TRUE(fetched);
+    EXPECT_FALSE(fetched->failure) << fetched->failure->message;
+    EXPECT_EQ(fetched->body.size(), static_cast<size_t>(server_->Size()));
 }
 
 // The Grabber's fetches (M4 design section 6.2): HEAD requests, pages only, site logins.

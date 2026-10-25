@@ -27,7 +27,8 @@ SELECT id, public_id, url, final_url, referer, parent_page, user_agent, file_nam
        last_modified, content_type, max_connections, speed_limit_bps, login_user, login_secret,
        completion_action, created_at, last_try_at, completed_at, last_result, sort_order, cookie_secret,
        post_secret, post_content_type, awaiting_confirmation, kind, media_private_source, queue_id,
-       queue_position, queue_failures, project_id, listed, replace_final, site_video, site_quality
+       queue_position, queue_failures, project_id, listed, replace_final, site_video, site_quality,
+       site_header_secret
 FROM downloads ORDER BY sort_order, id
 )sql";
 
@@ -38,10 +39,11 @@ INSERT INTO downloads (
   last_modified, content_type, max_connections, speed_limit_bps, login_user, login_secret,
   completion_action, created_at, last_try_at, completed_at, last_result, sort_order, cookie_secret,
   post_secret, post_content_type, awaiting_confirmation, kind, media_private_source, queue_id,
-  queue_position, queue_failures, project_id, listed, replace_final, site_video, site_quality)
+  queue_position, queue_failures, project_id, listed, replace_final, site_video, site_quality,
+  site_header_secret)
 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20,
         ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, ?40,
-        ?41, ?42)
+        ?41, ?42, ?43)
 )sql";
 
 constexpr std::string_view kUpdateDownload = R"sql(
@@ -54,8 +56,8 @@ UPDATE downloads SET
   completed_at = ?26, last_result = ?27, sort_order = ?28, cookie_secret = ?29, post_secret = ?30,
   post_content_type = ?31, awaiting_confirmation = ?32, kind = ?33, media_private_source = ?34,
   queue_id = ?35, queue_position = ?36, queue_failures = ?37, project_id = ?38, listed = ?39,
-  replace_final = ?40, site_video = ?41, site_quality = ?42
-WHERE id = ?43
+  replace_final = ?40, site_video = ?41, site_quality = ?42, site_header_secret = ?43
+WHERE id = ?44
 )sql";
 
 base::Error CorruptRow(std::string_view what)
@@ -165,7 +167,7 @@ bool TrackIsConsistent(const model::MediaTrack& track)
     return !track.wholeFile || track.pieces.size() <= 1;
 }
 
-// Binds parameters ?1..?42 in the column order of kInsertDownload / kUpdateDownload.
+// Binds parameters ?1..?43 in the column order of kInsertDownload / kUpdateDownload.
 void BindDownloadColumns(Statement& statement, const model::Download& d)
 {
     statement.Bind(1, d.publicId)
@@ -222,6 +224,11 @@ void BindDownloadColumns(Statement& statement, const model::Download& d)
         .Bind(40, d.replaceFinalFile)
         .Bind(41, d.siteVideo)
         .Bind(42, d.siteQuality ? std::string(model::ToString(*d.siteQuality)) : std::string());
+    if (d.siteHeaderSecret.empty()) {
+        statement.BindNull(43);
+    } else {
+        statement.Bind(43, std::span<const std::uint8_t>(d.siteHeaderSecret));
+    }
 }
 
 base::Result<model::Download> ReadDownload(const Statement& row)
@@ -301,6 +308,7 @@ base::Result<model::Download> ReadDownload(const Statement& row)
             return CorruptRow("downloads.site_quality");
         }
     }
+    d.siteHeaderSecret = row.Blob(43);
     return d;
 }
 
@@ -721,7 +729,7 @@ base::Status SqliteStore::SaveDownload(const model::Download& download)
         return update.GetError();
     }
     BindDownloadColumns(update.Value(), download);
-    update.Value().Bind(43, download.id.value);
+    update.Value().Bind(44, download.id.value);
     base::Status updated = update.Value().Run();
     if (!updated) {
         return updated;

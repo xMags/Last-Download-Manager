@@ -94,6 +94,9 @@ struct SiteFormat {
     std::optional<std::int64_t> bytes;  // the exact length, when the site states one
     std::string referer;                // the Referer the site wants for this format; empty for none
     std::string ext;                    // the file type the site names, such as "mp4" or "ogv"
+    // Other headers the site wants with this format's requests, as "Name: value" lines (a
+    // session id, a stream key); checked when read (SiteVideo.h).
+    std::vector<std::string> headers;
 };
 
 // One quality of the video, or of the whole stream when it has no video (an audio-only HLS

@@ -273,6 +273,11 @@ ALTER TABLE media_tracks ADD COLUMN expected_bytes INTEGER CHECK (expected_bytes
     Migration{12, R"sql(
 ALTER TABLE downloads ADD COLUMN site_quality TEXT NOT NULL DEFAULT '';
 )sql"},
+    // A site video's other request headers (a session's key), protected like its cookies and
+    // removed with them once it completes.
+    Migration{13, R"sql(
+ALTER TABLE downloads ADD COLUMN site_header_secret BLOB;
+)sql"},
 };
 
 base::Result<int> CurrentVersion(Connection& connection)

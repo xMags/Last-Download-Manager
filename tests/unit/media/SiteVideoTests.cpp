@@ -418,16 +418,31 @@ TEST(SiteVideo, AVideoWithoutAnySoundOffersItsPicturesAlone)
     EXPECT_EQ(VariantIds(mixed), (std::vector<std::string>{"both"}));
 }
 
-TEST(SiteVideo, TheSitesRefererIsKeptAndOtherHeadersAreNot)
+TEST(SiteVideo, TheSitesRefererAndOwnHeadersAreKeptAndYtDlpsDefaultsAreNot)
 {
     const SiteVideo video = Parse(Answer("[" +
         Format("v", "avc1.4d401e", "mp4a.40.2",
-               R"(,"height":360,"http_headers":{"Referer":"https://www.example.test/watch/1","User-Agent":"app/1"})") + "," +
-        Format("w", "avc1.4d401e", "mp4a.40.2", R"(,"height":480,"http_headers":{"Referer":"https://www.example.test/\r\nX: y"})") +
+               R"(,"height":360,"http_headers":{"Referer":"https://www.example.test/watch/1","User-Agent":"app/1",)"
+               R"("Accept":"*/*","Sec-Fetch-Mode":"navigate","X-Playback-Session-Id":"s1","Stream_Key":"k1",)"
+               R"("Host":"other.test","Cookie":"a=b","Range":"bytes=0-","Bad Name":"x","X-Empty":"","X-Number":5})") + "," +
+        Format("w", "avc1.4d401e", "mp4a.40.2",
+               R"(,"height":480,"http_headers":{"Referer":"https://www.example.test/\r\nX: y","X-Key":"a\r\nX-Forged: 1"})") +
         "]"));
     ASSERT_EQ(video.offer.variants.size(), 2u);
     EXPECT_TRUE(video.offer.variants[0].site->referer.empty());  // 480p: a line break, refused
+    EXPECT_TRUE(video.offer.variants[0].site->headers.empty()) << "a line break would forge another header";
     EXPECT_EQ(video.offer.variants[1].site->referer, "https://www.example.test/watch/1");
+    EXPECT_EQ(video.offer.variants[1].site->headers, (std::vector<std::string>{"Stream_Key: k1", "X-Playback-Session-Id: s1"}));
+}
+
+TEST(SiteVideo, OnlyHeadersLdmDoesNotSetItselfAreSiteHeaderLines)
+{
+    EXPECT_TRUE(ldm::media::IsSiteHeaderLine("X-Forwarded-For: 203.0.113.7"));
+    EXPECT_TRUE(ldm::media::IsSiteHeaderLine("Origin: https://www.example.test"));
+    for (const char* line : {"Host: a.test", "user-agent: x", "Cookie: a=b", "Content-Length: 4", "If-Range: x",
+                             "X-A:b", "X-A: ", "X-A:  b", ": b", "X A: b", "X-A: b\nX-B: c"}) {
+        EXPECT_FALSE(ldm::media::IsSiteHeaderLine(line)) << line;
+    }
 }
 
 TEST(SiteVideo, SubtitlesAreTheUploadersAndTheAutomaticOnesInTheVideosLanguage)

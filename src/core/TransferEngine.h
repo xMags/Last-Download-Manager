@@ -40,6 +40,8 @@ struct TransferRequest {
     // Browser cookies in Netscape format, decrypted just before the start like credentials.
     // libcurl sends each one only to its own host and path, also after redirects.
     std::vector<std::string> cookieLines;
+    // More request headers, as "Name: value" lines: the ones a site video's formats want.
+    std::vector<std::string> headers;
     // A form submission to repeat (POST), decrypted just before the start. Always one connection:
     // sending a form several times at once can have effects on the site.
     std::optional<PostData> post;
@@ -119,6 +121,7 @@ struct MediaRequest {
     std::optional<std::string> referer;
     std::string userAgent;
     std::vector<std::string> cookieLines;  // Netscape format, as in TransferRequest
+    std::vector<std::string> headers;      // as in TransferRequest; for pieces, keys and whole files
     std::optional<std::string> proxy;
     bool refusePrivateAddresses = false;  // as in TransferRequest; for pieces and keys
 
@@ -287,6 +290,7 @@ struct FetchRequest {
     std::optional<std::string> referer;
     std::string userAgent;
     std::vector<std::string> cookieLines;  // Netscape format, as in TransferRequest
+    std::vector<std::string> headers;      // as in TransferRequest
     std::optional<std::string> proxy;
     std::size_t maxBytes = 0;  // a longer body fails the fetch
     bool refusePrivateAddresses = false;  // as in TransferRequest

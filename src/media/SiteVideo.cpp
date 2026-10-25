@@ -223,6 +223,7 @@ struct Candidate {
     int channels = 0;  // 0 when not stated
     bool sdr = true;
     std::string referer;
+    std::vector<std::string> headers;  // "Name: value", sorted by name
 };
 
 std::optional<std::string> CheckedUrl(std::string_view base, std::string_view url)
@@ -289,6 +290,53 @@ std::optional<TrackSegments> ReadPieces(const Json& format)
         track.segments.push_back(std::move(segment));
     }
     return track;
+}
+
+// RFC 9110 5.6.2: a header name is a token.
+bool IsToken(std::string_view text)
+{
+    return !text.empty() && text.size() <= 64 && std::all_of(text.begin(), text.end(), [](char c) {
+        return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+               std::string_view("!#$%&'*+-.^_`|~").find(c) != std::string_view::npos;
+    });
+}
+
+// Headers LDM never takes from the site's list: yt-dlp's own defaults (the site's files answer
+// the browser's User-Agent, video-sites design section 8), the ones LDM sets itself (Referer,
+// Cookie, Range), and those that describe the connection or the request's body.
+bool IsOwnHeader(const std::string& lower)
+{
+    for (const std::string_view own : {"user-agent", "accept", "accept-language", "accept-encoding", "sec-fetch-mode",
+                                       "referer", "cookie", "host", "range", "content-length", "content-type",
+                                       "connection", "keep-alive", "transfer-encoding", "te", "trailer", "upgrade",
+                                       "expect", "proxy-authorization", "proxy-connection"}) {
+        if (lower == own) {
+            return true;
+        }
+    }
+    return lower.starts_with("if-");
+}
+
+// The other headers the site wants with a format's requests (a stream key, a session id), as
+// "Name: value" lines sorted by name. A name that is not a token or a value with a line break is
+// left out, as is everything past kMaxSiteHeaders.
+std::vector<std::string> SiteHeaders(const Json& headers)
+{
+    std::vector<std::string> lines;
+    for (const auto& [name, value] : headers.items()) {
+        if (!value.is_string()) {
+            continue;
+        }
+        std::string line = name + ": " + value.get_ref<const std::string&>();
+        if (IsSiteHeaderLine(line)) {
+            lines.push_back(std::move(line));
+        }
+    }
+    std::sort(lines.begin(), lines.end());
+    if (lines.size() > kMaxSiteHeaders) {
+        lines.resize(kMaxSiteHeaders);
+    }
+    return lines;
 }
 
 bool IsSoundFileType(std::string_view ext)
@@ -383,12 +431,11 @@ std::optional<Candidate> ReadCandidate(const Json& format, bool& protectedSeen)
     const std::string range = Text(format, "dynamic_range");
     candidate.sdr = range.empty() || range == "SDR";
     if (const auto headers = format.find("http_headers"); headers != format.end() && headers->is_object()) {
-        // Only the Referer: the site's files answer the browser's own User-Agent (video-sites
-        // design, section 8), and the other headers yt-dlp lists are its defaults.
         const std::string referer = Text(*headers, "Referer");
         if (!referer.empty() && PlainText(referer, 2048) && CheckedUrl(referer, referer)) {
             candidate.referer = referer;
         }
+        candidate.headers = SiteHeaders(*headers);
     }
     return candidate;
 }
@@ -552,7 +599,7 @@ std::string Container(const Candidate& candidate)
 
 SiteFormat Format(const Candidate& candidate)
 {
-    return SiteFormat{candidate.id, candidate.bytes, candidate.referer, candidate.ext};
+    return SiteFormat{candidate.id, candidate.bytes, candidate.referer, candidate.ext, candidate.headers};
 }
 
 // The RFC 6381 list as far as the site named it.
@@ -691,6 +738,22 @@ void ReadSubtitles(const Json& root, MediaOffer& offer)
         read(*automatic, true);
     }
 }
+
+}  // namespace
+
+bool IsSiteHeaderLine(std::string_view line)
+{
+    const size_t colon = line.find(": ");
+    if (colon == std::string_view::npos) {
+        return false;
+    }
+    const std::string_view name = line.substr(0, colon);
+    const std::string_view value = line.substr(colon + 2);
+    return IsToken(name) && !IsOwnHeader(Lower(std::string(name))) && !value.empty() && PlainText(value, 4096) &&
+           value.front() != ' ' && value.back() != ' ';
+}
+
+namespace {
 
 base::Result<SiteVideo> ReadVideo(const Json& root)
 {

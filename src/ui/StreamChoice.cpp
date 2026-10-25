@@ -77,6 +77,7 @@ base::Result<StreamCapture> BuildStreamCapture(const TabMedia& tab, const MediaI
         return quality.GetError();
     }
     capture.media.tracks = std::move(quality.Value().tracks);
+    capture.media.siteHeaders = std::move(quality.Value().headers);
     if (!quality.Value().referer.empty()) {
         capture.pageUrl = quality.Value().referer;  // the Referer the site wants for its formats
     }

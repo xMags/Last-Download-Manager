@@ -382,6 +382,26 @@ TEST_F(MediaEngineTest, LoopbackAddressesAreRefusedForAStreamFromThePublicIntern
     }
 }
 
+TEST_F(MediaEngineTest, ASitesOwnHeadersGoWithEveryPieceAndKey)
+{
+    const auto track = Track(fixtures_->hlsAes);
+    MediaRequest request = Request({TrackRequest(track)});
+    request.headers = {"X-Stream-Key: k1"};
+    engine_->StartMedia(std::move(request));
+    const auto finished = Finished(1);
+    ASSERT_TRUE(finished);
+    ASSERT_EQ(finished->outcome, TransferOutcome::Completed) << (finished->failure ? finished->failure->message : "");
+    const nlohmann::json log = server_->Log();
+    int requests = 0;
+    for (const auto& entry : log.at("entries")) {
+        if (entry.value("event", "") == "request" && entry.value("path", "").starts_with("/media/")) {
+            EXPECT_EQ(entry.value("streamKey", std::string()), "k1") << entry.dump();
+            ++requests;
+        }
+    }
+    EXPECT_GT(requests, static_cast<int>(track.pieces.size())) << "the pieces and the key";
+}
+
 TEST_F(MediaEngineTest, AMissingPieceFailsTheRun)
 {
     auto track = Track(fixtures_->hlsTs);

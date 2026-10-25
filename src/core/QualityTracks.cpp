@@ -28,14 +28,15 @@ MediaTrackChoice TrackFrom(const media::SegmentSource& source, const std::string
 }
 
 // The site's format of a track, so a refresh can ask for the same bytes again.
-void TakeSiteFormat(MediaTrackChoice& track, const std::optional<media::SiteFormat>& site, std::string& referer)
+void TakeSiteFormat(MediaTrackChoice& track, const std::optional<media::SiteFormat>& site, QualityTracks& result)
 {
     if (site) {
         track.siteFormat = site->id;
         track.expectedBytes = site->bytes;
         if (!site->referer.empty()) {
-            referer = site->referer;
+            result.referer = site->referer;
         }
+        result.headers = site->headers;
     }
 }
 
@@ -86,7 +87,7 @@ base::Result<QualityTracks> TracksForQuality(const media::MediaOffer& offer, con
             entry.kind == media::QualityKind::AudioOnly ? model::TrackRole::Audio : model::TrackRole::Video;
         MediaTrackChoice track = TrackFrom(variant.source, manifestUrl, role);
         track.codecs = variant.codecs;
-        TakeSiteFormat(track, variant.site, result.referer);
+        TakeSiteFormat(track, variant.site, result);
         result.tracks.push_back(std::move(track));
         result.picture = role == model::TrackRole::Video;
     }
@@ -99,6 +100,9 @@ base::Result<QualityTracks> TracksForQuality(const media::MediaOffer& offer, con
             MediaTrackChoice track = TrackForRendition(audio, manifestUrl, model::TrackRole::Audio);
             if (audio.site && !audio.site->referer.empty() && result.referer.empty()) {
                 result.referer = audio.site->referer;
+            }
+            if (audio.site && result.headers.empty()) {
+                result.headers = audio.site->headers;
             }
             result.tracks.push_back(std::move(track));
         }

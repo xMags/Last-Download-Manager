@@ -52,6 +52,14 @@ MemoryFetch::MemoryFetch(CURLM* multi, core::FetchRequest request, long connectT
             curl_easy_setopt(easy, CURLOPT_COOKIELIST, line.c_str());  // copied by libcurl
         }
     }
+    curl_slist* headers = nullptr;
+    for (const std::string& line : request_.headers) {
+        headers = curl_slist_append(headers, line.c_str());
+    }
+    if (headers != nullptr) {
+        headers_.reset(headers);
+        curl_easy_setopt(easy, CURLOPT_HTTPHEADER, headers);
+    }
     // Through a proxy the connection goes to the proxy, which says nothing about the server.
     addressGuard_.refuse = request_.refusePrivateAddresses && !request_.proxy;
     InstallAddressGuard(easy, &addressGuard_);

@@ -256,6 +256,10 @@ private:
     // A stream's run: its HLS playlists first when they are not read yet, then the engine.
     void StartStream(Entry& entry);
     [[nodiscard]] std::vector<std::string> StreamCookieLines(const model::Download& download);
+    // A site video's other headers, as stored with it (model::Download::siteHeaderSecret).
+    [[nodiscard]] std::vector<std::string> StreamSiteHeaders(const model::Download& download);
+    // Them protected for storing: nothing for none; only lines media::IsSiteHeaderLine takes.
+    [[nodiscard]] base::Result<std::vector<std::uint8_t>> ProtectSiteHeaders(const std::vector<std::string>& lines);
     // A live recording's playlists, read again (RFC 8216 section 6.3.4).
     void ReloadPlaylists(Entry& entry);
     // Ends a live recording that is not running: joins what is on disk, if anything.

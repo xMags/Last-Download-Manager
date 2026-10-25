@@ -3,6 +3,7 @@
 #include "core/MediaPieces.h"
 #include "core/Url.h"
 
+#include <algorithm>
 #include <charconv>
 #include <variant>
 
@@ -13,20 +14,20 @@ namespace {
 // The format `id` of the video's offer: where its pieces come from, and the length the site states.
 struct OfferedFormat {
     const media::SegmentSource* source = nullptr;
-    std::optional<std::int64_t> bytes;
+    const media::SiteFormat* site = nullptr;
 };
 
 std::optional<OfferedFormat> FindFormat(const media::MediaOffer& offer, const std::string& id)
 {
     for (const media::Variant& variant : offer.variants) {
         if (variant.site && variant.site->id == id) {
-            return OfferedFormat{&variant.source, variant.site->bytes};
+            return OfferedFormat{&variant.source, &*variant.site};
         }
     }
     for (const auto* renditions : {&offer.audio, &offer.subtitles}) {
         for (const media::Rendition& rendition : *renditions) {
             if (rendition.site && rendition.site->id == id && rendition.source) {
-                return OfferedFormat{&*rendition.source, rendition.site->bytes};
+                return OfferedFormat{&*rendition.source, &*rendition.site};
             }
         }
     }
@@ -150,12 +151,18 @@ FreshAddresses ApplyFreshAddresses(model::Download& download, const media::SiteV
         }
         formats.push_back(std::move(format));
     }
+    // The headers go with the first track's format, as a quality's go with its picture (QualityTracks).
+    const auto first = std::find_if(formats.begin(), formats.end(), [](const auto& format) { return format.has_value(); });
+    const auto firstFormat = static_cast<std::uint32_t>(first - formats.begin());
     for (std::uint32_t t = 0; t < download.tracks.size(); ++t) {
         if (!formats[t]) {
             continue;
         }
         model::MediaTrack& track = download.tracks[t];
         const OfferedFormat& format = *formats[t];
+        if (t == firstFormat) {
+            result.headers = format.site->headers;
+        }
         switch (FitOf(download, track, format)) {
         case Fit::Playlist:
             // Its pieces' addresses may be signed too: the playlist is always read again.
@@ -177,12 +184,13 @@ FreshAddresses ApplyFreshAddresses(model::Download& download, const media::SiteV
         }
         case Fit::WholeFile: {
             const std::string url = *WholeFileUrl(format);
-            const bool sameBytes = track.expectedBytes && format.bytes && *track.expectedBytes == *format.bytes;
+            const std::optional<std::int64_t> bytes = format.site->bytes;
+            const bool sameBytes = track.expectedBytes && bytes && *track.expectedBytes == *bytes;
             if (!sameBytes) {
                 track.ranges.clear();
                 track.pieces.front().done = false;
                 track.pieces.front().bytes.reset();
-                track.expectedBytes = format.bytes;
+                track.expectedBytes = bytes;
                 result.restarted.push_back(t);
             } else if (AddressOf(track) == url) {
                 break;  // nothing new

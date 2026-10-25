@@ -73,6 +73,8 @@ struct MediaChoice {
     std::optional<model::SiteQuality> siteQuality;
     std::vector<MediaTrackChoice> tracks;
     std::optional<std::int64_t> approximateBytes;  // shown until the stream's size is known
+    // A site video's other headers for its formats (QualityTracks::headers), sent with every request.
+    std::vector<std::string> siteHeaders;
 };
 
 // At most this many tracks in one stream download: video, audio and some to spare.

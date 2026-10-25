@@ -1128,7 +1128,7 @@ protected:
     }
 
     // The resolver's answer to its last question: the formats at new addresses, with `bytes` for 299.
-    void Answer(std::int64_t bytes299 = 257'619'653, bool with299 = true)
+    void Answer(std::int64_t bytes299 = 257'619'653, bool with299 = true, std::vector<std::string> headers = {})
     {
         ASSERT_FALSE(sites_.asked.empty());
         ldm::core::SiteLookupFinished finished;
@@ -1153,6 +1153,7 @@ protected:
                 ldm::media::Variant variant;
                 variant.source = whole;
                 variant.site = ldm::media::SiteFormat{format, bytes};
+                variant.site->headers = headers;
                 video.offer.variants.push_back(variant);
             }
         }
@@ -1175,6 +1176,17 @@ TEST_F(SiteRefreshTest, FreshAddressesAreAskedForBeforeTheEngineStartsWhenTheOld
     const auto stored = Stored(id);
     ASSERT_TRUE(stored);
     EXPECT_EQ(stored->tracks[0].pieces.front().url, Address("299", 21'600)) << "kept for the next start";
+}
+
+TEST_F(SiteRefreshTest, FreshAddressesBringTheSitesHeadersForThem)
+{
+    const DownloadId id = AddExpiring(5 * 60);
+    Answer(257'619'653, true, {"X-Playback-Session-Id: s2"});
+    ASSERT_EQ(engine_.mediaStarts.size(), 1u);
+    EXPECT_EQ(engine_.mediaStarts[0].headers, std::vector<std::string>{"X-Playback-Session-Id: s2"});
+    const auto stored = Stored(id);
+    ASSERT_TRUE(stored);
+    EXPECT_FALSE(stored->siteHeaderSecret.empty()) << "kept for the next start";
 }
 
 TEST_F(SiteRefreshTest, AddressesThatStayValidStartAtOnce)
@@ -1282,6 +1294,7 @@ TEST_F(SiteRefreshTest, ARefusedHlsTrackReadsItsFreshPlaylistAndKeepsThePiecesOn
         video.sourceUrl = "https://vod.test/old/index.m3u8";
         video.siteFormat = "hls-720";
         media.tracks = {video};
+        media.siteHeaders = {"Stream_Key: k1"};
         c.media = media;
     });
     ASSERT_TRUE(result.id) << result.error.value_or("");
@@ -1294,6 +1307,7 @@ TEST_F(SiteRefreshTest, ARefusedHlsTrackReadsItsFreshPlaylistAndKeepsThePiecesOn
         answer.body = "#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXTINF:4,\na.ts\n#EXTINF:4,\nb.ts\n#EXT-X-ENDLIST\n";
         Send(DownloadId{}, 0, answer);
     };
+    EXPECT_EQ(engine_.fetches.back().headers, std::vector<std::string>{"Stream_Key: k1"}) << "the playlist's request too";
     answerPlaylist("old");
     ASSERT_EQ(engine_.mediaStarts.size(), 1u);
 
@@ -1420,6 +1434,38 @@ TEST_F(CoordinatorTest, ADashStreamStartsWithEveryPieceInItsPartsFolder)
     EXPECT_EQ(view.stream->piecesTotal, 8);
     EXPECT_EQ(view.stream->estimatedBytes, 3'000'000) << "the panel's estimate until pieces arrive";
     EXPECT_TRUE(view.download.tracks[0].pieces.empty()) << "snapshots leave the piece lists out";
+}
+
+TEST_F(CoordinatorTest, ASitesOwnHeadersGoWithEveryRequestUntilItCompletes)
+{
+    const AddResult result = Add("https://cdn.test/v.mpd", AddMode::StartNow, [](AddDownloadCommand& c) {
+        c.fileName = "Clip.mp4";
+        c.media = DashChoice();
+        c.media->siteHeaders = {"Stream_Key: k1", "Host: other.test", "X-Forged: a\nX-More: b"};
+    });
+    ASSERT_TRUE(result.id) << result.error.value_or("");
+    const DownloadId id = *result.id;
+    ASSERT_EQ(engine_.mediaStarts.size(), 1u);
+    EXPECT_EQ(engine_.mediaStarts[0].headers, std::vector<std::string>{"Stream_Key: k1"})
+        << "LDM's own headers and lines that would forge others are left out";
+    auto stored = Stored(id);
+    ASSERT_TRUE(stored);
+    ASSERT_FALSE(stored->siteHeaderSecret.empty());
+    EXPECT_EQ(stored->siteHeaderSecret.front(), 'P') << "stored through the secret protector (DPAPI in LDM)";
+    EXPECT_TRUE(View(id).download.siteHeaderSecret.empty()) << "snapshots never carry secrets";
+
+    ldm::core::MediaFinished finished;
+    finished.outcome = TransferOutcome::Completed;
+    finished.done = {{0, 0, 100}, {0, 1, 1000}, {0, 2, 1000}, {0, 3, 1000}, {1, 0, 50}, {1, 1, 500}, {1, 2, 500}, {1, 3, 500}};
+    Send(id, 1, finished);
+    ldm::core::MuxFinished muxed;
+    muxed.output = kRoot / L"Video" / L"Clip.mp4.ldmparts" / L"output.mp4";
+    muxed.extension = "mp4";
+    muxed.bytes = 4321;
+    Send(id, 1, muxed);
+    Send(id, 1, ldm::core::FinalizeFinished{});
+    ASSERT_EQ(View(id).download.status, DownloadStatus::Completed);
+    EXPECT_TRUE(Stored(id)->siteHeaderSecret.empty()) << "kept only until completion, as cookies are";
 }
 
 TEST_F(CoordinatorTest, AStreamIsJoinedRenamedDescribedAndMovedWhenItsPiecesAreDone)

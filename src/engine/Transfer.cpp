@@ -321,6 +321,9 @@ void Transfer::StartConnection(Segment& segment, bool probe, Clock::time_point n
         curl_easy_setopt(easy, CURLOPT_COPYPOSTFIELDS, request_.post->body.data());
         headers = curl_slist_append(headers, ("Content-Type: " + request_.post->contentType).c_str());
     }
+    for (const std::string& line : request_.headers) {
+        headers = curl_slist_append(headers, line.c_str());
+    }
     if (headers != nullptr) {
         connection->headerList.reset(headers);
         curl_easy_setopt(easy, CURLOPT_HTTPHEADER, headers);
