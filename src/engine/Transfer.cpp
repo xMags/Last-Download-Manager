@@ -571,6 +571,14 @@ bool Transfer::AcceptFirstResponse(Connection& connection, Segment& segment)
             *headers.lastModified != *request_.validators.lastModified) {
             changed = true;
         }
+        // Without If-Range, a whole file of the same length is a server that ignores ranges now,
+        // not proof of a change; with If-Range it means the validators no longer match.
+        if (changed && !range && headers.status == 200 && !IfRangeValue() && headers.contentLength == totalSize_ &&
+            !headers.HasContentEncoding()) {
+            connection.failure = MakeFailure(FailureReason::ResumeUnsupported, FailureClass::NeedsUser,
+                                             "the server does not support resuming this download");
+            return false;
+        }
         if (changed) {
             connection.failure = MakeFailure(FailureReason::ResourceChanged, FailureClass::NeedsUser,
                                              "the file on the server has changed since the download started");
