@@ -15,8 +15,13 @@ add_library(ldm_media STATIC
     NumberText.h
     QualityList.cpp
     QualityList.h
+    SiteVideo.cpp
+    SiteVideo.h
     UrlReference.cpp
     UrlReference.h
     XmlElement.cpp
     XmlElement.h)
-target_link_libraries(ldm_media PUBLIC ldm_base)
+find_package(nlohmann_json CONFIG REQUIRED)
+target_link_libraries(ldm_media
+    PUBLIC ldm_base
+    PRIVATE nlohmann_json::nlohmann_json)

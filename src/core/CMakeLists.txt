@@ -34,6 +34,8 @@ add_library(ldm_core STATIC
     Scheduler.h
     SegmentPlanner.cpp
     SegmentPlanner.h
+    SiteList.cpp
+    SiteList.h
     Snapshot.h
     Store.h
     TransferEngine.h
