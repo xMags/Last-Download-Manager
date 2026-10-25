@@ -574,7 +574,7 @@ STYLE DS_SETFONT | DS_CONTROL | WS_CHILD
 FONT 9, "Segoe UI", 400, 0, 0x1
 BEGIN
     AUTOCHECKBOX "&Download videos from web pages", IDC_OPT_SITEVIDEOS, 7, 7, 286, 10, WS_TABSTOP
-    LTEXT "On a video page of YouTube, Dailymotion, Vimeo, Twitch, TED or Instagram, the media panel offers its qualities. Elsewhere, right-click and choose Download video with LDM, or use Find video in Add URL. yt-dlp, a free program, reads the page; LDM downloads.", -1, 7, 22, 286, 46
+    LTEXT "On video pages of YouTube, Facebook, Vimeo, Twitch, VK, Rumble, Kick and more sites, the media panel offers the qualities. Elsewhere, right-click and choose Download video with LDM, or use Find video in Add URL. yt-dlp reads the page.", -1, 7, 22, 286, 46
     LTEXT "Turning this on downloads yt-dlp, and Deno, which yt-dlp needs for YouTube, from their GitHub pages: about 61 MB, 125 MB on disk. LDM keeps them up to date.", -1, 7, 70, 286, 18
     GROUPBOX "Components", -1, 7, 92, 286, 58
     LTEXT "", IDC_OPT_SITETOOLS_STATUS, 14, 102, 272, 26
