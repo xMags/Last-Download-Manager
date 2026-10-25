@@ -336,6 +336,7 @@ struct SiteLookupFinished {
         ToolsMissing,  // the resolver's programs are not installed
         Resolver,      // the resolver failed in a way that a newer version may fix
         Busy,          // too many lookups at once; LDM did not ask
+        Unreachable,   // the site could not be reached (the network, or the site refusing this one)
     };
     Problem problem = Problem::None;
 };
