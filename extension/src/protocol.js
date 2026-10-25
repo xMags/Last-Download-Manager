@@ -159,7 +159,8 @@ export function makeCapture(download) {
   const optionalAddress = (value) => (isDownloadAddress(value) ? value : undefined);
   const optionalText = (value, max) => {
     const text = String(value ?? '');
-    return text && text.length <= max && !CONTROL.test(text) ? text : undefined;
+    // LDM's limits count UTF-8 bytes; one longer field would make it refuse the whole capture.
+    return text && utf8Length(text) <= max && !CONTROL.test(text) ? text : undefined;
   };
   const seen = new Set();
   const cookies = [];
@@ -361,7 +362,7 @@ export function makeMedia(media) {
     url: media.url,
     pageUrl: isWebAddress(media.pageUrl) ? media.pageUrl : undefined,
     pageTitle: cleanPageText(media.pageTitle, MAX_PAGE_TITLE_BYTES) || undefined,
-    mimeType: mimeType && mimeType.length <= 256 && !CONTROL.test(mimeType) ? mimeType : undefined,
+    mimeType: mimeType && utf8Length(mimeType) <= 256 && !CONTROL.test(mimeType) ? mimeType : undefined,
     fileSize: Number.isSafeInteger(media.fileSize) && media.fileSize >= 0 ? media.fileSize : undefined,
     userAgent: cleanText(media.userAgent, 1024) || 'Mozilla/5.0',
     cookies,
