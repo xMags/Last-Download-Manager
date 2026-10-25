@@ -69,6 +69,8 @@ private:
     void OnPageCommand(int id, int code);
     void OnPageNotify(const NMHDR& header);
     void ShowPage(int index);
+    // Shows the page with control `id`, says what is wrong and puts the cursor there.
+    void FailOn(int id, const std::wstring& message);
 
     [[nodiscard]] HWND Control(int id) const;
     [[nodiscard]] std::wstring Get(int id) const;

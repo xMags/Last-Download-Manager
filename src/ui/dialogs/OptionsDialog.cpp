@@ -72,9 +72,6 @@ constexpr std::array<std::pair<model::SpeedProfile, const wchar_t*>, 3> kProfile
     {model::SpeedProfile::High, L"High speed (cable, fiber, LAN)"},
 }};
 
-constexpr int kFileTypesPage = 1;
-constexpr int kSavePage = 2;
-
 // A file type as Options > File types accepts it: letters, digits and a few symbols, with '*' as a
 // wildcard and an optional leading dot (the extension ignores anything else).
 bool IsFileTypePattern(const std::wstring& word)
@@ -325,6 +322,20 @@ void OptionsDialog::ShowPage(int index)
     }
 }
 
+void OptionsDialog::FailOn(int id, const std::wstring& message)
+{
+    for (int i = 0; i < kPageCount; ++i) {
+        if (const HWND control = ::GetDlgItem(pages_[static_cast<size_t>(i)], id); control != nullptr) {
+            TabCtrl_SetCurSel(Item(IDC_OPT_TAB), i);
+            ShowPage(i);
+            Warn(message);
+            ::SetFocus(control);
+            return;
+        }
+    }
+    Warn(message);
+}
+
 HWND OptionsDialog::Control(int id) const
 {
     for (const HWND page : pages_) {
@@ -509,7 +520,7 @@ bool OptionsDialog::StoreProxy(int enabledId, int hostId, int portId, int userId
     server.port = GetNumber(portId).value_or(0);
     server.user = base::ToUtf8(Get(userId));
     if (server.enabled && (server.host.empty() || server.port < 1 || server.port > 65535)) {
-        Warn(L"Each enabled proxy needs a server and a port between 1 and 65535.");
+        FailOn(server.host.empty() ? hostId : portId, L"Each enabled proxy needs a server and a port between 1 and 65535.");
         return false;
     }
     const std::string password = base::ToUtf8(Get(passwordId));
@@ -874,9 +885,7 @@ bool OptionsDialog::Store()
     const std::vector<std::wstring> types = SplitWords(Get(IDC_OPT_TYPES));
     for (const std::wstring& type : types) {
         if (!IsFileTypePattern(type)) {
-            Warn(L"\"" + type + L"\" is not a file type. Use letters and digits, such as ZIP, with * as a wildcard.");
-            ShowPage(kFileTypesPage);
-            TabCtrl_SetCurSel(Item(IDC_OPT_TAB), kFileTypesPage);
+            FailOn(IDC_OPT_TYPES, L"\"" + type + L"\" is not a file type. Use letters and digits, such as ZIP, with * as a wildcard.");
             return false;
         }
     }
@@ -896,17 +905,19 @@ bool OptionsDialog::Store()
     s.siteVideosSignIn = siteSignIn_;
 
     StoreCategory(currentCategory_);
-    for (const model::Category& category : categories_) {
+    for (size_t i = 0; i < categories_.size(); ++i) {
+        const model::Category& category = categories_[i];
         if (!std::filesystem::path(base::ToUtf16(category.folder)).is_absolute()) {
-            Warn(L"The folder of category \"" + base::ToUtf16(category.name) + L"\" must be a full path.");
-            ShowPage(kSavePage);
-            TabCtrl_SetCurSel(Item(IDC_OPT_TAB), kSavePage);
+            // Shows that category, so the folder field is the one that is wrong.
+            ComboBox_SetCurSel(Control(IDC_OPT_CATEGORY), static_cast<int>(i));
+            LoadCategory(static_cast<int>(i));
+            FailOn(IDC_OPT_CAT_FOLDER, L"The folder of category \"" + base::ToUtf16(category.name) + L"\" must be a full path.");
             return false;
         }
     }
     const std::wstring temporary = Get(IDC_OPT_TEMP);
     if (!temporary.empty() && !std::filesystem::path(temporary).is_absolute()) {
-        Warn(L"The temporary folder must be a full path, or empty.");
+        FailOn(IDC_OPT_TEMP, L"The temporary folder must be a full path, or empty.");
         return false;
     }
     s.temporaryDirectory = base::ToUtf8(temporary);
@@ -935,7 +946,7 @@ bool OptionsDialog::Store()
     }
     const auto connections = GetNumber(IDC_OPT_CONNECTIONS);
     if (!connections || *connections < 1 || *connections > 32) {
-        Warn(L"Connections per download must be between 1 and 32.");
+        FailOn(IDC_OPT_CONNECTIONS, L"Connections per download must be between 1 and 32.");
         return false;
     }
     s.defaultMaxConnections = *connections;
@@ -945,11 +956,11 @@ bool OptionsDialog::Store()
     const auto quotaMegabytes = GetNumber(IDC_OPT_QUOTA_MB);
     const auto quotaHours = GetNumber(IDC_OPT_QUOTA_HOURS);
     if (s.quota.enabled && (!quotaMegabytes || *quotaMegabytes < 1 || *quotaMegabytes > 10'000'000)) {
-        Warn(L"The download quota must be between 1 and 10,000,000 MB.");
+        FailOn(IDC_OPT_QUOTA_MB, L"The download quota must be between 1 and 10,000,000 MB.");
         return false;
     }
     if (s.quota.enabled && (!quotaHours || *quotaHours < 1 || *quotaHours > 23)) {
-        Warn(L"The quota period must be between 1 and 23 hours.");
+        FailOn(IDC_OPT_QUOTA_HOURS, L"The quota period must be between 1 and 23 hours.");
         return false;
     }
     if (quotaMegabytes && *quotaMegabytes >= 1 && *quotaMegabytes <= 10'000'000) {
@@ -965,7 +976,7 @@ bool OptionsDialog::Store()
                                                     : model::ProxyMode::System;
     s.autoConfigScriptUrl = base::ToUtf8(Get(IDC_OPT_PAC_URL));
     if (s.proxyMode == model::ProxyMode::AutoConfigScript && s.autoConfigScriptUrl.empty()) {
-        Warn(L"Enter the address of the automatic configuration script.");
+        FailOn(IDC_OPT_PAC_URL, L"Enter the address of the automatic configuration script.");
         return false;
     }
     if (!StoreProxy(IDC_OPT_HTTP_ON, IDC_OPT_HTTP_HOST, IDC_OPT_HTTP_PORT, IDC_OPT_HTTP_USER, IDC_OPT_HTTP_PASS, s.httpProxy) ||
