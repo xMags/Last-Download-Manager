@@ -27,7 +27,7 @@ SELECT id, public_id, url, final_url, referer, parent_page, user_agent, file_nam
        last_modified, content_type, max_connections, speed_limit_bps, login_user, login_secret,
        completion_action, created_at, last_try_at, completed_at, last_result, sort_order, cookie_secret,
        post_secret, post_content_type, awaiting_confirmation, kind, media_private_source, queue_id,
-       queue_position, queue_failures, project_id, listed, replace_final
+       queue_position, queue_failures, project_id, listed, replace_final, site_video
 FROM downloads ORDER BY sort_order, id
 )sql";
 
@@ -38,9 +38,10 @@ INSERT INTO downloads (
   last_modified, content_type, max_connections, speed_limit_bps, login_user, login_secret,
   completion_action, created_at, last_try_at, completed_at, last_result, sort_order, cookie_secret,
   post_secret, post_content_type, awaiting_confirmation, kind, media_private_source, queue_id,
-  queue_position, queue_failures, project_id, listed, replace_final)
+  queue_position, queue_failures, project_id, listed, replace_final, site_video)
 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20,
-        ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, ?40)
+        ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, ?40,
+        ?41)
 )sql";
 
 constexpr std::string_view kUpdateDownload = R"sql(
@@ -53,8 +54,8 @@ UPDATE downloads SET
   completed_at = ?26, last_result = ?27, sort_order = ?28, cookie_secret = ?29, post_secret = ?30,
   post_content_type = ?31, awaiting_confirmation = ?32, kind = ?33, media_private_source = ?34,
   queue_id = ?35, queue_position = ?36, queue_failures = ?37, project_id = ?38, listed = ?39,
-  replace_final = ?40
-WHERE id = ?41
+  replace_final = ?40, site_video = ?41
+WHERE id = ?42
 )sql";
 
 base::Error CorruptRow(std::string_view what)
@@ -218,7 +219,8 @@ void BindDownloadColumns(Statement& statement, const model::Download& d)
         .Bind(37, d.queueFailures)
         .Bind(38, d.projectId ? std::optional<std::int64_t>(d.projectId->value) : std::nullopt)
         .Bind(39, d.listed)
-        .Bind(40, d.replaceFinalFile);
+        .Bind(40, d.replaceFinalFile)
+        .Bind(41, d.siteVideo);
 }
 
 base::Result<model::Download> ReadDownload(const Statement& row)
@@ -291,6 +293,7 @@ base::Result<model::Download> ReadDownload(const Statement& row)
     }
     d.listed = row.Int64(39) != 0;
     d.replaceFinalFile = row.Int64(40) != 0;
+    d.siteVideo = row.Int64(41) != 0;
     return d;
 }
 
@@ -389,7 +392,8 @@ base::Status SqliteStore::LoadTracks(std::vector<model::Download>& downloads)
 {
     const DownloadsById byId = IndexById(downloads);
     base::Result<Statement> tracks = connection_.Prepare(
-        "SELECT download_id, track, role, source_url, codecs, language, name, whole_file, live FROM media_tracks "
+        "SELECT download_id, track, role, source_url, codecs, language, name, whole_file, live, site_format, expected_bytes "
+        "FROM media_tracks "
         "ORDER BY download_id, track");
     if (!tracks) {
         return tracks.GetError();
@@ -420,6 +424,8 @@ base::Status SqliteStore::LoadTracks(std::vector<model::Download>& downloads)
         track.name = r.Text(6);
         track.wholeFile = r.Int64(7) != 0;
         track.live = r.Int64(8) != 0;
+        track.siteFormat = r.Text(9);
+        track.expectedBytes = r.OptionalInt64(10);
         owner->tracks.push_back(std::move(track));
     }
 
@@ -569,8 +575,8 @@ base::Status SqliteStore::DeleteTrack(model::DownloadId id, std::uint32_t track)
 base::Status SqliteStore::WriteTrack(model::DownloadId id, std::uint32_t index, const model::MediaTrack& track)
 {
     base::Result<Statement> insertTrack = connection_.Prepare(
-        "INSERT INTO media_tracks (download_id, track, role, source_url, codecs, language, name, whole_file, live) "
-        "VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)");
+        "INSERT INTO media_tracks (download_id, track, role, source_url, codecs, language, name, whole_file, live, "
+        "site_format, expected_bytes) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)");
     if (!insertTrack) {
         return insertTrack.GetError();
     }
@@ -584,6 +590,8 @@ base::Status SqliteStore::WriteTrack(model::DownloadId id, std::uint32_t index, 
                                 .Bind(7, track.name)
                                 .Bind(8, track.wholeFile)
                                 .Bind(9, track.live)
+                                .Bind(10, track.siteFormat)
+                                .Bind(11, track.expectedBytes)
                                 .Run();
     if (!inserted) {
         return inserted;
@@ -706,7 +714,7 @@ base::Status SqliteStore::SaveDownload(const model::Download& download)
         return update.GetError();
     }
     BindDownloadColumns(update.Value(), download);
-    update.Value().Bind(41, download.id.value);
+    update.Value().Bind(42, download.id.value);
     base::Status updated = update.Value().Run();
     if (!updated) {
         return updated;

@@ -78,6 +78,10 @@ struct MediaTrack {
     // An HLS live stream still being recorded: its playlist is read again while the download runs
     // and new pieces are added at the end. Off once the stream ended or the user finished it.
     bool live = false;
+    // A site video's track (Download::siteVideo): the resolver's format id, to ask for the same
+    // format again, and its exact length when the site stated one, to tell the same bytes came.
+    std::string siteFormat;
+    std::optional<std::int64_t> expectedBytes;
     std::vector<MediaKey> keys;
     // Empty until the track's list is known (an HLS media playlist not read yet).
     std::vector<MediaPiece> pieces;

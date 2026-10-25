@@ -123,6 +123,10 @@ struct Download {
     // addresses too. Otherwise LDM refuses them, so a hostile manifest cannot make LDM send
     // requests into the home network.
     bool mediaFromPrivateNetwork = false;
+    // A video of a supported site (a Dash stream of whole-file tracks): `url` is the video's page,
+    // as core::FindSiteVideo builds it, and the tracks' addresses come from asking the site
+    // resolver about that page. They expire, so they are asked for again when they do.
+    bool siteVideo = false;
     std::vector<MediaTrack> tracks;  // a stream's tracks, in order; empty for a file
 
     [[nodiscard]] bool IsStream() const noexcept { return kind != DownloadKind::File; }

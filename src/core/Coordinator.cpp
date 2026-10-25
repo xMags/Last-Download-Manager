@@ -8,6 +8,7 @@
 #include "core/MediaDownloads.h"
 #include "core/MediaPieces.h"
 #include "core/NetworkAddress.h"
+#include "core/SiteList.h"
 #include "model/Cookie.h"
 
 #include <algorithm>
@@ -1815,8 +1816,16 @@ std::optional<std::string> Coordinator::ValidateMedia(const MediaChoice& media, 
         return "A stream download needs between 1 and " + std::to_string(kMaxMediaTracks) + " tracks.";
     }
     const auto clip = [](const std::string& text) { return text.substr(0, 200); };
+    if (media.siteVideo) {
+        // The page must be one LDM builds itself, so a refresh asks the resolver about exactly it.
+        const auto page = FindSiteVideo(download.url);
+        if (media.kind != model::DownloadKind::Dash || !page || page->canonicalUrl != download.url) {
+            return "A site video needs the address of its page.";
+        }
+    }
     download.kind = media.kind;
     download.mediaFromPrivateNetwork = media.fromPrivateNetwork;
+    download.siteVideo = media.siteVideo;
     download.tracks.clear();
     for (const MediaTrackChoice& choice : media.tracks) {
         const auto source = ParseUrl(choice.sourceUrl);
@@ -1843,6 +1852,14 @@ std::optional<std::string> Coordinator::ValidateMedia(const MediaChoice& media, 
                 return "A track of the stream lists no segments, or too many.";
             }
             FillTrack(track, *choice.segments);
+        }
+        if (media.siteVideo) {
+            if (!track.wholeFile || choice.siteFormat.empty() || choice.siteFormat.size() > 64 ||
+                (choice.expectedBytes && *choice.expectedBytes <= 0)) {
+                return "A track of the site video has no format to ask for again.";
+            }
+            track.siteFormat = choice.siteFormat;
+            track.expectedBytes = choice.expectedBytes;
         }
         download.tracks.push_back(std::move(track));
     }
