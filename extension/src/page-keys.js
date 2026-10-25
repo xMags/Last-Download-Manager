@@ -54,8 +54,10 @@
       report();
     }
   };
-  addEventListener('keydown', (event) => update(event, true), true);
-  addEventListener('keyup', (event) => update(event, false), true);
+  // Only the user's own input counts: page code can dispatch made-up key and mouse events, which
+  // must not force, push or block a download.
+  addEventListener('keydown', (event) => event.isTrusted && update(event, true), true);
+  addEventListener('keyup', (event) => event.isTrusted && update(event, false), true);
   addEventListener('blur', () => {
     if (Object.values(keys).some(Boolean)) {
       Object.keys(keys).forEach((name) => { keys[name] = false; });
@@ -105,7 +107,7 @@
   // Reported on the button press: the browser may start a download (Alt+click in Chrome) before
   // the click event reaches the page.
   addEventListener('mousedown', (event) => {
-    const href = event.button === 0 ? linkOf(event) : null;
+    const href = event.isTrusted && event.button === 0 ? linkOf(event) : null;
     if (href) {
       send({ type: 'link-click', href, pageUrl: location.href, keys: pressedKeys(event) });
     }
@@ -115,7 +117,7 @@
   // usual; a download they start is forced when it starts. If LDM cannot take the link, the page
   // opens it after all.
   addEventListener('click', (event) => {
-    const href = event.button === 0 ? linkOf(event) : null;
+    const href = event.isTrusted && event.button === 0 ? linkOf(event) : null;
     if (!enabled || !href || !forceHeld(pressedKeys(event)) || !/^(https?|ftps?):/i.test(href) || !sendsToLdm(href)) {
       return;
     }
