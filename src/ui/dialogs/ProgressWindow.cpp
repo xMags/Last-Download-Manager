@@ -75,8 +75,11 @@ void ProgressWindow::Open(HWND owner, const core::DownloadView& view, const mode
     ShowPage(kStatusPage);
     SetChecked(IDC_PROG_SHOW_COMPLETE, settings.showCompleteDialog);
     const auto limit = view.download.speedLimitBytesPerSecond;
+    // Filling the field sends EN_CHANGE, which must not post the shown value back as a new limit.
+    updating_ = true;
     SetChecked(IDC_PROG_LIMIT_ENABLE, limit.has_value());
     SetNumber(IDC_PROG_LIMIT_VALUE, limit ? std::max<std::int64_t>(*limit / 1024, 1) : 500);
+    updating_ = false;
     Enable(IDC_PROG_LIMIT_VALUE, limit.has_value());
     SetChecked(IDC_PROG_LIMIT_REMEMBER, true);
     for (size_t i = 0; i < kActions.size(); ++i) {
