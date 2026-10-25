@@ -688,6 +688,15 @@ void GrabberExplorer::OnPageRead(Project& project, Item& item, const core::Fetch
     item.data.state = model::GrabberItemState::Done;
     item.data.size = static_cast<std::int64_t>(finished.body.size());
     Changed(project, item);
+    if (!item.data.parentId && !finished.finalUrl.empty()) {
+        // A start page that redirects to another host of its domain ("example.com" to
+        // "www.example.com") makes that host the site: every link on it is there. Another domain
+        // is not adopted, so the project's login never follows a redirect off the site.
+        const auto landed = core::ParseUrl(finished.finalUrl);
+        if (landed && landed->host != project.site.host && MainDomainOf(landed->host) == project.site.mainDomain) {
+            project.site = BaseSiteOf(*landed);
+        }
+    }
     if (++project.pagesExplored >= config_.maxPagesExplored) {
         project.limitReached = true;
         project.pageQueue.clear();

@@ -261,8 +261,9 @@ protected:
             served_.push_back(request);
             FetchFinished finished;
             finished.fetchId = request.fetchId;
-            finished.finalUrl = request.url;
-            const auto found = site_.find(request.url);
+            const auto redirect = redirects_.find(request.url);
+            finished.finalUrl = redirect == redirects_.end() ? request.url : redirect->second;
+            const auto found = site_.find(finished.finalUrl);
             if (found == site_.end()) {
                 finished.failure = ldm::core::TransferFailure{ldm::core::FailureReason::NotFound,
                                                               ldm::core::FailureClass::Fatal, 404, "not found"};
@@ -356,6 +357,7 @@ protected:
     std::unique_ptr<GrabberExplorer> explorer_;
     std::shared_ptr<const ldm::core::Snapshot> core_;
     std::map<std::string, Resource> site_;
+    std::map<std::string, std::string> redirects_;  // address -> where the server sends it
     std::vector<FetchRequest> served_;
     std::uint64_t token_ = 0;
 };
@@ -424,6 +426,23 @@ TEST_F(GrabberExplorerTest, ExploresBreadthFirstWithinTheDepth)
     EXPECT_EQ(view->stats.pagesExplored, 3);
     EXPECT_TRUE(view->project.lastRunAtMs);
     EXPECT_FALSE(view->startPageFailure);
+}
+
+TEST_F(GrabberExplorerTest, AStartPageRedirectedWithinItsDomainMovesTheSite)
+{
+    Start();
+    redirects_["https://example.com/"] = "https://www.example.com/";
+    Page("https://www.example.com/", R"(<a href="a.html">A</a><a href="https://elsewhere.com/b.html">B</a>)");
+    Page("https://www.example.com/a.html", "<p>A</p>");
+    Page("https://elsewhere.com/b.html", "<p>B</p>");
+    const GrabberProjectId id = Save(Definition("https://example.com/"));
+
+    explorer_->Handle(ldm::core::GrabberExploreCommand{id, false, {}});
+    Serve();
+
+    // The links on www.example.com are on the site; another domain still is not.
+    const std::vector<std::string> expected{"https://example.com/", "https://www.example.com/a.html"};
+    EXPECT_EQ(ServedUrls(), expected);
 }
 
 TEST_F(GrabberExplorerTest, SaysWhenTheStartPageCannotBeRead)
