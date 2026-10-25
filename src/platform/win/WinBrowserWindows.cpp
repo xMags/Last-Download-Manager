@@ -25,6 +25,10 @@ constexpr const wchar_t* kLaunchers[] = {L"cmd.exe", L"conhost.exe", L"ldm-host.
 // How far the found page size may be from the reported one, in pixels: rounding of fractional
 // pixel ratios.
 constexpr double kPageSizeTolerance = 3;
+// How much better (summed edge distance, physical pixels) another window must match a new report
+// before it replaces the window a tab was found in: a report sent while the window moved is a
+// little behind it.
+constexpr double kSwitchMargin = 200;
 
 std::wstring ClassOf(HWND window)
 {
@@ -73,32 +77,44 @@ struct WindowSearch {
     Candidate best;
 };
 
-BOOL CALLBACK VisitTopWindow(HWND window, LPARAM parameter)
+// True for a shown, not minimized, titled browser window of `processId`: a window a page can be in.
+bool IsBrowserWindow(HWND window, std::uint32_t processId)
 {
-    auto& search = *reinterpret_cast<WindowSearch*>(parameter);  // EnumWindows hands back our pointer
     DWORD owner = 0;
     ::GetWindowThreadProcessId(window, &owner);
-    if (owner != search.processId || !::IsWindowVisible(window) || ::IsIconic(window)) {
-        return TRUE;
+    if (owner != processId || !::IsWindowVisible(window) || ::IsIconic(window)) {
+        return false;
     }
     const std::wstring windowClass = ClassOf(window);
     if (windowClass != kChromiumWindowClass && windowClass != kFirefoxWindowClass) {
-        return TRUE;
+        return false;
     }
-    if (::GetWindowTextLengthW(window) == 0) {
-        return TRUE;  // menus, tooltips and other helper windows have no title
-    }
+    return ::GetWindowTextLengthW(window) != 0;  // menus, tooltips and other helper windows have no title
+}
+
+// How far the window's bounds are from the reported ones, summed over the four edges.
+double DistanceToReport(HWND window, const browser::VideoPosition& position)
+{
     RECT bounds{};
     if (!::GetWindowRect(window, &bounds)) {
-        return TRUE;
+        return std::numeric_limits<double>::max();
     }
     // The extension reports the window in CSS pixels of the screen: physical pixels at the
     // window's display scale.
     const double scale = static_cast<double>(::GetDpiForWindow(window)) / USER_DEFAULT_SCREEN_DPI;
-    const browser::CssRect& reported = search.position->window;
-    const double distance = std::abs(bounds.left - reported.x * scale) + std::abs(bounds.top - reported.y * scale) +
-                            std::abs((bounds.right - bounds.left) - reported.width * scale) +
-                            std::abs((bounds.bottom - bounds.top) - reported.height * scale);
+    const browser::CssRect& reported = position.window;
+    return std::abs(bounds.left - reported.x * scale) + std::abs(bounds.top - reported.y * scale) +
+           std::abs((bounds.right - bounds.left) - reported.width * scale) +
+           std::abs((bounds.bottom - bounds.top) - reported.height * scale);
+}
+
+BOOL CALLBACK VisitTopWindow(HWND window, LPARAM parameter)
+{
+    auto& search = *reinterpret_cast<WindowSearch*>(parameter);  // EnumWindows hands back our pointer
+    if (!IsBrowserWindow(window, search.processId)) {
+        return TRUE;
+    }
+    const double distance = DistanceToReport(window, *search.position);
     if (distance < search.best.distance) {
         search.best = Candidate{window, distance};
     }
@@ -160,28 +176,46 @@ std::uint32_t WinBrowserWindows::BrowserProcessOf(std::uint32_t hostProcessId)
     return 0;
 }
 
-std::optional<ui::BrowserView> WinBrowserWindows::Find(std::uint32_t hostProcessId, const browser::VideoPosition& position)
+std::optional<ui::BrowserView> WinBrowserWindows::Find(std::uint32_t hostProcessId, const browser::VideoPosition& position,
+                                                       HWND known, bool recheck)
 {
     const std::uint32_t browser = hostProcessId != 0 ? BrowserProcessOf(hostProcessId) : 0;
     if (browser == 0) {
         return std::nullopt;
     }
+    const bool knownUsable = known != nullptr && ::IsWindow(known) && IsBrowserWindow(known, browser);
+    if (knownUsable && !recheck) {
+        if (auto view = PageIn(known, position)) {
+            return view;
+        }
+    }
     WindowSearch windows;
     windows.processId = browser;
     windows.position = &position;
     ::EnumWindows(&VisitTopWindow, reinterpret_cast<LPARAM>(&windows));  // the callback reads it back
+    if (knownUsable && windows.best.window != known &&
+        DistanceToReport(known, position) <= windows.best.distance + kSwitchMargin) {
+        if (auto view = PageIn(known, position)) {
+            return view;
+        }
+    }
     if (windows.best.window == nullptr) {
         return std::nullopt;
     }
+    return PageIn(windows.best.window, position);
+}
+
+std::optional<ui::BrowserView> WinBrowserWindows::PageIn(HWND window, const browser::VideoPosition& position)
+{
     ui::BrowserView view;
-    view.window = windows.best.window;
+    view.window = window;
     const double pageWidth = position.viewport.width * position.pixelRatio;
     const double pageHeight = position.viewport.height * position.pixelRatio;
-    if (ClassOf(view.window) == kChromiumWindowClass) {
+    if (ClassOf(window) == kChromiumWindowClass) {
         PageSearch page;
         page.width = pageWidth;
         page.height = pageHeight;
-        ::EnumChildWindows(view.window, &VisitChild, reinterpret_cast<LPARAM>(&page));  // read back in VisitChild
+        ::EnumChildWindows(window, &VisitChild, reinterpret_cast<LPARAM>(&page));  // read back in VisitChild
         if (page.best == nullptr || !::GetWindowRect(page.best, &view.page)) {
             return std::nullopt;
         }
@@ -190,8 +224,18 @@ std::optional<ui::BrowserView> WinBrowserWindows::Find(std::uint32_t hostProcess
     if (!position.viewportPositionKnown) {
         return std::nullopt;
     }
-    const LONG left = std::lround(position.viewport.x * position.pixelRatio);
-    const LONG top = std::lround(position.viewport.y * position.pixelRatio);
+    // Firefox draws pages without a child window. The page keeps its place in the window, so it
+    // moves with the window's live bounds rather than staying where the last report saw it.
+    RECT bounds{};
+    if (!::GetWindowRect(window, &bounds)) {
+        return std::nullopt;
+    }
+    const double scale = static_cast<double>(::GetDpiForWindow(window)) / USER_DEFAULT_SCREEN_DPI;
+    // Both reported in screen CSS pixels: the page's at its zoom (pixelRatio), the window's at the
+    // display scale.
+    const LONG left =
+        bounds.left + std::lround(position.viewport.x * position.pixelRatio - position.window.x * scale);
+    const LONG top = bounds.top + std::lround(position.viewport.y * position.pixelRatio - position.window.y * scale);
     view.page = RECT{left, top, left + std::lround(pageWidth), top + std::lround(pageHeight)};
     return view;
 }

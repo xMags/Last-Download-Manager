@@ -11,6 +11,7 @@
 #include "ui/MediaPanelWindow.h"
 #include "ui/StreamChoice.h"
 #include "ui/Theme.h"
+#include "ui/WindowMoveWatch.h"
 
 #include <cstdint>
 #include <functional>
@@ -64,6 +65,7 @@ private:
     struct Followed {
         TabKey tab;
         browser::VideoPosition position;
+        HWND window = nullptr;  // the browser window the tab was found in; null until found
     };
 
     void OnCatalogChanged(BrowserConnectionId connection, int tabId);
@@ -89,6 +91,9 @@ private:
     int menuEdge_ = -1;
     UINT menuEdgeDpi_ = 0;
     int menuLineWidth_ = 0;  // the line width of the menu open now; 0 when it does not match the panel
+    bool recheckWindow_ = false;  // a new report came: Place matches the window against it again
+    // Last member: let go first, so no move event reaches a controller being destroyed.
+    WindowMoveWatch moveWatch_{[this] { Place(); }};
 };
 
 }  // namespace ldm::ui

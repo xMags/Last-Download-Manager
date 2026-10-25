@@ -17,11 +17,14 @@ namespace ldm::platform {
 class WinBrowserWindows final : public ui::BrowserWindows {
 public:
     [[nodiscard]] std::optional<ui::BrowserView> Find(std::uint32_t hostProcessId,
-                                                      const browser::VideoPosition& position) override;
+                                                      const browser::VideoPosition& position, HWND known,
+                                                      bool recheck) override;
     [[nodiscard]] bool IsShownAt(const ui::BrowserView& view, POINT point, HWND panel) override;
 
 private:
     [[nodiscard]] std::uint32_t BrowserProcessOf(std::uint32_t hostProcessId);
+    // The page area of `window` for `position`, or nothing when it shows no page of that size.
+    [[nodiscard]] static std::optional<ui::BrowserView> PageIn(HWND window, const browser::VideoPosition& position);
 
     std::map<std::uint32_t, std::uint32_t> browsers_;  // host process -> browser process
 };

@@ -102,6 +102,8 @@ add_library(ldm_ui STATIC
     TrayIcon.h
     UiBridge.cpp
     UiBridge.h
+    WindowMoveWatch.cpp
+    WindowMoveWatch.h
     dialogs/AddUrlDialog.cpp
     dialogs/AddUrlDialog.h
     dialogs/AllLinksDialog.cpp
