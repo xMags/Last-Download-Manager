@@ -23,6 +23,7 @@ public:
         std::function<void(POINT anchor)> openMenu;  // screen point under the panel's left edge
         std::function<void()> close;                  // the user closed the panel
         std::function<void()> tick;                   // the placement timer, while it runs
+        std::function<void(HWND menuWindow)> menuShown;  // the open menu is on screen
     };
 
     MediaPanelWindow() = default;
@@ -47,6 +48,11 @@ public:
     void SetContent(bool protectedVideo);
     void SetMini(bool mini);
     [[nodiscard]] bool Mini() const noexcept { return mini_; }
+    // Full mode is at least this wide (physical pixels), to match the menu under it; 0 for the
+    // width of the text. Keeps the right edge, like SetMini. Forgotten in mini mode and when the
+    // panel moves to a monitor with another DPI.
+    void SetMinWidth(int width);
+    [[nodiscard]] RECT WindowRect() const;
     // Repaints with the theme's current colors.
     void ThemeChanged();
 
@@ -71,6 +77,7 @@ private:
     void SetHot(Part part);
     void SetPressed(Part part);
     void UpdateFont(UINT dpi);
+    void ResizeKeepingRight();
 
     HWND window_ = nullptr;
     const PanelMenuPainter* menuPainter_ = nullptr;
@@ -81,6 +88,8 @@ private:
     UINT dpi_ = USER_DEFAULT_SCREEN_DPI;
     bool visible_ = false;
     bool mini_ = false;
+    int minWidth_ = 0;
+    bool menuShownReported_ = false;  // menuShown went out for the menu open now
     bool protected_ = false;
     bool timerRunning_ = false;
     bool tracking_ = false;  // TrackMouseEvent asked for WM_MOUSELEAVE

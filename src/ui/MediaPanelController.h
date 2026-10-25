@@ -69,6 +69,7 @@ private:
     void OnCatalogChanged(BrowserConnectionId connection, int tabId);
     void Place();
     void OpenMenu(POINT anchor);
+    void MenuShown(HWND menuWindow);
     void Run(const PanelAction& action, const TabKey& key);
     [[nodiscard]] bool Offers(const TabMedia& tab) const;
 
@@ -83,6 +84,11 @@ private:
     std::map<TabKey, bool> told_;     // what each extension was last told per tab
     std::set<TabKey> hiddenForPage_;  // closed by the user until the tab loads another page
     bool menuOpen_ = false;
+    // The menu window's width beyond its lines' width (its border and the space Windows keeps for
+    // a check mark), learned from the first menu shown at `menuEdgeDpi_`; -1 while unknown.
+    int menuEdge_ = -1;
+    UINT menuEdgeDpi_ = 0;
+    int menuLineWidth_ = 0;  // the line width of the menu open now; 0 when it does not match the panel
 };
 
 }  // namespace ldm::ui

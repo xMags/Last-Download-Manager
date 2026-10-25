@@ -155,6 +155,17 @@ int PanelMenuPainter::Px(int value96) const noexcept
     return Scale(value96, dpi_);
 }
 
+int PanelMenuPainter::NaturalWidth(const std::vector<PanelMenuItem>& items) const
+{
+    int widest = 0;
+    for (const PanelMenuItem& item : items) {
+        if (!item.separator) {
+            widest = std::max(widest, MeasureWidth(item));
+        }
+    }
+    return widest;
+}
+
 void PanelMenuPainter::Measure(MEASUREITEMSTRUCT& measure) const
 {
     const PanelMenuItem* item = ItemOf(measure.itemData);
@@ -163,22 +174,26 @@ void PanelMenuPainter::Measure(MEASUREITEMSTRUCT& measure) const
         measure.itemHeight = static_cast<UINT>(Px(kSeparatorHeight96));
         return;
     }
-    const LineText parts = SplitText(*item);
+    measure.itemWidth = static_cast<UINT>(std::max(MeasureWidth(*item), minimumWidth_));
+    measure.itemHeight = static_cast<UINT>(Px(kRowHeight96));
+}
+
+int PanelMenuPainter::MeasureWidth(const PanelMenuItem& item) const
+{
+    const LineText parts = SplitText(item);
     const HDC dc = ::GetDC(nullptr);
     int width = Px(kEdge96 + kIcon96 + kIconGap96) + TextWidth(dc, text_.get(), parts.first);
     if (!parts.detail.empty()) {
         width += Px(kDetailGap96) + TextWidth(dc, text_.get(), parts.detail);
     }
-    if (!item->badge.empty()) {
-        width += Px(kBadgeGap96 + 2 * kBadgePadding96) + TextWidth(dc, badgeFont_.get(), item->badge);
+    if (!item.badge.empty()) {
+        width += Px(kBadgeGap96 + 2 * kBadgePadding96) + TextWidth(dc, badgeFont_.get(), item.badge);
     }
     if (!parts.size.empty()) {
         width += Px(kSizeGap96) + TextWidth(dc, text_.get(), parts.size);
     }
     ::ReleaseDC(nullptr, dc);
-    width += Px(kEdge96) + (item->children.empty() ? 0 : Px(kChevronRoom96));
-    measure.itemWidth = static_cast<UINT>(width);
-    measure.itemHeight = static_cast<UINT>(Px(kRowHeight96));
+    return width + Px(kEdge96) + (item.children.empty() ? 0 : Px(kChevronRoom96));
 }
 
 void PanelMenuPainter::Draw(const DRAWITEMSTRUCT& draw) const
