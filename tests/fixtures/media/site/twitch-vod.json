@@ -1,0 +1,146 @@
+{
+ "_type": "video",
+ "id": "v6528877",
+ "title": "LCK Summer Split - Week 6 Day 1",
+ "extractor_key": "TwitchVod",
+ "duration": 17208,
+ "live_status": "was_live",
+ "is_live": false,
+ "formats": [
+  {
+   "format_id": "sb1",
+   "protocol": "mhtml",
+   "ext": "mhtml",
+   "vcodec": "none",
+   "acodec": "none",
+   "width": 110,
+   "height": 62,
+   "fps": 0.011506276150627616,
+   "tbr": null,
+   "format_note": "storyboard",
+   "url": "https://media.example.test/sb1",
+   "fragment_base_url": "https://media.example.test/dash/",
+   "fragments": [
+    {
+     "path": "sb1/0.m4s",
+     "duration": 17208
+    }
+   ]
+  },
+  {
+   "format_id": "sb0",
+   "protocol": "mhtml",
+   "ext": "mhtml",
+   "vcodec": "none",
+   "acodec": "none",
+   "width": 220,
+   "height": 124,
+   "fps": 0.011506276150627616,
+   "tbr": null,
+   "format_note": "storyboard",
+   "url": "https://media.example.test/sb0",
+   "fragment_base_url": "https://media.example.test/dash/",
+   "fragments": [
+    {
+     "path": "sb0/0.m4s",
+     "duration": 4302
+    },
+    {
+     "path": "sb0/1.m4s",
+     "duration": 4302
+    },
+    {
+     "path": "sb0/2.m4s",
+     "duration": 4302
+    },
+    {
+     "path": "sb0/3.m4s",
+     "duration": 4302
+    }
+   ]
+  },
+  {
+   "format_id": "Audio_Only",
+   "protocol": "m3u8_native",
+   "ext": "mp4",
+   "vcodec": "none",
+   "acodec": "mp4a.40.2",
+   "fps": null,
+   "tbr": 182.725,
+   "dynamic_range": null,
+   "has_drm": false,
+   "url": "https://media.example.test/Audio_Only.m3u8"
+  },
+  {
+   "format_id": "226p",
+   "protocol": "m3u8_native",
+   "ext": "mp4",
+   "vcodec": "avc1.42C00D",
+   "acodec": "mp4a.40.2",
+   "width": 400,
+   "height": 226,
+   "fps": 19.994,
+   "tbr": 280.474,
+   "dynamic_range": "SDR",
+   "has_drm": false,
+   "url": "https://media.example.test/226p.m3u8"
+  },
+  {
+   "format_id": "360p",
+   "protocol": "m3u8_native",
+   "ext": "mp4",
+   "vcodec": "avc1.42C01E",
+   "acodec": "mp4a.40.2",
+   "width": 640,
+   "height": 360,
+   "fps": 23.303,
+   "tbr": 628.347,
+   "dynamic_range": "SDR",
+   "has_drm": false,
+   "url": "https://media.example.test/360p.m3u8"
+  },
+  {
+   "format_id": "480p",
+   "protocol": "m3u8_native",
+   "ext": "mp4",
+   "vcodec": "avc1.42C01E",
+   "acodec": "mp4a.40.2",
+   "width": 852,
+   "height": 480,
+   "fps": 23.303,
+   "tbr": 893.387,
+   "dynamic_range": "SDR",
+   "has_drm": false,
+   "url": "https://media.example.test/480p.m3u8"
+  },
+  {
+   "format_id": "720p-0",
+   "protocol": "m3u8_native",
+   "ext": "mp4",
+   "vcodec": "avc1.42C01F",
+   "acodec": "mp4a.40.2",
+   "width": 1280,
+   "height": 720,
+   "fps": 23.303,
+   "tbr": 1603.789,
+   "dynamic_range": "SDR",
+   "has_drm": false,
+   "url": "https://media.example.test/720p-0.m3u8"
+  },
+  {
+   "format_id": "720p-1",
+   "protocol": "m3u8_native",
+   "ext": "mp4",
+   "vcodec": "avc1.100.31",
+   "acodec": "mp4a.40.2",
+   "width": 1280,
+   "height": 720,
+   "fps": 29.999,
+   "tbr": 3214.134,
+   "format_note": "Source",
+   "dynamic_range": "SDR",
+   "has_drm": false,
+   "url": "https://media.example.test/720p-1.m3u8"
+  }
+ ]
+}

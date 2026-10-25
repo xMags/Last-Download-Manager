@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstdint>
 #include <map>
+#include <set>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -75,30 +76,61 @@ bool Flag(const Json& object, const char* key)
     return it != object.end() && it->is_boolean() && it->get<bool>();
 }
 
+// Text that may go into a request header or a file name: bounded, without control characters.
+bool PlainText(std::string_view text, size_t limit)
+{
+    return text.size() <= limit &&
+           std::none_of(text.begin(), text.end(), [](char c) { return static_cast<unsigned char>(c) < 0x20 || c == 0x7f; });
+}
+
+std::string Lower(std::string text)
+{
+    std::transform(text.begin(), text.end(), text.begin(),
+                   [](char c) { return (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c; });
+    return text;
+}
+
 // The codecs LDM takes from a site. yt-dlp says "none" for a stream a format does not have and
-// leaves the field out (or null) when it does not know; an unknown codec is never guessed at.
+// leaves the field out (or null) when it does not know: Unstated, which the joining takes as it
+// comes (MKV when MP4 cannot hold it). A codec it names that LDM does not take (AC-3, E-AC-3,
+// IAMF, ...) is Unknown, and the format is left out.
 enum class Codec {
     None,
+    Unstated,
     Unknown,
     H264,
+    H265,
+    Vp8,
     Vp9,
     Av1,
     Aac,
     Opus,
+    Mp3,
+    Vorbis,
+    Flac,
 };
 
 Codec VideoCodec(std::string_view codec)
 {
+    if (codec.empty()) {
+        return Codec::Unstated;
+    }
     if (codec == "none") {
         return Codec::None;
     }
-    if (codec.starts_with("avc1") || codec.starts_with("avc3")) {
+    if (codec.starts_with("avc1") || codec.starts_with("avc3") || codec == "h264") {
         return Codec::H264;
+    }
+    if (codec.starts_with("hvc1") || codec.starts_with("hev1") || codec == "h265" || codec == "hevc") {
+        return Codec::H265;
     }
     if (codec.starts_with("vp09") || codec.starts_with("vp9")) {
         return Codec::Vp9;
     }
-    if (codec.starts_with("av01")) {
+    if (codec == "vp8" || codec.starts_with("vp8.")) {
+        return Codec::Vp8;
+    }
+    if (codec.starts_with("av01") || codec == "av1") {
         return Codec::Av1;
     }
     return Codec::Unknown;
@@ -106,30 +138,77 @@ Codec VideoCodec(std::string_view codec)
 
 Codec AudioCodec(std::string_view codec)
 {
+    if (codec.empty()) {
+        return Codec::Unstated;
+    }
     if (codec == "none") {
         return Codec::None;
     }
-    if (codec.starts_with("mp4a.40.") && codec != "mp4a.40.34") {  // .34 is MP3 in an MP4 box
+    if (codec == "mp4a.40.34" || codec == "mp4a.6b" || codec == "mp3") {  // MP3, in an MP4 box or not
+        return Codec::Mp3;
+    }
+    if (codec.starts_with("mp4a.40.") || codec == "mp4a" || codec == "aac") {
         return Codec::Aac;
     }
     if (codec == "opus") {
         return Codec::Opus;
     }
+    if (codec == "vorbis") {
+        return Codec::Vorbis;
+    }
+    if (codec == "flac") {
+        return Codec::Flac;
+    }
     return Codec::Unknown;
 }
 
-// Among formats of the same picture: H.264 plays everywhere, VP9 and AV1 need newer players.
+// Among formats of the same picture: H.264 plays everywhere, VP9 and AV1 need newer players,
+// H.265 a paid Windows extension; one the site does not name comes last.
 int VideoRank(Codec codec)
 {
-    return codec == Codec::H264 ? 0 : codec == Codec::Vp9 ? 1 : 2;
+    switch (codec) {
+    case Codec::H264:
+        return 0;
+    case Codec::Vp9:
+        return 1;
+    case Codec::Av1:
+        return 2;
+    case Codec::Vp8:
+        return 3;
+    case Codec::H265:
+        return 4;
+    default:
+        return 5;
+    }
+}
+
+// How LDM downloads a format. One quality never mixes two of them: the tracks of a download are
+// all files or DASH piece lists, or all HLS playlists.
+enum class Delivery {
+    File,    // one http(s) file, fetched in ranges
+    Pieces,  // a DASH piece list, given in full
+    Hls,     // an HLS media playlist, read when the download starts
+};
+
+// Whole files resume cleanly with few requests; HLS needs its playlist read again.
+int DeliveryRank(Delivery delivery)
+{
+    return delivery == Delivery::File ? 0 : delivery == Delivery::Pieces ? 1 : 2;
+}
+
+std::string DeliveryGroup(Delivery delivery)
+{
+    return delivery == Delivery::File ? "file" : delivery == Delivery::Pieces ? "pieces" : "hls";
 }
 
 // One format that passed the checks every kind needs.
 struct Candidate {
     std::string id;
-    std::string url;
+    Delivery delivery = Delivery::File;
+    std::string url;       // File: the file; Hls: the media playlist; Pieces: unused
+    TrackSegments pieces;  // Pieces only
     std::string ext;
-    std::string vcodec;
+    std::string vcodec;  // empty when not stated
     std::string acodec;
     Codec video = Codec::None;
     Codec audio = Codec::None;
@@ -143,9 +222,68 @@ struct Candidate {
     std::string note;
     int channels = 0;  // 0 when not stated
     bool sdr = true;
+    std::string referer;
 };
 
-// A format LDM can fetch as one file: a direct http(s) address, no DRM, codecs it knows.
+std::optional<std::string> CheckedUrl(std::string_view base, std::string_view url)
+{
+    if (url.empty() || url.size() > kMaxSiteUrlBytes || base.size() > kMaxSiteUrlBytes) {
+        return std::nullopt;
+    }
+    auto checked = ResolveMediaUrl(base, url);
+    if (!checked || checked->size() > kMaxSiteUrlBytes) {
+        return std::nullopt;
+    }
+    return checked;
+}
+
+// A DASH format the resolver listed piece by piece: `fragment_base_url` and `fragments`, each with
+// an absolute `url` or a `path` under the base, and its `duration`. yt-dlp lists the init section
+// as the first piece, so the pieces joined in order are the track's bytes.
+std::optional<TrackSegments> ReadPieces(const Json& format)
+{
+    const auto fragments = format.find("fragments");
+    if (fragments == format.end() || !fragments->is_array() || fragments->empty() ||
+        fragments->size() > kMaxSegmentsPerTrack) {
+        return std::nullopt;
+    }
+    const std::string base = Text(format, "fragment_base_url");
+    std::optional<std::string> checkedBase;
+    if (!base.empty()) {
+        checkedBase = CheckedUrl(base, base);
+        if (!checkedBase) {
+            return std::nullopt;
+        }
+    }
+    TrackSegments track;
+    track.segments.reserve(fragments->size());
+    for (const Json& fragment : *fragments) {
+        if (!fragment.is_object() || fragment.contains("range") || fragment.contains("byte_range")) {
+            return std::nullopt;  // pieces in byte ranges are not taken: never guessed at
+        }
+        const std::string url = Text(fragment, "url");
+        const std::string path = Text(fragment, "path");
+        std::optional<std::string> checked;
+        if (!url.empty()) {
+            checked = CheckedUrl(url, url);
+        } else if (!path.empty() && checkedBase) {
+            checked = CheckedUrl(*checkedBase, path);
+        }
+        if (!checked) {
+            return std::nullopt;
+        }
+        Segment segment;
+        segment.url = std::move(*checked);
+        segment.seconds = Number(fragment, "duration").value_or(0);
+        segment.sequence = track.segments.size();
+        track.targetSeconds = std::max(track.targetSeconds, segment.seconds);
+        track.segments.push_back(std::move(segment));
+    }
+    return track;
+}
+
+// A format LDM can download: a direct http(s) file, an HLS media playlist or a DASH piece list,
+// no DRM, codecs it takes.
 std::optional<Candidate> ReadCandidate(const Json& format, bool& protectedSeen)
 {
     if (!format.is_object()) {
@@ -155,27 +293,46 @@ std::optional<Candidate> ReadCandidate(const Json& format, bool& protectedSeen)
         protectedSeen = true;
         return std::nullopt;
     }
-    const std::string protocol = Text(format, "protocol");
-    if (protocol != "https" && protocol != "http") {
-        return std::nullopt;  // HLS and DASH pieces, storyboards, and anything newer
-    }
     Candidate candidate;
+    const std::string protocol = Text(format, "protocol");
+    if (protocol == "https" || protocol == "http") {
+        candidate.delivery = Delivery::File;
+    } else if (protocol == "m3u8_native" || protocol == "m3u8") {
+        candidate.delivery = Delivery::Hls;
+    } else if (protocol == "http_dash_segments") {
+        candidate.delivery = Delivery::Pieces;
+    } else {
+        return std::nullopt;  // storyboards, f4m, ism, rtmp, websockets and anything newer
+    }
     candidate.id = Text(format, "format_id");
-    if (candidate.id.empty() || candidate.id.size() > 64) {
+    if (candidate.id.empty() || !PlainText(candidate.id, 64)) {
         return std::nullopt;
     }
-    const std::string url = Text(format, "url");
-    if (url.empty() || url.size() > kMaxSiteUrlBytes) {
-        return std::nullopt;
+    if (candidate.delivery == Delivery::Pieces) {
+        auto pieces = ReadPieces(format);
+        if (!pieces) {
+            return std::nullopt;
+        }
+        candidate.pieces = std::move(*pieces);
+    } else {
+        const std::string url = Text(format, "url");
+        auto checked = CheckedUrl(url, url);
+        if (!checked) {
+            return std::nullopt;
+        }
+        candidate.url = std::move(*checked);
     }
-    const auto checked = ResolveMediaUrl(url, url);
-    if (!checked) {
-        return std::nullopt;
-    }
-    candidate.url = *checked;
     candidate.ext = Text(format, "ext");
+    if (candidate.ext.size() > 8 || !std::all_of(candidate.ext.begin(), candidate.ext.end(), [](char c) {
+            return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9');
+        })) {
+        candidate.ext.clear();
+    }
     candidate.vcodec = Text(format, "vcodec");
     candidate.acodec = Text(format, "acodec");
+    if (!PlainText(candidate.vcodec, 64) || !PlainText(candidate.acodec, 64)) {
+        return std::nullopt;
+    }
     candidate.video = VideoCodec(candidate.vcodec);
     candidate.audio = AudioCodec(candidate.acodec);
     if (candidate.video == Codec::Unknown || candidate.audio == Codec::Unknown ||
@@ -184,27 +341,117 @@ std::optional<Candidate> ReadCandidate(const Json& format, bool& protectedSeen)
     }
     candidate.width = Whole(format, "width");
     candidate.height = Whole(format, "height");
-    if (candidate.video != Codec::None && candidate.height == 0) {
-        return std::nullopt;  // a picture of unknown size cannot be listed sensibly
-    }
     candidate.fps = Number(format, "fps").value_or(0);
     candidate.kbps = Number(format, "tbr").value_or(0);
     candidate.bytes = Bytes(format, "filesize");
     candidate.language = Text(format, "language");
-    if (candidate.language.size() > 35) {  // longer than any BCP 47 tag in use
+    if (!PlainText(candidate.language, 35)) {  // longer than any BCP 47 tag in use
         candidate.language.clear();
     }
     if (const auto it = format.find("language_preference"); it != format.end() && it->is_number_integer()) {
         candidate.languagePreference = static_cast<int>(std::clamp<std::int64_t>(it->get<std::int64_t>(), -1000, 1000));
     }
     candidate.note = Text(format, "format_note");
-    if (candidate.note.size() > 128) {
+    if (!PlainText(candidate.note, 128)) {
         candidate.note.clear();
     }
     candidate.channels = Whole(format, "audio_channels");
     const std::string range = Text(format, "dynamic_range");
     candidate.sdr = range.empty() || range == "SDR";
+    if (const auto headers = format.find("http_headers"); headers != format.end() && headers->is_object()) {
+        // Only the Referer: the site's files answer the browser's own User-Agent (video-sites
+        // design, section 8), and the other headers yt-dlp lists are its defaults.
+        const std::string referer = Text(*headers, "Referer");
+        if (!referer.empty() && PlainText(referer, 2048) && CheckedUrl(referer, referer)) {
+            candidate.referer = referer;
+        }
+    }
     return candidate;
+}
+
+bool IsCookieAttribute(const std::string& lower)
+{
+    return lower == "domain" || lower == "path" || lower == "expires" || lower == "max-age" || lower == "secure" ||
+           lower == "httponly" || lower == "samesite" || lower == "comment" || lower == "version" || lower == "discard" ||
+           lower == "port";
+}
+
+bool IsHostName(std::string_view host)
+{
+    return !host.empty() && host.size() <= 253 && std::all_of(host.begin(), host.end(), [](char c) {
+        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '.';
+    });
+}
+
+// The cookies of a format's `cookies` text, as yt-dlp writes it: "name=value; Domain=.site;
+// Path=/; Secure; Expires=1795492351; name2=value2; ...", each cookie's attributes after it. A
+// cookie without a Domain is not taken: nothing says where it goes. Text that does not read this
+// way gives no cookies at all.
+void ReadCookies(const Json& format, std::vector<SiteCookie>& cookies)
+{
+    const std::string text = Text(format, "cookies");
+    if (text.empty() || text.size() > 64 * 1024) {
+        return;
+    }
+    std::vector<SiteCookie> read;
+    size_t start = 0;
+    while (start < text.size()) {
+        size_t end = text.find(';', start);
+        if (end == std::string::npos) {
+            end = text.size();
+        }
+        std::string part = text.substr(start, end - start);
+        start = end + 1;
+        const size_t first = part.find_first_not_of(' ');
+        if (first == std::string::npos) {
+            continue;
+        }
+        part.erase(0, first);
+        const size_t equals = part.find('=');
+        const std::string name = part.substr(0, equals);
+        const std::string value = equals == std::string::npos ? std::string() : part.substr(equals + 1);
+        const std::string lower = Lower(name);
+        if (!IsCookieAttribute(lower)) {
+            if (name.empty() || equals == std::string::npos) {
+                return;
+            }
+            SiteCookie cookie;
+            cookie.name = name;
+            cookie.value = value;
+            read.push_back(std::move(cookie));
+            continue;
+        }
+        if (read.empty()) {
+            return;
+        }
+        SiteCookie& cookie = read.back();
+        if (lower == "domain") {
+            cookie.hostOnly = !value.starts_with('.');
+            cookie.domain = Lower(value.substr(value.starts_with('.') ? 1 : 0));
+        } else if (lower == "path") {
+            cookie.path = value;
+        } else if (lower == "secure") {
+            cookie.secure = true;
+        } else if (lower == "expires") {
+            const bool digits = !value.empty() && value.size() < 19 &&
+                                std::all_of(value.begin(), value.end(), [](char c) { return c >= '0' && c <= '9'; });
+            cookie.expires = digits ? std::stoll(value) : 0;
+        }
+    }
+    for (SiteCookie& cookie : read) {
+        const bool ok = IsHostName(cookie.domain) && cookie.path.starts_with('/') && PlainText(cookie.path, 1024) &&
+                        PlainText(cookie.name, 256) && PlainText(cookie.value, 4096) &&
+                        cookie.name.find_first_of(" \t=") == std::string::npos;
+        if (!ok || cookies.size() >= kMaxSiteCookies) {
+            continue;
+        }
+        const bool known = std::any_of(cookies.begin(), cookies.end(), [&cookie](const SiteCookie& c) {
+            return c.domain == cookie.domain && c.path == cookie.path && c.name == cookie.name;
+        });
+        if (!known) {
+            cookies.push_back(std::move(cookie));
+        }
+    }
 }
 
 // A dynamic-range-compressed copy of an audio format (YouTube's "-drc" ids): quieter parts made
@@ -220,16 +467,31 @@ int FrameRateClass(double fps)
     return fps > 31 ? static_cast<int>(std::lround(fps)) : 0;
 }
 
-// Whether `a` is the better pick than `b` for the same picture.
-bool BetterVideo(const Candidate& a, const Candidate& b)
+// One picture of the offer: the format, and whether its sound is a separate track.
+struct Picture {
+    const Candidate* candidate = nullptr;
+    bool separate = false;
+};
+
+// Whether `a` is the better pick than `b` for the same picture. One with separate sound beats one
+// with its own: on these sites those are the low qualities kept for old players.
+bool BetterPicture(const Picture& a, const Picture& b)
 {
-    if (a.sdr != b.sdr) {
-        return a.sdr;
+    const Candidate& x = *a.candidate;
+    const Candidate& y = *b.candidate;
+    if (x.sdr != y.sdr) {
+        return x.sdr;
     }
-    if (VideoRank(a.video) != VideoRank(b.video)) {
-        return VideoRank(a.video) < VideoRank(b.video);
+    if (a.separate != b.separate) {
+        return a.separate;
     }
-    return a.kbps > b.kbps;
+    if (DeliveryRank(x.delivery) != DeliveryRank(y.delivery)) {
+        return DeliveryRank(x.delivery) < DeliveryRank(y.delivery);
+    }
+    if (VideoRank(x.video) != VideoRank(y.video)) {
+        return VideoRank(x.video) < VideoRank(y.video);
+    }
+    return x.kbps > y.kbps;
 }
 
 // Bits per second as the quality list uses them: from the exact length when the site states one,
@@ -242,8 +504,14 @@ std::uint64_t Bandwidth(const Candidate& candidate, std::optional<double> second
     return static_cast<std::uint64_t>(candidate.kbps * 1000);
 }
 
-SegmentSource WholeFile(const Candidate& candidate, std::optional<double> seconds)
+SegmentSource Source(const Candidate& candidate, std::optional<double> seconds)
 {
+    if (candidate.delivery == Delivery::Hls) {
+        return PlaylistAddress{candidate.url};
+    }
+    if (candidate.delivery == Delivery::Pieces) {
+        return candidate.pieces;
+    }
     TrackSegments track;
     Segment segment;
     segment.url = candidate.url;
@@ -258,32 +526,55 @@ std::string Container(const Candidate& candidate)
     return candidate.ext == "webm" ? "webm" : "mp4";
 }
 
-Variant MakeVariant(const Candidate& candidate, std::optional<double> seconds)
+SiteFormat Format(const Candidate& candidate)
 {
+    return SiteFormat{candidate.id, candidate.bytes, candidate.referer, candidate.ext};
+}
+
+// The RFC 6381 list as far as the site named it.
+std::string Codecs(const Candidate& candidate)
+{
+    std::string codecs;
+    for (const auto& [codec, text] : {std::pair{candidate.video, &candidate.vcodec}, std::pair{candidate.audio, &candidate.acodec}}) {
+        if (codec == Codec::None || codec == Codec::Unstated) {
+            continue;
+        }
+        codecs += (codecs.empty() ? "" : ",") + *text;
+    }
+    return codecs;
+}
+
+Variant MakeVariant(const Picture& picture, std::optional<double> seconds)
+{
+    const Candidate& candidate = *picture.candidate;
     Variant variant;
     variant.bandwidth = Bandwidth(candidate, seconds);
-    variant.resolution = Resolution{candidate.width, candidate.height};
+    if (candidate.height > 0) {
+        variant.resolution = Resolution{candidate.width, candidate.height};
+    }
     if (candidate.fps > 0) {
         variant.frameRate = candidate.fps;
     }
-    variant.codecs = candidate.audio == Codec::None ? candidate.vcodec : candidate.vcodec + "," + candidate.acodec;
+    variant.codecs = Codecs(candidate);
     variant.mimeType = "video/" + Container(candidate);
-    variant.source = WholeFile(candidate, seconds);
-    variant.site = SiteFormat{candidate.id, candidate.bytes};
+    if (picture.separate) {
+        variant.audioGroup = DeliveryGroup(candidate.delivery);
+    }
+    variant.source = Source(candidate, seconds);
+    variant.site = Format(candidate);
     return variant;
 }
 
 Rendition MakeAudio(const Candidate& candidate, std::optional<double> seconds)
 {
     Rendition rendition;
-    rendition.groupId = "audio";
     rendition.name = candidate.note;
     rendition.language = candidate.language;
     rendition.bandwidth = Bandwidth(candidate, seconds);
-    rendition.codecs = candidate.acodec;
+    rendition.codecs = Codecs(candidate);
     rendition.mimeType = "audio/" + Container(candidate);
-    rendition.source = WholeFile(candidate, seconds);
-    rendition.site = SiteFormat{candidate.id, candidate.bytes};
+    rendition.source = Source(candidate, seconds);
+    rendition.site = Format(candidate);
     return rendition;
 }
 
@@ -319,6 +610,10 @@ base::Result<SiteVideo> ParseSiteVideo(std::string_view json)
     if (video.title.size() > 4096) {
         video.title.clear();
     }
+    video.extractor = Text(root, "extractor_key");
+    if (!PlainText(video.extractor, 64)) {
+        video.extractor.clear();
+    }
     if (const auto seconds = Number(root, "duration"); seconds && *seconds < 10'000'000) {
         video.seconds = seconds;
     }
@@ -337,73 +632,106 @@ base::Result<SiteVideo> ParseSiteVideo(std::string_view json)
         if (!candidate) {
             continue;
         }
+        ReadCookies((*formats)[i], video.cookies);
         if (candidate->audio == Codec::None) {
             videoOnly.push_back(std::move(*candidate));
         } else if (candidate->video == Codec::None) {
             audio.push_back(std::move(*candidate));
         } else {
-            combined.push_back(std::move(*candidate));
+            combined.push_back(std::move(*candidate));  // sound inside, or not said: kept with the picture
         }
     }
 
-    // One picture per height and frame rate class. With separate pictures available, formats
-    // that carry their own sound are left out: on these sites they are the low qualities kept
-    // for old players. Without them, those are the qualities, each with its own sound.
-    const bool separate = !videoOnly.empty() && !audio.empty();
-    std::vector<Candidate>& pictures = separate ? videoOnly : combined;
-    std::map<std::pair<int, int>, size_t> bestByPicture;
-    for (size_t i = 0; i < pictures.size(); ++i) {
-        const auto key = std::make_pair(pictures[i].height, FrameRateClass(pictures[i].fps));
-        const auto found = bestByPicture.find(key);
-        if (found == bestByPicture.end()) {
-            bestByPicture.emplace(key, i);
-        } else if (BetterVideo(pictures[i], pictures[found->second])) {
-            found->second = i;
-        }
-    }
-
-    // The best stereo track per language and codec; surround and compressed copies are left out.
-    std::map<std::pair<std::string, Codec>, size_t> bestAudio;
+    // The best stereo track per delivery, language and codec; surround and compressed copies are
+    // left out.
+    std::map<std::tuple<Delivery, std::string, Codec>, size_t> bestAudio;
     for (size_t i = 0; i < audio.size(); ++i) {
         if (IsCompressedAudio(audio[i]) || audio[i].channels > 2) {
             continue;
         }
-        const auto key = std::make_pair(audio[i].language, audio[i].audio);
+        const auto key = std::make_tuple(audio[i].delivery, audio[i].language, audio[i].audio);
         const auto found = bestAudio.find(key);
         if (found == bestAudio.end() || audio[i].kbps > audio[found->second].kbps) {
             bestAudio[key] = i;
         }
     }
+    std::set<Delivery> withAudio;
+    for (const auto& [key, index] : bestAudio) {
+        withAudio.insert(std::get<0>(key));
+    }
+
+    // One picture per height and frame rate class: from pictures whose sound can be paired (a
+    // track of the same delivery) and from pictures with their own sound.
+    std::vector<Picture> pictures;
+    for (const Candidate& candidate : videoOnly) {
+        if (withAudio.contains(candidate.delivery)) {
+            pictures.push_back(Picture{&candidate, true});
+        }
+    }
+    for (const Candidate& candidate : combined) {
+        pictures.push_back(Picture{&candidate, false});
+    }
+    std::map<std::pair<int, int>, size_t> bestByPicture;
+    for (size_t i = 0; i < pictures.size(); ++i) {
+        const auto key = std::make_pair(pictures[i].candidate->height, FrameRateClass(pictures[i].candidate->fps));
+        const auto found = bestByPicture.find(key);
+        if (found == bestByPicture.end()) {
+            bestByPicture.emplace(key, i);
+        } else if (BetterPicture(pictures[i], pictures[found->second])) {
+            found->second = i;
+        }
+    }
+    // A picture of unknown size is offered only when no picture has a size: it cannot be placed
+    // among them sensibly.
+    if (std::any_of(bestByPicture.begin(), bestByPicture.end(), [](const auto& entry) { return entry.first.first > 0; })) {
+        std::erase_if(bestByPicture, [](const auto& entry) { return entry.first.first == 0; });
+    }
 
     MediaOffer& offer = video.offer;
-    offer.format = separate ? StreamFormat::Dash : StreamFormat::Hls;
+    // The pairing goes by groups (HLS's rule in the quality list), so pictures with their own sound
+    // and pictures with separate sound can be offered side by side.
+    offer.format = StreamFormat::Hls;
     offer.seconds = video.seconds;
+    std::set<Delivery> paired;
     for (const auto& [key, index] : bestByPicture) {
         offer.variants.push_back(MakeVariant(pictures[index], video.seconds));
+        if (pictures[index].separate) {
+            paired.insert(pictures[index].candidate->delivery);
+        }
     }
     // Highest picture first, as the quality list sorts them too; keeps the offer readable in logs.
     std::reverse(offer.variants.begin(), offer.variants.end());
 
-    // The track paired with every picture: the site's preferred language (the original audio of a
-    // dubbed video), in AAC, which MP4 players all take.
-    std::optional<size_t> pairedIndex;
+    // Per delivery, the track paired with every picture: the site's preferred language (the
+    // original audio of a dubbed video), in AAC, which MP4 players all take.
+    std::map<Delivery, size_t> pairedIndex;
     for (const auto& [key, index] : bestAudio) {
-        const Candidate& candidate = audio[index];
-        if (!pairedIndex) {
-            pairedIndex = index;
+        const Delivery delivery = std::get<0>(key);
+        const auto current = pairedIndex.find(delivery);
+        if (current == pairedIndex.end()) {
+            pairedIndex.emplace(delivery, index);
             continue;
         }
-        const Candidate& current = audio[*pairedIndex];
         const auto rank = [](const Candidate& c) { return std::make_tuple(c.languagePreference, c.audio == Codec::Aac, c.kbps); };
-        if (rank(candidate) > rank(current)) {
-            pairedIndex = index;
+        if (rank(audio[index]) > rank(audio[current->second])) {
+            current->second = index;
         }
     }
     for (const auto& [key, index] : bestAudio) {
+        const Delivery delivery = std::get<0>(key);
+        // Sound no picture pairs with is offered on its own, unless the same language comes in a
+        // better delivery too (YouTube's HLS copies of its files).
+        const bool better = std::any_of(bestAudio.begin(), bestAudio.end(), [&key](const auto& other) {
+            return std::get<1>(other.first) == std::get<1>(key) &&
+                   DeliveryRank(std::get<0>(other.first)) < DeliveryRank(std::get<0>(key));
+        });
+        if (!paired.contains(delivery) && better) {
+            continue;
+        }
         Rendition rendition = MakeAudio(audio[index], video.seconds);
-        rendition.isDefault = pairedIndex && index == *pairedIndex;
-        if (!separate) {
-            rendition.groupId.clear();  // sound-only qualities beside pictures that have their own
+        if (paired.contains(delivery)) {
+            rendition.groupId = DeliveryGroup(delivery);
+            rendition.isDefault = pairedIndex.at(delivery) == index;
         }
         offer.audio.push_back(std::move(rendition));
     }

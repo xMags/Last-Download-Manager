@@ -92,6 +92,8 @@ struct Resolution {
 struct SiteFormat {
     std::string id;                     // the resolver's format id, such as "299"
     std::optional<std::int64_t> bytes;  // the exact length, when the site states one
+    std::string referer;                // the Referer the site wants for this format; empty for none
+    std::string ext;                    // the file type the site names, such as "mp4" or "ogv"
 };
 
 // One quality of the video, or of the whole stream when it has no video (an audio-only HLS

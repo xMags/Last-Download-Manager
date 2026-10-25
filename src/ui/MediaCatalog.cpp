@@ -3,6 +3,8 @@
 #include "core/SiteList.h"
 #include "media/DashManifest.h"
 #include "media/HlsPlaylist.h"
+#include "media/SiteVideo.h"
+#include "model/Cookie.h"
 
 #include <algorithm>
 #include <set>
@@ -175,6 +177,15 @@ bool MediaCatalog::OnSiteLookedUp(const core::SiteLookupFinished& finished)
         item->offer = finished.video->offer;
         item->seconds = finished.video->seconds;
         item->siteTitle = finished.video->title;
+        // Cookies the resolver got from the site while reading the page, which the site wants
+        // back with the requests for its files. Not the browser's.
+        item->cookies.clear();
+        for (const media::SiteCookie& site : finished.video->cookies) {
+            model::Cookie cookie{site.domain, site.hostOnly, site.path, site.secure, site.expires, site.name, site.value};
+            if (model::IsValidCookie(cookie)) {
+                item->cookies.push_back(std::move(cookie));
+            }
+        }
         item->qualities = media::BuildQualityList(*item->offer, item->seconds);
         item->state = item->qualities.entries.empty() ? MediaItem::State::Failed : MediaItem::State::Ready;
         if (item->state == MediaItem::State::Failed) {

@@ -2,6 +2,7 @@
 
 #include "core/FileNames.h"
 
+#include <algorithm>
 #include <variant>
 
 namespace ldm::ui {
@@ -52,13 +53,34 @@ std::string Title(const TabMedia& tab, const MediaItem& item)
     return Title(item.siteVideo && !item.siteTitle.empty() ? item.siteTitle : tab.pageTitle);
 }
 
-// The site's format of a track, so a refresh can ask for the same bytes again.
-void TakeSiteFormat(core::MediaTrackChoice& track, const std::optional<media::SiteFormat>& site)
+// The site's format of a track, so a refresh can ask for the same bytes again, and the Referer
+// the site wants for it, which then goes with the whole download.
+void TakeSiteFormat(core::MediaTrackChoice& track, const std::optional<media::SiteFormat>& site, StreamCapture& capture)
 {
     if (site) {
         track.siteFormat = site->id;
         track.expectedBytes = site->bytes;
+        if (!site->referer.empty()) {
+            capture.pageUrl = site->referer;
+        }
     }
+}
+
+// A site video's quality is all whole files and DASH piece lists (a Dash download) or all HLS
+// playlists (an Hls one); the site offer never pairs the two kinds.
+base::Result<model::DownloadKind> SiteKind(const core::MediaChoice& media)
+{
+    const bool lists = std::all_of(media.tracks.begin(), media.tracks.end(),
+                                   [](const core::MediaTrackChoice& t) { return t.segments.has_value(); });
+    const bool playlists = std::none_of(media.tracks.begin(), media.tracks.end(),
+                                        [](const core::MediaTrackChoice& t) { return t.segments.has_value(); });
+    if (lists) {
+        return model::DownloadKind::Dash;
+    }
+    if (playlists) {
+        return model::DownloadKind::Hls;
+    }
+    return Refused("This quality mixes kinds of tracks LDM cannot download together.");
 }
 
 }  // namespace
@@ -115,7 +137,7 @@ base::Result<StreamCapture> BuildStreamCapture(const TabMedia& tab, const MediaI
             entry.kind == media::QualityKind::AudioOnly ? model::TrackRole::Audio : model::TrackRole::Video;
         core::MediaTrackChoice track = TrackFrom(variant.source, capture.manifestUrl, role);
         track.codecs = variant.codecs;
-        TakeSiteFormat(track, variant.site);
+        TakeSiteFormat(track, variant.site, capture);
         capture.media.tracks.push_back(std::move(track));
         picture = role == model::TrackRole::Video;
     }
@@ -126,12 +148,19 @@ base::Result<StreamCapture> BuildStreamCapture(const TabMedia& tab, const MediaI
         const media::Rendition& audio = offer.audio[*entry.audio];
         if (audio.source) {  // without one, the sound is inside the variant's own segments
             core::MediaTrackChoice track = RenditionTrack(audio, capture.manifestUrl, model::TrackRole::Audio);
-            TakeSiteFormat(track, audio.site);
+            TakeSiteFormat(track, audio.site, capture);
             capture.media.tracks.push_back(std::move(track));
         }
     }
     if (capture.media.tracks.empty()) {
         return Refused("This quality has nothing to download.");
+    }
+    if (item.siteVideo) {
+        auto kind = SiteKind(capture.media);
+        if (!kind) {
+            return kind.GetError();
+        }
+        capture.media.kind = kind.Value();
     }
     if (!offer.live) {
         capture.media.approximateBytes = entry.approximateBytes;  // a recording's size depends on how long it runs

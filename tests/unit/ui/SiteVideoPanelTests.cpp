@@ -217,4 +217,33 @@ TEST(SiteVideoCapture, AQualityGivesASiteVideoWithEachTracksFormatAndTheVideosTi
     EXPECT_TRUE(capture.Value().cookies.empty()) << "no browser cookies for site videos";
 }
 
+TEST(SiteVideoCapture, AnHlsQualityOfASiteIsAnHlsDownloadOfItsPlaylist)
+{
+    ldm::ui::TabMedia tab;
+    tab.pageUrl = "https://www.dailymotion.com/video/x5kesuj";
+    MediaItem item;
+    item.key = 1;
+    item.kind = MediaKind::Dash;
+    item.url = "https://www.dailymotion.com/video/x5kesuj";
+    item.finalUrl = item.url;
+    item.siteVideo = true;
+    item.state = MediaItem::State::Ready;
+    auto parsed = ldm::media::ParseSiteVideo(ReadFixture("site/dailymotion.json"));
+    ASSERT_TRUE(parsed.Ok());
+    item.offer = parsed.Value().offer;
+    item.seconds = parsed.Value().seconds;
+    item.siteTitle = parsed.Value().title;
+    item.qualities = ldm::media::BuildQualityList(*item.offer, item.seconds);
+
+    const auto capture = ldm::ui::BuildStreamCapture(tab, item, ldm::ui::PanelAction{ldm::ui::PanelAction::Kind::DownloadStream, 1, 0});
+    ASSERT_TRUE(capture) << capture.GetError().message;
+    const auto& media = capture.Value().media;
+    EXPECT_TRUE(media.siteVideo);
+    EXPECT_EQ(media.kind, ldm::model::DownloadKind::Hls);
+    ASSERT_EQ(media.tracks.size(), 1u);  // the sound is inside the picture's playlist
+    EXPECT_EQ(media.tracks[0].siteFormat, "hls-1080");
+    EXPECT_EQ(media.tracks[0].sourceUrl, "https://media.example.test/hls-1080.m3u8");
+    EXPECT_FALSE(media.tracks[0].segments);
+}
+
 }  // namespace

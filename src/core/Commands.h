@@ -64,8 +64,9 @@ struct MediaChoice {
     // The manifest came from a loopback or private address (FetchFinished::fromPrivateNetwork);
     // otherwise the stream's pieces may not be on such addresses.
     bool fromPrivateNetwork = false;
-    // A video of a supported site (model::Download::siteVideo): a Dash stream of whole-file
-    // tracks, each with its format, and the command's `url` is the video's page.
+    // A video of a supported site (model::Download::siteVideo): a Dash stream of whole-file or
+    // piece-list tracks, or an Hls stream of playlists, each track with its format; the command's
+    // `url` is the video's page.
     bool siteVideo = false;
     std::vector<MediaTrackChoice> tracks;
     std::optional<std::int64_t> approximateBytes;  // shown until the stream's size is known

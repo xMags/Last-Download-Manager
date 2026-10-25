@@ -1250,17 +1250,19 @@ TEST_F(CoordinatorTest, ASiteVideoNeedsItsCanonicalPageAndAFormatPerTrack)
                                        c.media = media;
                                    });
     EXPECT_FALSE(noFormat.id);
+    EXPECT_TRUE(engine_.mediaStarts.empty());
+    // A site's DASH piece lists are a site video too, each track with its format.
     const AddResult pieces = Add("https://www.youtube.com/watch?v=aqz-KE-bpKQ", AddMode::StartNow,
                                  [](AddDownloadCommand& c) {
-                                     ldm::core::MediaChoice media = DashChoice();  // segmented: not one file
+                                     ldm::core::MediaChoice media = DashChoice();
                                      media.siteVideo = true;
                                      for (auto& track : media.tracks) {
                                          track.siteFormat = "1";
                                      }
                                      c.media = media;
                                  });
-    EXPECT_FALSE(pieces.id);
-    EXPECT_TRUE(engine_.mediaStarts.empty());
+    ASSERT_TRUE(pieces.id);
+    EXPECT_TRUE(View(*pieces.id).download.siteVideo);
 }
 
 TEST_F(CoordinatorTest, ADashStreamStartsWithEveryPieceInItsPartsFolder)
