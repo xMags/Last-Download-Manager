@@ -145,6 +145,13 @@ private:
         std::optional<TransferFailure> recordingFailure;  // the run stops, then the download fails
         bool finishRecording = false;     // join what is on disk once the run stopped
 
+        // Site videos (video-sites design, section 8): fresh addresses asked for before the engine
+        // starts, at most once per run, and runs started again after an expired address.
+        bool pendingRefresh = false;
+        bool refreshedThisRun = false;
+        bool forceRefresh = false;        // the next run asks, whenever the addresses expire
+        int expiredRestarts = 0;          // since the user last started it or it completed
+
         // Synchronization (checklist Q-05): what the completed download was before its check, put
         // back when the server's file did not change or nothing of a new one arrived.
         struct SyncCheck {
@@ -345,6 +352,8 @@ private:
     std::unique_ptr<ToolUpdates> tools_;
     // Stores when `tool` was last checked, and publishes what changed.
     void OnToolChecked(SiteTool tool);
+    // The site lookup's answer for a site video's run that waits for fresh addresses.
+    void OnSiteRefreshed(model::DownloadId id, std::int64_t epoch, const SiteLookupFinished& answer);
     void OnUpdateChecked(const UpdateCheckOutcome& outcome);
 
     // HLS playlists fetched at a stream's start or a live recording's reload, by fetch id. Their

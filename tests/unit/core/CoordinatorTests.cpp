@@ -132,6 +132,15 @@ public:
     std::chrono::steady_clock::time_point steady = std::chrono::steady_clock::time_point{} + std::chrono::hours(1);
 };
 
+// Records the site lookups; tests answer them with SiteLookupFinished events.
+class FakeSiteResolver final : public ldm::core::SiteResolver {
+public:
+    void Resolve(ldm::core::SiteLookupRequest request) override { asked.push_back(std::move(request)); }
+    void Cancel(std::int64_t lookupId) override { cancelled.push_back(lookupId); }
+    std::vector<ldm::core::SiteLookupRequest> asked;
+    std::vector<std::int64_t> cancelled;
+};
+
 class FakeSecrets final : public ldm::core::SecretProtector {
 public:
     ldm::base::Result<std::vector<std::uint8_t>> Protect(std::string_view secret) override
@@ -235,6 +244,7 @@ protected:
         ports.media = &media_;
         ports.timeZone = timeZone_;
         ports.wakeTimer = &wakeTimer_;
+        ports.sites = &sites_;
         ldm::core::CoordinatorConfig config;
         config.downloadsFolder = kRoot;
         coordinator_ = std::make_unique<Coordinator>(ports, config);
@@ -320,6 +330,7 @@ protected:
     FakeProxy proxy_;
     FakeMediaTools media_;
     FakeWakeTimer wakeTimer_;
+    FakeSiteResolver sites_;
     ldm::core::TimeZone* timeZone_ = nullptr;  // no schedules unless a test sets one
     RecordingObserver observer_;
     std::unique_ptr<Coordinator> coordinator_;
@@ -1088,6 +1099,131 @@ TEST_F(CoordinatorTest, ASiteVideoIsStoredWithItsPageAndTrackFormats)
     for (const auto& track : engine_.mediaStarts[0].tracks) {
         EXPECT_EQ(track.maxRequestBytes, ldm::core::kSiteVideoRequestBytes) << "the site slows long requests down";
     }
+}
+
+// Fresh addresses (video-sites design, section 8).
+class SiteRefreshTest : public CoordinatorTest {
+protected:
+    // An address of `format` that expires `fromNow` seconds after the fake clock's time.
+    std::string Address(const char* format, std::int64_t fromNow) const
+    {
+        return std::string("https://media.test/videoplayback?itag=") + format +
+               "&expire=" + std::to_string(clock_.unixMs / 1000 + fromNow);
+    }
+
+    // A site video whose addresses expire `fromNow` seconds from now, added and started.
+    DownloadId AddExpiring(std::int64_t fromNow)
+    {
+        const AddResult result = Add("https://www.youtube.com/watch?v=aqz-KE-bpKQ", AddMode::StartNow,
+                                     [this, fromNow](AddDownloadCommand& c) {
+                                         c.fileName = "Bunny.mp4";
+                                         ldm::core::MediaChoice media = SiteChoice();
+                                         for (auto& track : media.tracks) {
+                                             track.segments->segments.front().url = Address(track.siteFormat.c_str(), fromNow);
+                                         }
+                                         c.media = media;
+                                     });
+        EXPECT_TRUE(result.id) << result.error.value_or("");
+        return result.id.value_or(DownloadId{});
+    }
+
+    // The resolver's answer to its last question: the formats at new addresses, with `bytes` for 299.
+    void Answer(std::int64_t bytes299 = 257'619'653, bool with299 = true)
+    {
+        ASSERT_FALSE(sites_.asked.empty());
+        ldm::core::SiteLookupFinished finished;
+        finished.lookupId = sites_.asked.back().lookupId;
+        ldm::media::SiteVideo video;
+        video.id = "aqz-KE-bpKQ";
+        for (const char* format : {"299", "140"}) {
+            if (std::string_view(format) == "299" && !with299) {
+                continue;
+            }
+            ldm::media::TrackSegments whole;
+            ldm::media::Segment segment;
+            segment.url = Address(format, 21'600);
+            whole.segments.push_back(segment);
+            const std::int64_t bytes = std::string_view(format) == "299" ? bytes299 : 10'271'496;
+            if (std::string_view(format) == "140") {
+                ldm::media::Rendition audio;
+                audio.source = whole;
+                audio.site = ldm::media::SiteFormat{format, bytes};
+                video.offer.audio.push_back(audio);
+            } else {
+                ldm::media::Variant variant;
+                variant.source = whole;
+                variant.site = ldm::media::SiteFormat{format, bytes};
+                video.offer.variants.push_back(variant);
+            }
+        }
+        finished.video = video;
+        Send(ldm::core::SiteLookupKey(finished.lookupId), 0, finished);
+    }
+};
+
+TEST_F(SiteRefreshTest, FreshAddressesAreAskedForBeforeTheEngineStartsWhenTheOldOnesExpireSoon)
+{
+    const DownloadId id = AddExpiring(5 * 60);
+    ASSERT_EQ(sites_.asked.size(), 1u);
+    EXPECT_EQ(sites_.asked[0].pageUrl, "https://www.youtube.com/watch?v=aqz-KE-bpKQ");
+    EXPECT_TRUE(engine_.mediaStarts.empty()) << "not with addresses about to expire";
+    EXPECT_EQ(View(id).download.status, DownloadStatus::Downloading);
+
+    Answer();
+    ASSERT_EQ(engine_.mediaStarts.size(), 1u);
+    EXPECT_EQ(engine_.mediaStarts[0].tracks[0].url, Address("299", 21'600));
+    const auto stored = Stored(id);
+    ASSERT_TRUE(stored);
+    EXPECT_EQ(stored->tracks[0].pieces.front().url, Address("299", 21'600)) << "kept for the next start";
+}
+
+TEST_F(SiteRefreshTest, AddressesThatStayValidStartAtOnce)
+{
+    AddExpiring(3 * 3600);
+    EXPECT_TRUE(sites_.asked.empty());
+    EXPECT_EQ(engine_.mediaStarts.size(), 1u);
+}
+
+TEST_F(SiteRefreshTest, StoppingWhileWaitingPausesAtOnceAndTheLateAnswerStartsNothing)
+{
+    const DownloadId id = AddExpiring(-60);
+    ASSERT_EQ(sites_.asked.size(), 1u);
+    coordinator_->Handle(ldm::core::StopCommand{{id}});
+    EXPECT_EQ(View(id).download.status, DownloadStatus::Paused);
+    EXPECT_EQ(sites_.cancelled.size(), 1u);
+    Answer();
+    EXPECT_TRUE(engine_.mediaStarts.empty());
+}
+
+TEST_F(SiteRefreshTest, AFormatThatIsGoneFailsWithTheReason)
+{
+    const DownloadId id = AddExpiring(-60);
+    Answer(257'619'653, false);
+    EXPECT_TRUE(engine_.mediaStarts.empty());
+    const auto& view = View(id);
+    EXPECT_EQ(view.download.status, DownloadStatus::Failed);
+    ASSERT_TRUE(view.download.lastResult);
+    EXPECT_NE(view.download.lastResult->find("no longer offers"), std::string::npos) << *view.download.lastResult;
+}
+
+TEST_F(SiteRefreshTest, ARefusedAddressGetsOneMoreRunWithFreshAddressesThenFails)
+{
+    const DownloadId id = AddExpiring(3 * 3600);
+    ASSERT_EQ(engine_.mediaStarts.size(), 1u);
+    const std::int64_t firstEpoch = engine_.mediaStarts[0].epoch;
+    ldm::core::MediaFinished refused;
+    refused.outcome = TransferOutcome::Failed;
+    refused.failure = TransferFailure{ldm::core::FailureReason::PermissionDenied, ldm::core::FailureClass::Fatal, 403,
+                                      "HTTP status 403"};
+    Send(id, firstEpoch, refused);
+    ASSERT_EQ(sites_.asked.size(), 1u) << "asked again although the addresses look valid";
+    EXPECT_EQ(View(id).download.status, DownloadStatus::Downloading);
+    Answer();
+    ASSERT_EQ(engine_.mediaStarts.size(), 2u);
+
+    Send(id, engine_.mediaStarts[1].epoch, refused);
+    EXPECT_EQ(sites_.asked.size(), 1u) << "a second refusal in a row is not asked about again";
+    EXPECT_EQ(View(id).download.status, DownloadStatus::Failed);
 }
 
 TEST_F(CoordinatorTest, OtherStreamsHaveNoRequestCap)
