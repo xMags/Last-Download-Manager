@@ -44,8 +44,8 @@ protected:
         (void)result;
         return false;
     }
-    // Modeless dialogs only: OnDestroying runs while the controls still exist; OnDestroyed runs
-    // after the window is gone and may delete the object.
+    // OnDestroying runs while the controls still exist, for modal and modeless dialogs alike.
+    // Modeless dialogs only: OnDestroyed runs after the window is gone and may delete the object.
     virtual void OnDestroying() {}
     virtual void OnDestroyed() {}
 

@@ -83,7 +83,13 @@ INT_PTR CALLBACK Dialog::DialogProc(HWND window, UINT message, WPARAM wParam, LP
     if (self == nullptr) {
         return FALSE;
     }
-    if (message == WM_DESTROY && !self->modal_) {
+    if (message == WM_DESTROY && self->modal_) {
+        // The object outlives a modal dialog (RunModal is still on the stack), so only the
+        // cleanup that needs the controls runs here.
+        self->OnDestroying();
+        return FALSE;
+    }
+    if (message == WM_DESTROY) {
         self->OnDestroying();
         ::SetWindowLongPtrW(window, DWLP_USER, 0);
         self->window_ = nullptr;
