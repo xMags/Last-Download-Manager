@@ -67,6 +67,19 @@ TEST(Settings, InvalidValuesFallBackToDefaultsWithWarnings)
     EXPECT_EQ(loaded.settings.httpProxy.port, defaults.httpProxy.port);
 }
 
+TEST(Settings, AnOverlongListKeepsItsLeadingLines)
+{
+    const std::string line(1000, 'a');
+    std::string history;
+    for (int i = 0; i < 40; ++i) {
+        history += (i == 0 ? "" : "\n") + line;
+    }
+    const auto loaded = SettingsFromMap({{"history.addresses", history}});
+    EXPECT_EQ(loaded.warnings.size(), 1u);
+    EXPECT_LE(loaded.settings.addressHistory.size(), ldm::model::kMaxSettingTextBytes);
+    EXPECT_EQ(loaded.settings.addressHistory.size(), 32 * 1000 + 31) << "32 whole lines";
+}
+
 TEST(Settings, UnknownKeysAreIgnored)
 {
     const auto loaded = SettingsFromMap({{"future.setting", "1"}});

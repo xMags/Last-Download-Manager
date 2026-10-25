@@ -1,3 +1,4 @@
+#include "model/Settings.h"
 #include "ui/BatchPattern.h"
 #include "ui/History.h"
 #include "ui/SystemActions.h"
@@ -71,6 +72,18 @@ TEST(History, PushesNewestFirstWithoutDuplicates)
     history = ldm::ui::PushHistory(history, "http://d", 3);
     EXPECT_EQ(ldm::ui::HistoryEntries(history), (std::vector<std::string>{"http://d", "http://c", "HTTP://A"}));
     EXPECT_EQ(ldm::ui::PushHistory(history, "bad\nentry", 3), history);
+}
+
+TEST(History, LongEntriesStayWithinWhatASettingHolds)
+{
+    std::string history;
+    for (char c = 'a'; c < 'a' + 20; ++c) {
+        history = ldm::ui::PushHistory(history, "http://x/" + std::string(3000, c), 20);
+    }
+    EXPECT_LE(history.size(), ldm::model::kMaxSettingTextBytes);
+    const auto entries = ldm::ui::HistoryEntries(history);
+    ASSERT_FALSE(entries.empty());
+    EXPECT_EQ(entries.front().back(), 'a' + 19) << "the newest stays";
 }
 
 TEST(SystemActions, VirusScanArguments)

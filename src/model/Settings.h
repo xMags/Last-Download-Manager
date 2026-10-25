@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <map>
 #include <string>
@@ -237,6 +238,10 @@ struct Settings {
     // with the browser's cookies for them, so videos that need an account work. None by default.
     std::string siteVideosSignIn;
 };
+
+// The longest text setting LDM reads back; a longer one takes its default, or for a list of
+// lines, the leading lines that fit.
+inline constexpr std::size_t kMaxSettingTextBytes = 32 * 1024;
 
 using SettingsMap = std::map<std::string, std::string, std::less<>>;
 
