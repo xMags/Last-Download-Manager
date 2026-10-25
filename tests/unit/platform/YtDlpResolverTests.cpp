@@ -67,6 +67,19 @@ TEST(YtDlpResolver, FactsAboutTheVideoAreTheVideosProblemWithYtDlpsPrefixRemoved
               Problem::Video);
 }
 
+TEST(YtDlpResolver, AVideoForSignedInUsersPointsAtLdmsSignInNotYtDlpsOptions)
+{
+    for (const char* error : {
+             "ERROR: [Reddit] 90bu6w: Account authentication is required. Use --cookies-from-browser or --cookies for the authentication.",
+             "ERROR: [vimeo] 76979871: The web client only works when logged-in. Use --cookies, --cookies-from-browser, --username and --password",
+             "ERROR: [hotstar] 1000234847: This video is only available for registered users. Use --cookies-from-browser or --cookies",
+         }) {
+        const auto failure = ReadResolverFailure(error);
+        EXPECT_EQ(failure.problem, Problem::Video) << error;
+        EXPECT_NE(failure.message.find("Options > Site videos > Sign in on sites"), std::string::npos) << failure.message;
+    }
+}
+
 TEST(YtDlpResolver, ABotCheckIsShownInPlainWords)
 {
     const auto bot = ReadResolverFailure("ERROR: [youtube] abcdefghijk: Sign in to confirm you\xE2\x80\x99re not a bot.");
