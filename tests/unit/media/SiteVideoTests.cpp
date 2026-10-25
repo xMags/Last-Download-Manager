@@ -391,6 +391,43 @@ TEST(SiteVideo, TheSitesRefererIsKeptAndOtherHeadersAreNot)
     EXPECT_EQ(video.offer.variants[1].site->referer, "https://www.example.test/watch/1");
 }
 
+TEST(SiteVideo, SubtitlesAreTheUploadersAndTheAutomaticOnesInTheVideosLanguage)
+{
+    const std::string subtitles = R"j(,"subtitles":{)j"
+        R"j("en":[{"ext":"json3","url":"https://subs.example.test/en.json"},{"ext":"srt","url":"https://subs.example.test/en.srt"},)j"
+        R"j({"ext":"vtt","url":"https://subs.example.test/en.vtt","name":"English"}],)j"
+        R"j("de-DE":[{"ext":"srt","url":"https://subs.example.test/de.srt","name":"German (Germany)"}],)j"
+        R"j("ja":[{"ext":"ttml","url":"https://subs.example.test/ja.ttml"}],)j"
+        R"j("el":[{"ext":"vtt","protocol":"m3u8_native","url":"https://subs.example.test/el.m3u8"}],)j"
+        R"j("live_chat":[{"ext":"json","url":"https://subs.example.test/chat"}],)j"
+        R"j("fr":[{"ext":"vtt","url":"javascript:void"}]},)j"
+        R"j("automatic_captions":{"en-orig":[{"ext":"vtt","url":"https://subs.example.test/auto.vtt","name":"English (Original)"}],)j"
+        R"j("en":[{"ext":"vtt","url":"https://subs.example.test/auto-en.vtt"}],"af":[{"ext":"vtt","url":"https://subs.example.test/af.vtt"}]})j";
+    const SiteVideo video = Parse(Answer("[" + Format("v", "avc1.4d401e", "mp4a.40.2", R"(,"height":360)") + "]", subtitles));
+    std::vector<std::string> ids;
+    for (const auto& rendition : video.offer.subtitles) {
+        ids.push_back(rendition.site ? rendition.site->id : "?");
+    }
+    std::sort(ids.begin(), ids.end());
+    EXPECT_EQ(ids, (std::vector<std::string>{"automatic:en-orig", "subtitles:de-DE", "subtitles:el", "subtitles:en"}));
+    for (const auto& rendition : video.offer.subtitles) {
+        ASSERT_TRUE(rendition.source);
+        if (rendition.site->id == "subtitles:en") {
+            EXPECT_EQ(rendition.name, "English");
+            EXPECT_EQ(rendition.site->ext, "vtt") << "WebVTT over SRT";
+            EXPECT_EQ(std::get<TrackSegments>(*rendition.source).segments.front().url, "https://subs.example.test/en.vtt");
+        } else if (rendition.site->id == "subtitles:de-DE") {
+            EXPECT_EQ(rendition.site->ext, "srt") << "SRT when there is no WebVTT";
+        } else if (rendition.site->id == "subtitles:el") {
+            EXPECT_TRUE(std::holds_alternative<ldm::media::PlaylistAddress>(*rendition.source));
+        } else {
+            EXPECT_EQ(rendition.name, "English (Original) (automatic)");
+            EXPECT_EQ(rendition.language, "en");
+        }
+    }
+    EXPECT_EQ(BuildQualityList(video.offer, video.seconds).subtitles.size(), 4u);
+}
+
 TEST(SiteVideo, CookieTextThatDoesNotReadIsNotTaken)
 {
     const auto cookiesOf = [](const std::string& text) {

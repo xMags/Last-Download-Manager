@@ -587,6 +587,96 @@ Rendition MakeAudio(const Candidate& candidate, std::optional<double> seconds)
     return rendition;
 }
 
+// One language's subtitles: its WebVTT file, or SRT, which the join turns into WebVTT. Given as
+// a file, or as an HLS playlist of pieces (TED).
+std::optional<Rendition> ReadSubtitleTrack(const Json& entries, const std::string& language, const std::string& id,
+                                           const std::string& suffix)
+{
+    if (!entries.is_array()) {
+        return std::nullopt;
+    }
+    const Json* chosen = nullptr;
+    for (const char* wanted : {"vtt", "srt"}) {
+        for (const Json& entry : entries) {
+            if (entry.is_object() && Text(entry, "ext") == wanted) {
+                chosen = &entry;
+                break;
+            }
+        }
+        if (chosen != nullptr) {
+            break;
+        }
+    }
+    if (chosen == nullptr) {
+        return std::nullopt;
+    }
+    const std::string url = Text(*chosen, "url");
+    const auto checked = CheckedUrl(url, url);
+    if (!checked) {
+        return std::nullopt;
+    }
+    const std::string protocol = Text(*chosen, "protocol");
+    Rendition rendition;
+    if (protocol.empty() || protocol == "https" || protocol == "http") {
+        TrackSegments file;
+        Segment segment;
+        segment.url = *checked;
+        file.segments.push_back(std::move(segment));
+        rendition.source = std::move(file);
+    } else if (protocol == "m3u8_native" || protocol == "m3u8") {
+        rendition.source = PlaylistAddress{*checked};
+    } else {
+        return std::nullopt;
+    }
+    std::string name = Text(*chosen, "name");
+    if (name.empty() || !PlainText(name, 128)) {
+        name = language;
+    }
+    rendition.name = name + suffix;
+    rendition.language = language;
+    rendition.codecs = "wvtt";
+    rendition.site = SiteFormat{id, std::nullopt, std::string(), Text(*chosen, "ext")};
+    return rendition;
+}
+
+// The uploader's subtitles in every language, then the captions the site made automatically in
+// the video's own language ("-orig" on YouTube); not the machine translations into every other
+// language (about 150 per YouTube video).
+void ReadSubtitles(const Json& root, MediaOffer& offer)
+{
+    constexpr size_t kMaxSubtitleLanguages = 200;
+    const auto read = [&offer](const Json& languages, bool automatic) {
+        if (!languages.is_object()) {
+            return;
+        }
+        for (const auto& [key, entries] : languages.items()) {
+            if (offer.subtitles.size() >= kMaxSubtitleLanguages) {
+                return;
+            }
+            if (key.empty() || !PlainText(key, 40) || key == "live_chat") {
+                continue;
+            }
+            std::string language = key;
+            if (automatic) {
+                if (!key.ends_with("-orig")) {
+                    continue;
+                }
+                language.resize(key.size() - 5);
+            }
+            const std::string id = (automatic ? "automatic:" : "subtitles:") + key;
+            if (auto rendition = ReadSubtitleTrack(entries, language, id, automatic ? " (automatic)" : "")) {
+                offer.subtitles.push_back(std::move(*rendition));
+            }
+        }
+    };
+    if (const auto subtitles = root.find("subtitles"); subtitles != root.end()) {
+        read(*subtitles, false);
+    }
+    if (const auto automatic = root.find("automatic_captions"); automatic != root.end()) {
+        read(*automatic, true);
+    }
+}
+
 }  // namespace
 
 base::Result<SiteVideo> ParseSiteVideo(std::string_view json)
@@ -749,6 +839,7 @@ base::Result<SiteVideo> ParseSiteVideo(std::string_view json)
         return Refused(protectedSeen ? "This video is protected and cannot be downloaded."
                                      : "This video has no format LDM can download.");
     }
+    ReadSubtitles(root, video.offer);
     return video;
 }
 
