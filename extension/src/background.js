@@ -13,6 +13,7 @@ import { downloadVerdict, keySettings, sendsForcedLinkToLdm } from './key-rules.
 import { cleanKeys, LinkClicks } from './link-clicks.js';
 import { MediaDetector } from './media-detect.js';
 import { isDownloadAddress, makeCookies, menuSettings, parseCookiesRequest, parseMediaList } from './protocol.js';
+import { SitePages } from './site-pages.js';
 import { applyToolbar, toolbarAppearance } from './toolbar.js';
 import { VideoPositions } from './video-positions.js';
 
@@ -39,6 +40,11 @@ const connection = new LdmConnection(api, {
     api.storage.local.set({ config });
     if (menuChanged) {
       updateMenu();
+    }
+    // Each config follows a new connection or a change in LDM's Options: with site videos on,
+    // LDM hears the open tabs' site addresses again (it ignores a video it already knows).
+    if (config.sitePages) {
+      sitePages.announceAll().catch((error) => console.warn('LDM: site pages failed', error));
     }
   },
   onMessage: (message) => {
@@ -113,6 +119,11 @@ const mediaDetector = new MediaDetector(api, connection, {
   userAgent: navigator.userAgent,
 });
 const videoPositions = new VideoPositions(api, connection);
+const sitePages = new SitePages(api, connection, {
+  ready: settingsLoaded,
+  isEnabled: () => enabled && rules.sitePages === true,
+  userAgent: navigator.userAgent,
+});
 
 /** Shows `text` in the page the user is on; pages the browser protects show nothing. */
 function tell(tab, text) {
@@ -196,11 +207,17 @@ api.webRequest.onBeforeRequest.addListener((details) => {
   if (details.tabId >= 0) {
     mediaDetector.reset(details.tabId);
     videoPositions.forget(details.tabId);
+    sitePages.reset(details.tabId);
   }
 }, { urls: ['<all_urls>'], types: ['main_frame'] });
 api.tabs.onRemoved.addListener((tabId) => {
   mediaDetector.reset(tabId);
   videoPositions.forget(tabId);
+  sitePages.reset(tabId);
+});
+// Video sites change the video without loading a page; the address still changes.
+api.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  sitePages.onUpdated(tabId, changeInfo, tab).catch((error) => console.warn('LDM: site page failed', error));
 });
 api.tabs.onActivated.addListener(() => videoPositions.refreshAll());
 api.windows.onFocusChanged.addListener(() => videoPositions.refreshAll());
