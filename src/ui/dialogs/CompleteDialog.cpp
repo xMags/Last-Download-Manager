@@ -41,8 +41,14 @@ bool CompleteDialog::OnInit()
     SetText(IDC_DONE_URL, base::ToUtf16(completed_.url));
     SetText(IDC_DONE_PATH, base::ToUtf16(completed_.finalPath));
     SetText(IDC_DONE_SIZE, completed_.size ? FormatSize(*completed_.size) : L"");
+    // The type's icon, as Properties shows it: reading the file itself for its own icon can block
+    // the window on a large program or a network folder.
     SHFILEINFOW info{};
-    if (::SHGetFileInfoW(base::ToUtf16(completed_.finalPath).c_str(), 0, &info, sizeof(info), SHGFI_ICON | SHGFI_LARGEICON) != 0) {
+    const std::string& path = completed_.finalPath;
+    const std::string name = path.substr(path.find_last_of("\\/") + 1);  // npos + 1: the whole path
+    const std::wstring probe = L"file." + base::ToUtf16(core::FileExtension(name));
+    if (::SHGetFileInfoW(probe.c_str(), FILE_ATTRIBUTE_NORMAL, &info, sizeof(info),
+                         SHGFI_USEFILEATTRIBUTES | SHGFI_ICON | SHGFI_LARGEICON) != 0) {
         icon_.reset(info.hIcon);
         ::SendMessageW(Item(IDC_DONE_ICON), STM_SETICON, reinterpret_cast<WPARAM>(icon_.get()), 0);
     }
