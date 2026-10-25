@@ -29,7 +29,8 @@ public:
     // The answer, once libcurl reported the handle done with `result` (or it never started).
     [[nodiscard]] core::FetchFinished Finish(CURLcode result);
 
-    // A manifest is small; a fetch taking longer than this has stalled.
+    // A manifest is small; a fetch taking longer than this has stalled. Fetches of large files set
+    // their own (FetchRequest::totalTimeout).
     static constexpr std::chrono::seconds kTotalTimeout{60};
 
 private:

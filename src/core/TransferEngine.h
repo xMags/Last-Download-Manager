@@ -7,6 +7,7 @@
 #include "model/Ids.h"
 #include "model/Media.h"
 
+#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <optional>
@@ -289,6 +290,9 @@ struct FetchRequest {
     // Media types whose body is wanted ("text/html"); empty for any. Another type ends the fetch
     // after the headers, as a success with FetchFinished::bodySkipped and no body.
     std::vector<std::string> bodyTypes;
+    // The whole fetch may take this long; nothing: the engine's default for small answers. A
+    // stalled connection fails sooner either way.
+    std::optional<std::chrono::seconds> totalTimeout;
 };
 
 // The answer to a FetchRequest: exactly one per request.
