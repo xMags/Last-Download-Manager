@@ -1,0 +1,19 @@
+{
+ "_type": "video",
+ "id": "62986583",
+ "title": "Lostin Powers - She so Heavy (SneakPreview) Adrian Ackers Blueprint 1",
+ "extractor_key": "Soundcloud",
+ "duration": 143.206,
+ "formats": [
+  {
+   "format_id": "hls_aac_96k",
+   "protocol": "m3u8_native",
+   "ext": "m4a",
+   "vcodec": "none",
+   "acodec": "mp4a.40.2",
+   "tbr": 96,
+   "format_note": null,
+   "url": "https://media.example.test/hls_aac_96k.m3u8"
+  }
+ ]
+}

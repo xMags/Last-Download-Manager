@@ -72,7 +72,8 @@ TEST(SiteVideo, LongVideoGivesOnePicturePerHeightAndFrameRatePreferringH264)
     EXPECT_EQ(video.title, "Big Buck Bunny 60fps 4K - Official Blender Foundation Short Film");
     ASSERT_TRUE(video.seconds);
     EXPECT_DOUBLE_EQ(*video.seconds, 635);
-    EXPECT_EQ(video.offer.format, StreamFormat::Dash);
+    // Paired by groups: each picture names the delivery of the sound it goes with.
+    EXPECT_EQ(video.offer.format, StreamFormat::Hls);
     // VP9 above 1080p, where the site has no H.264; never the AV1 copies, the storyboards, the HLS
     // duplicates or the low combined format 18.
     EXPECT_EQ(VariantIds(video), (std::vector<std::string>{"315", "308", "299", "298", "136", "135", "134", "133", "160"}));
@@ -83,6 +84,7 @@ TEST(SiteVideo, LongVideoGivesOnePicturePerHeightAndFrameRatePreferringH264)
         ASSERT_EQ(track.segments.size(), 1u);  // one whole file
         EXPECT_FALSE(track.segments.front().range);
         EXPECT_TRUE(track.inits.empty());
+        EXPECT_EQ(variant.audioGroup, "file");
         EXPECT_EQ(track.segments.front().url.rfind("https://media.example.test/videoplayback?itag=", 0), 0u);
     }
     EXPECT_EQ(video.offer.variants[2].mimeType, "video/mp4");
@@ -92,7 +94,7 @@ TEST(SiteVideo, LongVideoGivesOnePicturePerHeightAndFrameRatePreferringH264)
 TEST(SiteVideo, AudioKeepsTheBestStereoTrackPerCodecAndPairsAac)
 {
     const SiteVideo video = Parse(ReadFixture("youtube-4k.json"));
-    // Not the "-drc" copies, not 5.1 (256, 258), not AC-3/E-AC-3 or the unknown codec of 773.
+    // Not the "-drc" copies, not 5.1 (256, 258), not AC-3/E-AC-3, not the HLS copies 233 and 234.
     ASSERT_EQ(video.offer.audio.size(), 2u);
     std::vector<std::string> ids;
     for (const auto& audio : video.offer.audio) {
@@ -102,6 +104,7 @@ TEST(SiteVideo, AudioKeepsTheBestStereoTrackPerCodecAndPairsAac)
     EXPECT_EQ(ids, (std::vector<std::string>{"140", "251"}));
     for (const auto& audio : video.offer.audio) {
         EXPECT_EQ(audio.isDefault, audio.site->id == "140") << audio.site->id;
+        EXPECT_EQ(audio.groupId, "file");
     }
 }
 
@@ -150,7 +153,7 @@ TEST(SiteVideo, ProtectedOrUnusableFormatsGiveAReason)
 {
     EXPECT_EQ(Refusal(Answer("[" + Format("1", "avc1.4d401e", "none", R"(,"height":360,"has_drm":true)") + "]")),
               "This video is protected and cannot be downloaded.");
-    EXPECT_EQ(Refusal(Answer("[" + Format("1", "hvc1.1", "none", R"(,"height":360)") + "]")),
+    EXPECT_EQ(Refusal(Answer("[" + Format("1", "dvh1.05.06", "ac-3", R"(,"height":360)") + "]")),
               "This video has no format LDM can download.");
     EXPECT_EQ(Refusal(Answer("[]")), "This video has no format LDM can download.");
 }
@@ -175,7 +178,8 @@ TEST(SiteVideo, FormatsWithUnsafeOrMissingFieldsAreLeftOut)
         R"({"format_id":"hls","protocol":"m3u8_native","url":"https://media.example.test/a.m3u8","vcodec":"avc1.4d401e","acodec":"none","height":1080},)" +
         R"({"protocol":"https","url":"https://media.example.test/noid","vcodec":"avc1.4d401e","acodec":"none","height":1080},)" +
         R"({"format_id":"noheight","protocol":"https","url":"https://media.example.test/x","vcodec":"avc1.4d401e","acodec":"none"},)" +
-        R"({"format_id":"unknown","protocol":"https","url":"https://media.example.test/y","height":1080},)" +
+        R"({"format_id":"rtmp","protocol":"rtmp","url":"rtmp://media.example.test/y","vcodec":"avc1.4d401e","acodec":"none","height":1080},)" +
+        R"({"format_id":"bad\nid","protocol":"https","url":"https://media.example.test/z","vcodec":"avc1.4d401e","acodec":"none","height":1080},)" +
         R"("not an object",)" +
         Format("a", "none", "mp4a.40.2", R"(,"tbr":128,"audio_channels":2)") + "]";
     const SiteVideo video = Parse(Answer(formats));
@@ -211,6 +215,7 @@ TEST(SiteVideo, SitesWithOnlyCombinedFormatsOfferThemWithTheirOwnSound)
         Format("high", "avc1.64001f", "mp4a.40.2", R"(,"height":720,"tbr":1500,"filesize":1875000)") + "]";
     const SiteVideo video = Parse(Answer(formats));
     EXPECT_EQ(video.offer.format, StreamFormat::Hls);  // the sound is in each picture's file
+    EXPECT_TRUE(video.offer.variants[0].audioGroup.empty());
     EXPECT_EQ(VariantIds(video), (std::vector<std::string>{"high", "low"}));
     const auto list = BuildQualityList(video.offer, video.seconds);
     ASSERT_EQ(list.entries.size(), 2u);
@@ -231,6 +236,166 @@ TEST(SiteVideo, TheOriginalLanguageIsPairedOverADub)
     for (const auto& audio : video.offer.audio) {
         EXPECT_EQ(audio.isDefault, audio.site->id == "orig-aac") << audio.site->id;
     }
+}
+
+std::string PlaylistOf(const SiteVideo& video, size_t variant)
+{
+    const auto* address = std::get_if<ldm::media::PlaylistAddress>(&video.offer.variants.at(variant).source);
+    return address ? address->url : std::string("(not a playlist)");
+}
+
+TEST(SiteVideo, HlsOnlySitesOfferTheirPlaylistsWithTheSoundInside)
+{
+    // Dailymotion: four HLS formats, each with picture and sound.
+    const SiteVideo video = Parse(ReadFixture("dailymotion.json"));
+    EXPECT_EQ(video.extractor, "Dailymotion");
+    EXPECT_EQ(VariantIds(video), (std::vector<std::string>{"hls-1080", "hls-720", "hls-480", "hls-380"}));
+    EXPECT_EQ(PlaylistOf(video, 0), "https://media.example.test/hls-1080.m3u8");
+    EXPECT_TRUE(video.offer.audio.empty());
+    const auto list = BuildQualityList(video.offer, video.seconds);
+    ASSERT_EQ(list.entries.size(), 4u);
+    EXPECT_EQ(list.entries[0].kind, QualityKind::Video);
+    EXPECT_FALSE(list.entries[0].audio);
+    EXPECT_EQ(QualityLabel(list.entries[0]), "1080p H.264");
+}
+
+TEST(SiteVideo, AudioOnlySitesOfferSoundOnly)
+{
+    // SoundCloud: one HLS AAC track and no picture.
+    const SiteVideo video = Parse(ReadFixture("soundcloud.json"));
+    EXPECT_TRUE(video.offer.variants.empty());
+    ASSERT_EQ(video.offer.audio.size(), 1u);
+    const auto& audio = video.offer.audio.front();
+    EXPECT_TRUE(audio.groupId.empty());
+    ASSERT_TRUE(audio.source);
+    EXPECT_TRUE(std::holds_alternative<ldm::media::PlaylistAddress>(*audio.source));
+    const auto list = BuildQualityList(video.offer, video.seconds);
+    ASSERT_EQ(list.entries.size(), 1u);
+    EXPECT_EQ(list.entries[0].kind, QualityKind::AudioOnly);
+}
+
+TEST(SiteVideo, SeparateHlsPicturesPairWithHlsSound)
+{
+    // TED: HLS pictures without sound, HLS sound whose codec is not named, and one https file
+    // whose size is not stated, which is not offered beside sized pictures.
+    const SiteVideo video = Parse(ReadFixture("ted.json"));
+    ASSERT_FALSE(video.offer.variants.empty());
+    for (const auto& variant : video.offer.variants) {
+        EXPECT_EQ(variant.audioGroup, "hls") << variant.site->id;
+        EXPECT_TRUE(variant.resolution) << variant.site->id;
+    }
+    ASSERT_FALSE(video.offer.audio.empty());
+    EXPECT_TRUE(std::any_of(video.offer.audio.begin(), video.offer.audio.end(),
+                            [](const auto& a) { return a.isDefault && a.groupId == "hls"; }));
+    const auto list = BuildQualityList(video.offer, video.seconds);
+    ASSERT_FALSE(list.entries.empty());
+    EXPECT_EQ(list.entries[0].kind, QualityKind::Video);
+    ASSERT_TRUE(list.entries[0].audio);
+    EXPECT_EQ(video.offer.audio[*list.entries[0].audio].groupId, "hls");
+}
+
+TEST(SiteVideo, FilesWithoutNamedCodecsAreOfferedWithTheSiteCookies)
+{
+    // archive.org: three files (ogv, mp4, avi) that name no codecs, with cookies the site set.
+    const SiteVideo video = Parse(ReadFixture("archive-org.json"));
+    EXPECT_EQ(VariantIds(video), (std::vector<std::string>{"2", "1", "0"}));
+    EXPECT_EQ(video.offer.variants[0].site->ext, "avi");
+    EXPECT_EQ(video.offer.variants[0].site->bytes, 332243668);
+    EXPECT_TRUE(video.offer.variants[0].codecs.empty());
+    EXPECT_TRUE(video.offer.variants[0].audioGroup.empty());  // the sound, if any, is inside
+    ASSERT_EQ(video.cookies.size(), 3u);  // the same three on every format, kept once
+    const auto& csrf = video.cookies.front();
+    EXPECT_EQ(csrf.name, "ia-csrf");
+    EXPECT_EQ(csrf.domain, "archive.org");
+    EXPECT_FALSE(csrf.hostOnly);
+    EXPECT_TRUE(csrf.secure);
+    EXPECT_EQ(csrf.expires, 1795492351);
+    EXPECT_EQ(csrf.path, "/");
+}
+
+TEST(SiteVideo, StoryboardsAreLeftOutOfAPastBroadcast)
+{
+    const SiteVideo video = Parse(ReadFixture("twitch-vod.json"));
+    ASSERT_FALSE(video.offer.variants.empty());
+    for (size_t i = 0; i < video.offer.variants.size(); ++i) {
+        EXPECT_FALSE(video.offer.variants[i].site->id.starts_with("sb"));
+        EXPECT_EQ(PlaylistOf(video, i).rfind("https://media.example.test/", 0), 0u);
+    }
+    EXPECT_EQ(VariantIds(video).front(), "720p-1");  // the higher rate of the two 720p ones
+    const auto list = BuildQualityList(video.offer, video.seconds);
+    EXPECT_TRUE(std::any_of(list.entries.begin(), list.entries.end(),
+                            [](const auto& e) { return e.kind == QualityKind::AudioOnly; }));
+}
+
+TEST(SiteVideo, DashPieceListsBecomeSegmentsUnderTheirBase)
+{
+    const std::string piece = R"("protocol":"http_dash_segments","fragment_base_url":"https://cdn.example.test/v/",)";
+    const std::string formats = "[" + std::string(R"({"format_id":"v1",)") + piece +
+        R"("fragments":[{"path":"init.mp4"},{"path":"1.m4s","duration":4},{"url":"https://other.example.test/2.m4s","duration":2.5}],)" +
+        R"("vcodec":"avc1.64001f","acodec":"none","height":720,"ext":"mp4"},)" +
+        R"({"format_id":"a1",)" + piece +
+        R"("fragments":[{"path":"a/1.m4s","duration":6.5}],"vcodec":"none","acodec":"mp4a.40.2","ext":"m4a"},)" +
+        R"({"format_id":"ranged",)" + piece +
+        R"("fragments":[{"path":"x","range":"0-99"}],"vcodec":"avc1.64001f","acodec":"none","height":1080},)" +
+        R"({"format_id":"escape",)" + piece +
+        R"("fragments":[{"path":"javascript:void"}],"vcodec":"avc1.64001f","acodec":"none","height":1440},)" +
+        R"({"format_id":"empty",)" + piece + R"("fragments":[],"vcodec":"avc1.64001f","acodec":"none","height":2160})" + "]";
+    const SiteVideo video = Parse(Answer(formats));
+    EXPECT_EQ(VariantIds(video), (std::vector<std::string>{"v1"}));
+    EXPECT_EQ(video.offer.variants[0].audioGroup, "pieces");
+    const auto& track = std::get<TrackSegments>(video.offer.variants[0].source);
+    ASSERT_EQ(track.segments.size(), 3u);
+    EXPECT_EQ(track.segments[0].url, "https://cdn.example.test/v/init.mp4");
+    EXPECT_EQ(track.segments[1].url, "https://cdn.example.test/v/1.m4s");
+    EXPECT_EQ(track.segments[2].url, "https://other.example.test/2.m4s");
+    EXPECT_DOUBLE_EQ(track.targetSeconds, 4);
+    ASSERT_EQ(video.offer.audio.size(), 1u);
+    EXPECT_EQ(video.offer.audio[0].groupId, "pieces");
+    EXPECT_TRUE(video.offer.audio[0].isDefault);
+}
+
+TEST(SiteVideo, APictureOnlyPairsWithSoundOfTheSameDelivery)
+{
+    // A 1080p HLS picture without sound, and sound only as a file: it cannot be offered, as LDM
+    // never makes one download of an HLS track and a file.
+    const std::string formats = "[" + Format("v360", "avc1.4d401e", "none", R"(,"height":360)") + "," +
+        R"({"format_id":"v1080","protocol":"m3u8_native","url":"https://media.example.test/v.m3u8","vcodec":"avc1.640028","acodec":"none","height":1080},)" +
+        Format("a", "none", "mp4a.40.2", R"(,"tbr":128)") + "]";
+    EXPECT_EQ(VariantIds(Parse(Answer(formats))), (std::vector<std::string>{"v360"}));
+}
+
+TEST(SiteVideo, AFileWhosePictureSizeIsUnknownIsOfferedWhenItIsTheOnlyOne)
+{
+    const SiteVideo video = Parse(Answer(
+        "[" + std::string(R"({"format_id":"only","protocol":"https","url":"https://media.example.test/o.mp4","ext":"mp4","tbr":800})") + "]"));
+    EXPECT_EQ(VariantIds(video), (std::vector<std::string>{"only"}));
+    EXPECT_FALSE(video.offer.variants[0].resolution);
+}
+
+TEST(SiteVideo, TheSitesRefererIsKeptAndOtherHeadersAreNot)
+{
+    const SiteVideo video = Parse(Answer("[" +
+        Format("v", "avc1.4d401e", "mp4a.40.2",
+               R"(,"height":360,"http_headers":{"Referer":"https://www.example.test/watch/1","User-Agent":"app/1"})") + "," +
+        Format("w", "avc1.4d401e", "mp4a.40.2", R"(,"height":480,"http_headers":{"Referer":"https://www.example.test/\r\nX: y"})") +
+        "]"));
+    ASSERT_EQ(video.offer.variants.size(), 2u);
+    EXPECT_TRUE(video.offer.variants[0].site->referer.empty());  // 480p: a line break, refused
+    EXPECT_EQ(video.offer.variants[1].site->referer, "https://www.example.test/watch/1");
+}
+
+TEST(SiteVideo, CookieTextThatDoesNotReadIsNotTaken)
+{
+    const auto cookiesOf = [](const std::string& text) {
+        return Parse(Answer("[" + Format("v", "avc1.4d401e", "mp4a.40.2", R"(,"height":360,"cookies":")" + text + "\"") + "]"))
+            .cookies.size();
+    };
+    EXPECT_EQ(cookiesOf("a=1; Domain=.example.test; Path=/"), 1u);
+    EXPECT_EQ(cookiesOf("a=1; Path=/"), 0u);                          // no Domain
+    EXPECT_EQ(cookiesOf("Domain=.example.test; a=1"), 0u);            // an attribute first
+    EXPECT_EQ(cookiesOf("a=1; Domain=.example.test; junk"), 0u);      // neither cookie nor attribute
+    EXPECT_EQ(cookiesOf("a=1; Domain=exa mple.test"), 0u);            // not a host name
+    EXPECT_EQ(cookiesOf("a=1; Domain=example.test; Path=nope"), 0u);  // a path starts with '/'
 }
 
 }  // namespace

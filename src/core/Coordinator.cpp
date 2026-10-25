@@ -1932,7 +1932,7 @@ std::optional<std::string> Coordinator::ValidateMedia(const MediaChoice& media, 
     if (media.siteVideo) {
         // The page must be one LDM builds itself, so a refresh asks the resolver about exactly it.
         const auto page = FindSiteVideo(download.url);
-        if (media.kind != model::DownloadKind::Dash || !page || page->canonicalUrl != download.url) {
+        if (!page || page->canonicalUrl != download.url) {
             return "A site video needs the address of its page.";
         }
     }
@@ -1967,7 +1967,7 @@ std::optional<std::string> Coordinator::ValidateMedia(const MediaChoice& media, 
             FillTrack(track, *choice.segments);
         }
         if (media.siteVideo) {
-            if (!track.wholeFile || choice.siteFormat.empty() || choice.siteFormat.size() > 64 ||
+            if (choice.siteFormat.empty() || choice.siteFormat.size() > 64 ||
                 (choice.expectedBytes && *choice.expectedBytes <= 0)) {
                 return "A track of the site video has no format to ask for again.";
             }

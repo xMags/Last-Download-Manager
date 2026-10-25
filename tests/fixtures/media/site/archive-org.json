@@ -1,0 +1,48 @@
+{
+ "_type": "video",
+ "id": "BigBuckBunny_124",
+ "title": "Big Buck Bunny",
+ "extractor_key": "ArchiveOrg",
+ "duration": 596.46,
+ "formats": [
+  {
+   "format_id": "0",
+   "protocol": "https",
+   "ext": "ogv",
+   "width": 533,
+   "height": 300,
+   "tbr": null,
+   "filesize": 46935223,
+   "format_note": "derivative",
+   "dynamic_range": "SDR",
+   "url": "https://media.example.test/0",
+   "cookies": "ia-csrf=v0; Domain=.archive.org; Path=/; Secure; Expires=1795492351; donation-identifier=v0; Domain=.archive.org; Path=/; Expires=1824436351; abtest-identifier=v0; Domain=.archive.org; Path=/; Expires=1824436351"
+  },
+  {
+   "format_id": "1",
+   "protocol": "https",
+   "ext": "mp4",
+   "width": 640,
+   "height": 360,
+   "tbr": null,
+   "filesize": 61878609,
+   "format_note": "derivative",
+   "dynamic_range": "SDR",
+   "url": "https://media.example.test/1",
+   "cookies": "ia-csrf=v1; Domain=.archive.org; Path=/; Secure; Expires=1795492351; donation-identifier=v1; Domain=.archive.org; Path=/; Expires=1824436351; abtest-identifier=v1; Domain=.archive.org; Path=/; Expires=1824436351"
+  },
+  {
+   "format_id": "2",
+   "protocol": "https",
+   "ext": "avi",
+   "width": 1280,
+   "height": 720,
+   "tbr": null,
+   "filesize": 332243668,
+   "format_note": "derivative",
+   "dynamic_range": "SDR",
+   "url": "https://media.example.test/2",
+   "cookies": "ia-csrf=v2; Domain=.archive.org; Path=/; Secure; Expires=1795492351; donation-identifier=v2; Domain=.archive.org; Path=/; Expires=1824436351; abtest-identifier=v2; Domain=.archive.org; Path=/; Expires=1824436351"
+  }
+ ]
+}

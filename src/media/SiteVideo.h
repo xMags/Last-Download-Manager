@@ -4,28 +4,48 @@
 #include "media/MediaModel.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
-// A video page of a supported site, as the site resolver (yt-dlp, run by platform/win) described
-// it in its JSON answer. The answer is untrusted input: it is read field by field, bounded, and
-// turned into the same MediaOffer a DASH manifest gives, so the quality list, the stream choice
-// and the downloads treat it like any other stream. Every quality is one whole file per track.
+// A video page of a site the resolver (yt-dlp, run by platform/win) reads, as it described it in
+// its JSON answer. The answer is untrusted input: it is read field by field, bounded, and turned
+// into the same MediaOffer a manifest gives, so the quality list, the stream choice and the
+// downloads treat it like any other stream. A format is one whole file, an HLS media playlist, or
+// a list of DASH pieces; every one is downloaded by LDM's own engine.
 namespace ldm::media {
 
 // Bounds on one answer. A long YouTube video answers with about 0.2 MB and 60 formats.
 inline constexpr size_t kMaxSiteAnswerBytes = 16 * 1024 * 1024;
 inline constexpr size_t kMaxSiteFormats = 500;
 inline constexpr size_t kMaxSiteUrlBytes = 16 * 1024;
+inline constexpr size_t kMaxSiteCookies = 50;
+
+// A cookie the resolver got from the site itself while reading the page (not one of the
+// browser's), which the site wants back with the requests for its files.
+struct SiteCookie {
+    std::string domain;     // without a leading dot
+    bool hostOnly = true;   // false: also sent to subdomains of `domain`
+    std::string path = "/";
+    bool secure = false;
+    std::int64_t expires = 0;  // Unix seconds; 0 for a session cookie
+    std::string name;
+    std::string value;
+};
 
 struct SiteVideo {
-    std::string id;     // the site's own id of the video
-    std::string title;  // may be empty
+    std::string id;         // the site's own id of the video
+    std::string title;      // may be empty
+    std::string extractor;  // the resolver's name for the site, such as "Youtube"; may be empty
     std::optional<double> seconds;
-    // Picked formats only: one video quality per height and frame rate, the best audio per
-    // language and codec. Separate sound, so the offer's format is Dash. Never live, never DRM.
+    // Picked formats only: one video quality per height and frame rate, the best audio per kind
+    // of delivery, language and codec. A picture whose sound is separate names its delivery as
+    // its audioGroup, and the audio of that delivery carries it as groupId, so a quality pairs
+    // only tracks LDM downloads the same way. Never live, never DRM.
     MediaOffer offer;
+    std::vector<SiteCookie> cookies;
 };
 
 // Reads an answer. Fails, with words to show the user, for a playlist, a live stream, a video

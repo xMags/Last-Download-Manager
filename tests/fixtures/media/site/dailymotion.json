@@ -1,0 +1,66 @@
+{
+ "_type": "video",
+ "id": "x5kesuj",
+ "title": "Office Christmas Party Review –  Jason Bateman, Olivia Munn, T.J. Miller",
+ "extractor_key": "Dailymotion",
+ "duration": 187,
+ "is_live": null,
+ "formats": [
+  {
+   "format_id": "hls-380",
+   "protocol": "m3u8_native",
+   "ext": "mp4",
+   "vcodec": "avc1.42001e",
+   "acodec": "mp4a.40.2",
+   "width": 512,
+   "height": 288,
+   "fps": null,
+   "tbr": 460.56,
+   "dynamic_range": "SDR",
+   "has_drm": false,
+   "url": "https://media.example.test/hls-380.m3u8"
+  },
+  {
+   "format_id": "hls-480",
+   "protocol": "m3u8_native",
+   "ext": "mp4",
+   "vcodec": "avc1.64001f",
+   "acodec": "mp4a.40.2",
+   "width": 848,
+   "height": 480,
+   "fps": null,
+   "tbr": 836.28,
+   "dynamic_range": "SDR",
+   "has_drm": false,
+   "url": "https://media.example.test/hls-480.m3u8"
+  },
+  {
+   "format_id": "hls-720",
+   "protocol": "m3u8_native",
+   "ext": "mp4",
+   "vcodec": "avc1.64001f",
+   "acodec": "mp4a.40.2",
+   "width": 1280,
+   "height": 720,
+   "fps": null,
+   "tbr": 2149.28,
+   "dynamic_range": "SDR",
+   "has_drm": false,
+   "url": "https://media.example.test/hls-720.m3u8"
+  },
+  {
+   "format_id": "hls-1080",
+   "protocol": "m3u8_native",
+   "ext": "mp4",
+   "vcodec": "avc1.640028",
+   "acodec": "mp4a.40.2",
+   "width": 1920,
+   "height": 1080,
+   "fps": null,
+   "tbr": 6221.6,
+   "dynamic_range": "SDR",
+   "has_drm": false,
+   "url": "https://media.example.test/hls-1080.m3u8"
+  }
+ ]
+}
