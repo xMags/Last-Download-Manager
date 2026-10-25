@@ -280,6 +280,19 @@ struct FetchManifestCommand {
     std::size_t maxBytes = 0;
 };
 
+// Asks what a video page of a supported site offers (video-sites design, section 3). Answered by a
+// SiteLookupFinished notification with this lookupId; a recent answer for the same video may be
+// given again without asking the site.
+struct LookUpSiteVideoCommand {
+    std::int64_t lookupId = 0;  // chosen by the caller, at least 1
+    std::string pageUrl;        // any address core::FindSiteVideo accepts
+};
+
+// The caller no longer wants the answer (the tab went to another page). It is not sent.
+struct CancelSiteLookupCommand {
+    std::int64_t lookupId = 0;
+};
+
 using Command = std::variant<AddDownloadCommand, ConfirmDownloadCommand, ResumeCommand, StopCommand, StopAllCommand,
                              FinishRecordingCommand, DeleteCommand, DeleteCompletedCommand, RedownloadCommand, SetDownloadSpeedLimitCommand,
                              SetSpeedLimiterCommand, UpdateDownloadCommand, MoveDownloadCommand, SaveCategoryCommand,
@@ -288,7 +301,7 @@ using Command = std::variant<AddDownloadCommand, ConfirmDownloadCommand, ResumeC
                              QuotaDecisionCommand, WaitForAddressCommand, ReplaceAddressCommand, FetchManifestCommand,
                              SaveQueueCommand, DeleteQueueCommand, SetQueueCommand, ReorderQueueCommand,
                              StartQueueCommand, StopQueueCommand, ClockChangedCommand, SetListedCommand,
-                             CheckForUpdatesCommand>;
+                             CheckForUpdatesCommand, LookUpSiteVideoCommand, CancelSiteLookupCommand>;
 
 // Where front ends send commands. Thread-safe; returns at once.
 class CommandSink {

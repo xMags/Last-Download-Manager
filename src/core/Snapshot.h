@@ -151,7 +151,7 @@ struct UpdateCheckFinished {
 
 // FetchFinished answers a FetchManifestCommand.
 using Notification = std::variant<AddResult, DownloadCompleted, DownloadFailed, CoreError, QuotaReached, FetchFinished,
-                                  QueueStarted, QueueFinished, QueueStopped, UpdateCheckFinished>;
+                                  QueueStarted, QueueFinished, QueueStopped, UpdateCheckFinished, SiteLookupFinished>;
 
 // Receives the coordinator's output. Called on the core thread; implementations must only post to
 // their own thread.

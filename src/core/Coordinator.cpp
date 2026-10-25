@@ -167,6 +167,11 @@ Coordinator::Coordinator(const CoordinatorPorts& ports, CoordinatorConfig config
                                                      config_.appVersion, ports_.clock->Steady());
         }
     }
+    if (ports_.sites != nullptr && ports_.proxy != nullptr && ports_.observer != nullptr && ports_.clock != nullptr) {
+        // Refreshes of expired addresses are asked for once downloads use them; nothing asks yet.
+        sites_ = std::make_unique<SiteLookups>(*ports_.sites, *ports_.proxy, *ports_.observer, *ports_.clock,
+                                               [](model::DownloadId, std::int64_t, const SiteLookupFinished&) {});
+    }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -418,6 +423,20 @@ void Coordinator::Handle(Command command)
                     updates_->CheckNow();
                 } else {
                     Notify(UpdateCheckFinished{true, std::nullopt, {}, std::string("this build does not check for updates")});
+                }
+            } else if constexpr (std::is_same_v<T, LookUpSiteVideoCommand>) {
+                if (sites_) {
+                    sites_->LookUp(typed);
+                } else {
+                    SiteLookupFinished missing;
+                    missing.lookupId = typed.lookupId;
+                    missing.problem = SiteLookupFinished::Problem::ToolsMissing;
+                    missing.failure = "Downloading videos from sites is not available in this build.";
+                    Notify(std::move(missing));
+                }
+            } else if constexpr (std::is_same_v<T, CancelSiteLookupCommand>) {
+                if (sites_) {
+                    sites_->Cancel(typed.lookupId);
                 }
             } else {
                 static_assert(sizeof(T) == 0, "unhandled command");
@@ -1239,6 +1258,16 @@ void Coordinator::OnEngineEvent(EngineEvent event)
         }
         return;
     }
+    if (IsSiteLookupKey(event.id)) {
+        if (sites_) {
+            if (const auto* resolved = std::get_if<ProxyResolved>(&event.payload)) {
+                sites_->OnProxyResolved(event.id, resolved->proxy);
+            } else if (const auto* looked = std::get_if<SiteLookupFinished>(&event.payload)) {
+                sites_->OnFinished(event.id, *looked);
+            }
+        }
+        return;
+    }
     if (ManifestFetches::IsFetchKey(event.id)) {
         if (const auto* resolved = std::get_if<ProxyResolved>(&event.payload); resolved && manifests_) {
             manifests_->OnProxyResolved(event.id, resolved->proxy);
@@ -1272,6 +1301,8 @@ void Coordinator::OnEngineEvent(EngineEvent event)
                 OnMuxFinished(*entry, payload);
             } else if constexpr (std::is_same_v<T, DescribeFinished>) {
                 OnDescribeFinished(*entry, payload);
+            } else if constexpr (std::is_same_v<T, SiteLookupFinished>) {
+                // handled above: lookups have their own ids
             } else {
                 static_assert(sizeof(T) == 0, "unhandled engine event");
             }

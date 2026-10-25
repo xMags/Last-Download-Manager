@@ -59,6 +59,19 @@ OwnedHandle CreateRunJob(std::size_t maxMemoryBytes)
     return job;
 }
 
+// A pipe for one of the program's outputs: the write end is inheritable, the read end is not.
+bool CreateOutputPipe(SECURITY_ATTRIBUTES& inherit, OwnedHandle& read, OwnedHandle& write)
+{
+    HANDLE rawRead = nullptr;
+    HANDLE rawWrite = nullptr;
+    if (!::CreatePipe(&rawRead, &rawWrite, &inherit, 0)) {
+        return false;
+    }
+    read = OwnedHandle(rawRead);
+    write = OwnedHandle(rawWrite);
+    return ::SetHandleInformation(read.Get(), HANDLE_FLAG_INHERIT, 0) != FALSE;
+}
+
 }  // namespace
 
 std::wstring QuoteArgument(std::wstring_view argument)
@@ -94,25 +107,29 @@ base::Result<ChildProcessResult> RunChildProcess(const ChildProcessRequest& requ
         return base::MakeError(base::ErrorCode::InvalidArgument, "the program path must be absolute");
     }
 
-    // Output: the read end stays here, the write end goes to the program.
+    // Output: the read end stays here, the write end goes to the program. Standard error gets a
+    // pipe of its own only when the caller asked for it.
     SECURITY_ATTRIBUTES inherit{sizeof(inherit), nullptr, TRUE};
-    HANDLE rawRead = nullptr;
-    HANDLE rawWrite = nullptr;
-    if (!::CreatePipe(&rawRead, &rawWrite, &inherit, 0)) {
+    OwnedHandle outputRead;
+    OwnedHandle outputWrite;
+    if (!CreateOutputPipe(inherit, outputRead, outputWrite)) {
         return SystemError("CreatePipe");
     }
-    OwnedHandle outputRead(rawRead);
-    OwnedHandle outputWrite(rawWrite);
-    if (!::SetHandleInformation(outputRead.Get(), HANDLE_FLAG_INHERIT, 0)) {
-        return SystemError("SetHandleInformation");
+    OwnedHandle errorsRead;
+    OwnedHandle errorsWrite;
+    if (request.separateErrors && !CreateOutputPipe(inherit, errorsRead, errorsWrite)) {
+        return SystemError("CreatePipe");
     }
     OwnedHandle input(::CreateFileW(L"NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, &inherit, OPEN_EXISTING, 0, nullptr));
     if (!input.Valid()) {
         return SystemError("Opening NUL");
     }
 
-    // Only these two handles are inherited, not every inheritable handle LDM happens to hold.
-    std::array<HANDLE, 2> inherited{input.Get(), outputWrite.Get()};
+    // Only these handles are inherited, not every inheritable handle LDM happens to hold.
+    std::vector<HANDLE> inherited{input.Get(), outputWrite.Get()};
+    if (errorsWrite.Valid()) {
+        inherited.push_back(errorsWrite.Get());
+    }
     SIZE_T attributeSize = 0;
     ::InitializeProcThreadAttributeList(nullptr, 1, 0, &attributeSize);
     std::vector<std::byte> attributeBuffer(attributeSize);
@@ -142,7 +159,7 @@ base::Result<ChildProcessResult> RunChildProcess(const ChildProcessRequest& requ
     startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
     startup.StartupInfo.hStdInput = input.Get();
     startup.StartupInfo.hStdOutput = outputWrite.Get();
-    startup.StartupInfo.hStdError = outputWrite.Get();
+    startup.StartupInfo.hStdError = errorsWrite.Valid() ? errorsWrite.Get() : outputWrite.Get();
     startup.lpAttributeList = attributes;
     const wchar_t* directory = request.workingDirectory ? request.workingDirectory->c_str() : nullptr;
     PROCESS_INFORMATION started{};
@@ -160,12 +177,25 @@ base::Result<ChildProcessResult> RunChildProcess(const ChildProcessRequest& requ
     }
     // The program has its copies now; with ours closed, reading ends when the program's do.
     outputWrite.Reset();
+    errorsWrite.Reset();
     input.Reset();
 
     ChildProcessResult result;
     std::thread reader([pipe = outputRead.Get(), limit = request.limits.maxOutputBytes, &result] {
         ReadAll(pipe, limit, result.output, result.outputTruncated);
     });
+    std::thread errorReader;
+    if (errorsRead.Valid()) {
+        errorReader = std::thread([pipe = errorsRead.Get(), limit = request.limits.maxErrorBytes, &result] {
+            ReadAll(pipe, limit, result.errors, result.errorsTruncated);
+        });
+    }
+    const auto joinReaders = [&reader, &errorReader] {
+        reader.join();
+        if (errorReader.joinable()) {
+            errorReader.join();
+        }
+    };
     ::ResumeThread(thread.Get());
 
     const std::array<HANDLE, 2> waits{process.Get(), stopEvent};
@@ -176,7 +206,7 @@ base::Result<ChildProcessResult> RunChildProcess(const ChildProcessRequest& requ
     if (waited == WAIT_FAILED) {
         ::TerminateJobObject(job.Get(), 1);
         ::WaitForSingleObject(process.Get(), INFINITE);
-        reader.join();
+        joinReaders();
         return base::MakeError(base::ErrorCode::Io, "Waiting for the program failed (error " + std::to_string(waitError) + ")");
     }
     if (waited == WAIT_OBJECT_0 + 1) {
@@ -188,7 +218,7 @@ base::Result<ChildProcessResult> RunChildProcess(const ChildProcessRequest& requ
     // would otherwise keep the output pipe open.
     ::TerminateJobObject(job.Get(), 1);
     ::WaitForSingleObject(process.Get(), INFINITE);
-    reader.join();
+    joinReaders();
     if (result.end == ChildProcessEnd::Exited && !::GetExitCodeProcess(process.Get(), &result.exitCode)) {
         return SystemError("GetExitCodeProcess");
     }

@@ -23,6 +23,8 @@ struct ChildProcessLimits {
     // Standard output and standard error together; beyond this the output is read and dropped,
     // so the program never stalls on a full pipe.
     std::size_t maxOutputBytes = 1024 * 1024;
+    // Standard error, when it is kept apart (ChildProcessRequest::separateErrors).
+    std::size_t maxErrorBytes = 64 * 1024;
     // Per process in the job; Windows ends a process that commits more.
     std::size_t maxMemoryBytes = std::size_t{1024} * 1024 * 1024;
 };
@@ -32,6 +34,9 @@ struct ChildProcessRequest {
     std::vector<std::wstring> arguments;
     std::optional<std::filesystem::path> workingDirectory;
     ChildProcessLimits limits;
+    // Standard error goes to ChildProcessResult::errors instead of into `output`: for programs
+    // whose output is data (JSON) that warnings must not mix into.
+    bool separateErrors = false;
 };
 
 enum class ChildProcessEnd {
@@ -43,8 +48,12 @@ enum class ChildProcessEnd {
 struct ChildProcessResult {
     ChildProcessEnd end = ChildProcessEnd::Exited;
     DWORD exitCode = 0;
-    std::string output;  // as the program wrote it, standard output and error interleaved
+    // As the program wrote it: standard output and error interleaved, or standard output alone
+    // with separateErrors.
+    std::string output;
     bool outputTruncated = false;
+    std::string errors;  // standard error, with separateErrors only
+    bool errorsTruncated = false;
 };
 
 // Runs the program and waits for it on the calling thread, so it must not be called on the UI

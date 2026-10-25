@@ -36,6 +36,9 @@ add_library(ldm_core STATIC
     SegmentPlanner.h
     SiteList.cpp
     SiteList.h
+    SiteLookups.cpp
+    SiteLookups.h
+    SiteResolver.h
     Snapshot.h
     Store.h
     TransferEngine.h

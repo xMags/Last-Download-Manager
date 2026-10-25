@@ -15,6 +15,7 @@ add_executable(ldm_unit_tests
     core/SchedulerTests.cpp
     core/SegmentPlannerTests.cpp
     core/SiteListTests.cpp
+    core/SiteLookupsTests.cpp
     core/UpdateCheckTests.cpp
     core/UrlAndNamesTests.cpp
     engine/Aes128CbcTests.cpp
@@ -36,6 +37,7 @@ add_executable(ldm_unit_tests
     model/DownloadTests.cpp
     model/SettingsTests.cpp
     platform/FfmpegCommandsTests.cpp
+    platform/YtDlpResolverTests.cpp
     platform/SystemPortsTests.cpp
     platform/XmlLiteReaderTests.cpp
     storage/SqliteStoreTests.cpp
