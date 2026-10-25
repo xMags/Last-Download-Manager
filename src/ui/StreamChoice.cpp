@@ -116,7 +116,12 @@ base::Result<StreamCapture> BuildStreamCapture(const TabMedia& tab, const MediaI
             return Refused("These subtitles are no longer offered.");
         }
         const media::Rendition& subtitles = offer.subtitles[index];
-        capture.media.tracks.push_back(RenditionTrack(subtitles, capture.manifestUrl, model::TrackRole::Subtitles));
+        core::MediaTrackChoice track = RenditionTrack(subtitles, capture.manifestUrl, model::TrackRole::Subtitles);
+        TakeSiteFormat(track, subtitles.site, capture);
+        capture.media.tracks.push_back(std::move(track));
+        if (item.siteVideo) {
+            capture.media.kind = SiteKind(capture.media).Value();  // one track: never mixed
+        }
         const std::string language = subtitles.language.empty() ? std::string() : core::SanitizeFileName(subtitles.language);
         capture.fileName = Title(tab, item) + (language.empty() ? "" : "." + language) + ".vtt";
         return capture;

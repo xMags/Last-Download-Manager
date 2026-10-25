@@ -246,4 +246,40 @@ TEST(SiteVideoCapture, AnHlsQualityOfASiteIsAnHlsDownloadOfItsPlaylist)
     EXPECT_FALSE(media.tracks[0].segments);
 }
 
+TEST(SiteVideoCapture, SubtitlesOfASiteAreASiteDownloadOfTheirOwnWithTheirFormat)
+{
+    ldm::ui::TabMedia tab;
+    MediaItem item;
+    item.key = 1;
+    item.kind = MediaKind::Dash;
+    item.url = "https://www.youtube.com/watch?v=aqz-KE-bpKQ";
+    item.finalUrl = item.url;
+    item.siteVideo = true;
+    item.state = MediaItem::State::Ready;
+    item.siteTitle = "Bunny";
+    ldm::media::MediaOffer offer = Bunny().offer;
+    ldm::media::Rendition subtitles;
+    subtitles.name = "English";
+    subtitles.language = "en";
+    ldm::media::TrackSegments file;
+    ldm::media::Segment segment;
+    segment.url = "https://subs.example.test/en.vtt";
+    file.segments.push_back(segment);
+    subtitles.source = file;
+    subtitles.site = ldm::media::SiteFormat{"subtitles:en", std::nullopt, std::string(), "vtt"};
+    offer.subtitles.push_back(subtitles);
+    item.offer = offer;
+    item.qualities = ldm::media::BuildQualityList(*item.offer, item.seconds);
+
+    const auto capture = ldm::ui::BuildStreamCapture(tab, item, ldm::ui::PanelAction{ldm::ui::PanelAction::Kind::DownloadSubtitles, 1, 0});
+    ASSERT_TRUE(capture) << capture.GetError().message;
+    EXPECT_EQ(capture.Value().fileName, "Bunny.en.vtt");
+    const auto& media = capture.Value().media;
+    EXPECT_TRUE(media.siteVideo);
+    EXPECT_EQ(media.kind, ldm::model::DownloadKind::Dash);
+    ASSERT_EQ(media.tracks.size(), 1u);
+    EXPECT_EQ(media.tracks[0].siteFormat, "subtitles:en");
+    EXPECT_EQ(media.tracks[0].role, ldm::model::TrackRole::Subtitles);
+}
+
 }  // namespace

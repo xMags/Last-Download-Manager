@@ -23,9 +23,11 @@ std::optional<OfferedFormat> FindFormat(const media::MediaOffer& offer, const st
             return OfferedFormat{&variant.source, variant.site->bytes};
         }
     }
-    for (const media::Rendition& audio : offer.audio) {
-        if (audio.site && audio.site->id == id && audio.source) {
-            return OfferedFormat{&*audio.source, audio.site->bytes};
+    for (const auto* renditions : {&offer.audio, &offer.subtitles}) {
+        for (const media::Rendition& rendition : *renditions) {
+            if (rendition.site && rendition.site->id == id && rendition.source) {
+                return OfferedFormat{&*rendition.source, rendition.site->bytes};
+            }
         }
     }
     return std::nullopt;
