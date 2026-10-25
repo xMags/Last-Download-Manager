@@ -62,6 +62,8 @@ add_library(ldm_ui STATIC
     MediaPanelController.h
     MediaPanelMenu.cpp
     MediaPanelMenu.h
+    MediaPanelMenuPainter.cpp
+    MediaPanelMenuPainter.h
     MediaPanelWindow.cpp
     MediaPanelWindow.h
     MainWindow.cpp

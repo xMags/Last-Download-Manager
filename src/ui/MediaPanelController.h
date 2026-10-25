@@ -73,6 +73,7 @@ private:
     [[nodiscard]] bool Offers(const TabMedia& tab) const;
 
     BrowserWindows& windows_;
+    const Theme& theme_;
     Hooks hooks_;
     MediaCatalog catalog_;
     MediaPanelWindow panel_;

@@ -1,7 +1,6 @@
 #pragma once
 
 #include "ui/Handles.h"
-#include "ui/Theme.h"
 
 #include <windows.h>
 
@@ -14,7 +13,10 @@ namespace ldm::ui {
 // borderless window that stays on top, never takes the focus from the
 // browser and has no taskbar entry. Full mode shows "Download this video" with a menu arrow, a
 // "make smaller" and a close button; mini mode shows only the icon and the arrow. It draws and
-// reports clicks; the controller decides what the menu holds and where the window goes.
+// reports clicks; the controller decides what the menu holds and where the window goes. While the
+// controller's menu is open, the window (its owner) passes the menu's drawing to a painter.
+class PanelMenuPainter;
+
 class MediaPanelWindow {
 public:
     struct Callbacks {
@@ -28,7 +30,7 @@ public:
     MediaPanelWindow(const MediaPanelWindow&) = delete;
     MediaPanelWindow& operator=(const MediaPanelWindow&) = delete;
 
-    [[nodiscard]] bool Create(const Theme& theme, Callbacks callbacks);
+    [[nodiscard]] bool Create(Callbacks callbacks);
     void Destroy();
 
     // The panel's size with its top-left corner at `at`, at the DPI of the monitor there.
@@ -37,6 +39,9 @@ public:
     void Hide();
     [[nodiscard]] bool Visible() const noexcept { return visible_; }
     [[nodiscard]] HWND Handle() const noexcept { return window_; }
+    [[nodiscard]] UINT Dpi() const noexcept { return dpi_; }
+    // Draws the owner-drawn menu the controller opens; null when no menu is open. Not owned.
+    void SetMenuPainter(const PanelMenuPainter* painter) noexcept { menuPainter_ = painter; }
 
     // `protectedVideo`: the button says the video is protected instead of offering a download.
     void SetContent(bool protectedVideo);
@@ -64,13 +69,15 @@ private:
     [[nodiscard]] Part HitTest(POINT client) const;
     [[nodiscard]] RECT PartRect(Part part) const;
     void SetHot(Part part);
+    void SetPressed(Part part);
     void UpdateFont(UINT dpi);
 
     HWND window_ = nullptr;
-    const Theme* theme_ = nullptr;
+    const PanelMenuPainter* menuPainter_ = nullptr;
     Callbacks callbacks_;
     UniqueFont font_;
-    UniqueIcon icon_;
+    UniqueFont glyphs_;      // the icon, at full size
+    UniqueFont smallGlyphs_; // the menu arrow and the side buttons
     UINT dpi_ = USER_DEFAULT_SCREEN_DPI;
     bool visible_ = false;
     bool mini_ = false;
@@ -78,6 +85,7 @@ private:
     bool timerRunning_ = false;
     bool tracking_ = false;  // TrackMouseEvent asked for WM_MOUSELEAVE
     Part hot_ = Part::None;
+    Part pressed_ = Part::None;  // the mouse went down here and is still down
 };
 
 }  // namespace ldm::ui

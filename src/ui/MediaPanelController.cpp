@@ -4,6 +4,7 @@
 #include "core/FileNames.h"
 #include "core/Url.h"
 #include "ui/Handles.h"
+#include "ui/MediaPanelMenuPainter.h"
 #include "ui/PanelPlacement.h"
 
 #include <algorithm>
@@ -19,21 +20,27 @@ constexpr UINT kFollowIntervalMs = 100;
 // Between the panel and the video's top edge, in physical pixels.
 constexpr int kPanelGap = 4;
 
+// Owner-drawn lines (PanelMenuPainter); each line's item data points at its PanelMenuItem, so
+// `items` must outlive the menu.
 void AppendItems(HMENU menu, const std::vector<PanelMenuItem>& items, std::vector<PanelAction>& actions)
 {
     for (const PanelMenuItem& item : items) {
-        if (item.separator) {
-            ::AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-        } else if (!item.children.empty()) {
-            const HMENU submenu = ::CreatePopupMenu();  // owned by `menu` once appended
+        MENUITEMINFOW info{sizeof(info)};
+        info.fMask = MIIM_FTYPE | MIIM_DATA | MIIM_ID | MIIM_STATE;
+        info.fType = MFT_OWNERDRAW | (item.separator ? MFT_SEPARATOR : 0);
+        info.dwItemData = reinterpret_cast<ULONG_PTR>(&item);
+        if (!item.children.empty()) {
+            const HMENU submenu = ::CreatePopupMenu();  // owned by `menu` once inserted
             AppendItems(submenu, item.children, actions);
-            ::AppendMenuW(menu, MF_POPUP | MF_STRING, reinterpret_cast<UINT_PTR>(submenu), item.text.c_str());
-        } else if (item.action && item.enabled) {
+            info.fMask |= MIIM_SUBMENU;
+            info.hSubMenu = submenu;
+        } else if (!item.separator && item.action && item.enabled) {
             actions.push_back(*item.action);
-            ::AppendMenuW(menu, MF_STRING, actions.size(), item.text.c_str());  // command ids start at 1
-        } else {
-            ::AppendMenuW(menu, MF_STRING | MF_GRAYED, 0, item.text.c_str());
+            info.wID = static_cast<UINT>(actions.size());  // command ids start at 1
+        } else if (!item.separator) {
+            info.fState = MFS_GRAYED;
         }
+        ::InsertMenuItemW(menu, ::GetMenuItemCount(menu), TRUE, &info);
     }
 }
 
@@ -53,6 +60,7 @@ std::optional<std::string> FileNameFor(const TabMedia& tab, const MediaItem& ite
 
 MediaPanelController::MediaPanelController(BrowserWindows& windows, const Theme& theme, Hooks hooks)
     : windows_(windows),
+      theme_(theme),
       hooks_(std::move(hooks)),
       catalog_(MediaCatalog::Hooks{
           hooks_.fetch,
@@ -63,7 +71,7 @@ MediaPanelController::MediaPanelController(BrowserWindows& windows, const Theme&
           hooks_.cancelLookup,
       })
 {
-    (void)panel_.Create(theme, MediaPanelWindow::Callbacks{
+    (void)panel_.Create(MediaPanelWindow::Callbacks{
                                    [this](POINT anchor) { OpenMenu(anchor); },
                                    [this] {
                                        if (followed_) {
@@ -212,6 +220,12 @@ void MediaPanelController::OpenMenu(POINT anchor)
     UniqueMenu menu(::CreatePopupMenu());
     std::vector<PanelAction> actions;
     AppendItems(menu.get(), items, actions);
+    const PanelMenuPainter painter(theme_, panel_.Dpi());
+    MENUINFO look{sizeof(look)};
+    look.fMask = MIM_BACKGROUND | MIM_APPLYTOSUBMENUS;
+    look.hbrBack = painter.Background();
+    ::SetMenuInfo(menu.get(), &look);
+    panel_.SetMenuPainter(&painter);
     // A menu needs its owner in front to close when the user clicks elsewhere. The click on the
     // panel gives LDM the right to come to the front; the browser gets it back when the menu closes.
     menuOpen_ = true;
@@ -219,6 +233,7 @@ void MediaPanelController::OpenMenu(POINT anchor)
     const UINT command = static_cast<UINT>(::TrackPopupMenuEx(menu.get(), TPM_RETURNCMD | TPM_LEFTALIGN | TPM_TOPALIGN,
                                                               anchor.x, anchor.y, panel_.Handle(), nullptr));
     ::PostMessageW(panel_.Handle(), WM_NULL, 0, 0);
+    panel_.SetMenuPainter(nullptr);
     menuOpen_ = false;
     // Browser events ran while the menu was open; the tab may be gone, so only its key is kept.
     if (command >= 1 && command <= actions.size()) {
