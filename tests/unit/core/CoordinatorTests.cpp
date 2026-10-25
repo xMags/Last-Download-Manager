@@ -1206,6 +1206,67 @@ TEST_F(SiteRefreshTest, AFormatThatIsGoneFailsWithTheReason)
     EXPECT_NE(view.download.lastResult->find("no longer offers"), std::string::npos) << *view.download.lastResult;
 }
 
+TEST_F(SiteRefreshTest, ARefusedHlsTrackReadsItsFreshPlaylistAndKeepsThePiecesOnDisk)
+{
+    const AddResult result = Add("https://www.youtube.com/watch?v=aqz-KE-bpKQ", AddMode::StartNow, [](AddDownloadCommand& c) {
+        c.fileName = "Clip.mp4";
+        ldm::core::MediaChoice media;
+        media.kind = ldm::model::DownloadKind::Hls;
+        media.siteVideo = true;
+        ldm::core::MediaTrackChoice video;
+        video.sourceUrl = "https://vod.test/old/index.m3u8";
+        video.siteFormat = "hls-720";
+        media.tracks = {video};
+        c.media = media;
+    });
+    ASSERT_TRUE(result.id) << result.error.value_or("");
+    const DownloadId id = *result.id;
+    const auto answerPlaylist = [this](const std::string& folder) {
+        ASSERT_FALSE(engine_.fetches.empty());
+        ldm::core::FetchFinished answer;
+        answer.fetchId = engine_.fetches.back().fetchId;
+        answer.finalUrl = "https://vod.test/" + folder + "/index.m3u8";
+        answer.body = "#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXTINF:4,\na.ts\n#EXTINF:4,\nb.ts\n#EXT-X-ENDLIST\n";
+        Send(DownloadId{}, 0, answer);
+    };
+    answerPlaylist("old");
+    ASSERT_EQ(engine_.mediaStarts.size(), 1u);
+
+    ldm::core::MediaFinished refused;
+    refused.outcome = TransferOutcome::Failed;
+    refused.failure = TransferFailure{ldm::core::FailureReason::PermissionDenied, ldm::core::FailureClass::Fatal, 403,
+                                      "HTTP status 403"};
+    refused.done = {ldm::core::MediaPieceDone{0, 0, 4096}};
+    files_.Put(engine_.mediaStarts[0].tracks[0].pieces[0].path, 4096);
+    Send(id, engine_.mediaStarts[0].epoch, refused);
+    ASSERT_EQ(sites_.asked.size(), 1u);
+
+    ldm::core::SiteLookupFinished finished;
+    finished.lookupId = sites_.asked.back().lookupId;
+    ldm::media::SiteVideo fresh;
+    fresh.id = "aqz-KE-bpKQ";
+    ldm::media::Variant variant;
+    variant.source = ldm::media::PlaylistAddress{"https://vod.test/new/index.m3u8"};
+    variant.site = ldm::media::SiteFormat{"hls-720", std::nullopt};
+    fresh.offer.variants.push_back(variant);
+    finished.video = fresh;
+    const size_t fetchesBefore = engine_.fetches.size();
+    Send(ldm::core::SiteLookupKey(finished.lookupId), 0, finished);
+    ASSERT_EQ(engine_.fetches.size(), fetchesBefore + 1) << "the fresh playlist is read first";
+    EXPECT_EQ(engine_.fetches.back().url, "https://vod.test/new/index.m3u8");
+    EXPECT_EQ(engine_.mediaStarts.size(), 1u);
+
+    answerPlaylist("new");
+    ASSERT_EQ(engine_.mediaStarts.size(), 2u);
+    const auto& pieces = engine_.mediaStarts[1].tracks[0].pieces;
+    ASSERT_EQ(pieces.size(), 1u) << "the piece on disk is kept";
+    EXPECT_EQ(pieces[0].url, "https://vod.test/new/b.ts");
+    const auto stored = Stored(id);
+    ASSERT_TRUE(stored);
+    EXPECT_EQ(stored->tracks[0].sourceUrl, "https://vod.test/new/index.m3u8");
+    EXPECT_TRUE(stored->tracks[0].pieces[0].done);
+}
+
 TEST_F(SiteRefreshTest, ARefusedAddressGetsOneMoreRunWithFreshAddressesThenFails)
 {
     const DownloadId id = AddExpiring(3 * 3600);

@@ -151,6 +151,9 @@ private:
         bool refreshedThisRun = false;
         bool forceRefresh = false;        // the next run asks, whenever the addresses expire
         int expiredRestarts = 0;          // since the user last started it or it completed
+        // HLS tracks whose playlists are read again after fresh addresses, as they were before:
+        // what they had on disk is kept when the new list has the same pieces (KeepProgress).
+        std::map<std::uint32_t, model::MediaTrack> relistedFrom;
 
         // Synchronization (checklist Q-05): what the completed download was before its check, put
         // back when the server's file did not change or nothing of a new one arrived.

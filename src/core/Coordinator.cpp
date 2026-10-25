@@ -1814,6 +1814,7 @@ void Coordinator::ResetProgress(Entry& entry)
         }
         StoreTracks(entry, ResetMediaProgress(d));
         entry.unsavedPieces.clear();
+        entry.relistedFrom.clear();
         d.totalSize.reset();
         entry.receivedBytes = 0;
         MarkChanged(entry);
@@ -2023,6 +2024,9 @@ void Coordinator::StartStream(Entry& entry)
         OnMediaFinished(entry, failed);
         return;
     }
+    // What a refresh before the engine dropped is not on disk any more: the run counts from here.
+    entry.runStartBytes = d.DownloadedBytes();
+    entry.quotaCountedBytes = entry.runStartBytes;
     MediaRequest request = BuildMediaRequest(d, PartsFolder(d));
     request.referer = d.referer;
     request.userAgent = d.userAgent.value_or(settings_.userAgent);
@@ -2192,9 +2196,14 @@ void Coordinator::OnPlaylistFetched(const FetchFinished& fetched)
             entry->playlistFailure = fetched.failure;
         }
     } else if (!entry->playlistFailure && fetch.track < entry->download.tracks.size()) {
-        if (auto failure = ListTrack(entry->download.tracks[fetch.track], fetched)) {
+        model::MediaTrack& track = entry->download.tracks[fetch.track];
+        if (auto failure = ListTrack(track, fetched)) {
             entry->playlistFailure = std::move(failure);
         } else {
+            if (const auto previous = entry->relistedFrom.find(fetch.track); previous != entry->relistedFrom.end()) {
+                (void)KeepProgress(track, previous->second);  // otherwise it starts from nothing
+                entry->relistedFrom.erase(previous);
+            }
             StoreTracks(*entry, {fetch.track});
             MarkChanged(*entry);
         }
@@ -2606,6 +2615,16 @@ void Coordinator::OnSiteRefreshed(model::DownloadId id, std::int64_t epoch, cons
         return;
     }
     StoreTracks(*entry, fresh.changed);
+    for (const std::uint32_t t : fresh.relist) {
+        // Unlisted, so the run reads the playlist first; stored only once it is listed again.
+        model::MediaTrack& track = d.tracks[t];
+        entry->relistedFrom.insert_or_assign(t, track);
+        track.keys.clear();
+        track.pieces.clear();
+        track.ranges.clear();
+        track.wholeFile = false;
+        track.live = false;
+    }
     entry->receivedBytes = d.DownloadedBytes();
     MarkChanged(*entry);
     StartStream(*entry);

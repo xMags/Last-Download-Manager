@@ -1,3 +1,4 @@
+#include "core/MediaPieces.h"
 #include "core/SiteRefresh.h"
 
 #include <gtest/gtest.h>
@@ -140,6 +141,141 @@ TEST(SiteRefresh, OnlyRefusedAddressesLookExpired)
     EXPECT_TRUE(ldm::core::LooksLikeExpiredAddress(TransferFailure{FailureReason::NotFound, FailureClass::Fatal, 410, ""}));
     EXPECT_FALSE(ldm::core::LooksLikeExpiredAddress(TransferFailure{FailureReason::NotFound, FailureClass::Fatal, 404, ""}));
     EXPECT_FALSE(ldm::core::LooksLikeExpiredAddress(TransferFailure{FailureReason::Dns, FailureClass::Retryable, 0, ""}));
+}
+
+// A site's DASH piece list: an init and `count` pieces of two seconds under `base`.
+ldm::media::TrackSegments PieceList(const std::string& base, size_t count, double seconds = 2)
+{
+    ldm::media::TrackSegments list;
+    list.inits.push_back(ldm::media::InitSection{base + "init.mp4", std::nullopt});
+    for (size_t i = 0; i < count; ++i) {
+        ldm::media::Segment segment;
+        segment.url = base + std::to_string(i) + ".m4s";
+        segment.seconds = seconds;
+        segment.init = 0;
+        list.segments.push_back(segment);
+    }
+    return list;
+}
+
+Download PieceVideo()
+{
+    Download d;
+    d.kind = ldm::model::DownloadKind::Dash;
+    d.siteVideo = true;
+    d.url = "https://www.youtube.com/watch?v=aqz-KE-bpKQ";
+    MediaTrack track;
+    track.sourceUrl = d.url;
+    track.siteFormat = "v1";
+    ldm::core::FillTrack(track, PieceList("https://old.media.test/", 3));
+    track.pieces[0].done = true;
+    track.pieces[0].bytes = 900;
+    track.pieces[1].done = true;
+    track.pieces[1].bytes = 1000;
+    d.tracks = {track};
+    return d;
+}
+
+ldm::media::SiteVideo PieceAnswer(ldm::media::TrackSegments list)
+{
+    ldm::media::SiteVideo video;
+    video.id = "aqz-KE-bpKQ";
+    ldm::media::Variant variant;
+    variant.source = std::move(list);
+    variant.site = ldm::media::SiteFormat{"v1", std::nullopt};
+    video.offer.variants.push_back(variant);
+    return video;
+}
+
+TEST(SiteRefresh, APieceListWithTheSamePiecesKeepsWhatIsOnDisk)
+{
+    Download d = PieceVideo();
+    const auto fresh = ApplyFreshAddresses(d, PieceAnswer(PieceList("https://new.media.test/", 3)));
+    ASSERT_FALSE(fresh.failure);
+    EXPECT_EQ(fresh.changed, (std::vector<std::uint32_t>{0}));
+    EXPECT_TRUE(fresh.restarted.empty());
+    const auto& pieces = d.tracks[0].pieces;
+    ASSERT_EQ(pieces.size(), 4u);
+    EXPECT_EQ(pieces[1].url, "https://new.media.test/0.m4s");
+    EXPECT_TRUE(pieces[0].done);
+    EXPECT_TRUE(pieces[1].done);
+    EXPECT_EQ(pieces[1].bytes, 1000);
+    EXPECT_FALSE(pieces[2].done);
+}
+
+TEST(SiteRefresh, APieceListOfOtherPiecesStartsAgain)
+{
+    for (const auto& list : {PieceList("https://new.media.test/", 4), PieceList("https://new.media.test/", 3, 2.5)}) {
+        Download d = PieceVideo();
+        const auto fresh = ApplyFreshAddresses(d, PieceAnswer(list));
+        ASSERT_FALSE(fresh.failure);
+        EXPECT_EQ(fresh.restarted, (std::vector<std::uint32_t>{0}));
+        for (const auto& piece : d.tracks[0].pieces) {
+            EXPECT_FALSE(piece.done);
+            EXPECT_EQ(piece.url.rfind("https://new.media.test/", 0), 0u);
+        }
+    }
+}
+
+TEST(SiteRefresh, AnHlsTrackTakesItsNewPlaylistAndIsListedAgain)
+{
+    Download d;
+    d.kind = ldm::model::DownloadKind::Hls;
+    d.siteVideo = true;
+    d.url = "https://www.dailymotion.com/video/x5kesuj";
+    MediaTrack track;
+    track.sourceUrl = "https://vod.media.test/old.m3u8?expire=" + std::to_string(kExpire);
+    track.siteFormat = "hls-720";
+    ldm::model::MediaPiece piece;
+    piece.url = "https://vod.media.test/1.ts";
+    track.pieces.push_back(piece);
+    d.tracks = {track};
+    EXPECT_TRUE(NeedsFreshAddresses(d, kExpire * 1000)) << "the playlist's own address expires";
+
+    ldm::media::SiteVideo video;
+    video.id = "x5kesuj";
+    ldm::media::Variant variant;
+    variant.source = ldm::media::PlaylistAddress{"https://vod.media.test/new.m3u8"};
+    variant.site = ldm::media::SiteFormat{"hls-720", std::nullopt};
+    video.offer.variants.push_back(variant);
+    const auto fresh = ApplyFreshAddresses(d, video);
+    ASSERT_FALSE(fresh.failure);
+    EXPECT_EQ(fresh.relist, (std::vector<std::uint32_t>{0}));
+    EXPECT_TRUE(fresh.changed.empty()) << "stored once listed again";
+    EXPECT_EQ(d.tracks[0].sourceUrl, "https://vod.media.test/new.m3u8");
+
+    // The same format given as a file instead: not continued as one.
+    ldm::media::SiteVideo other = video;
+    other.offer.variants[0].source = PieceList("https://new.media.test/", 1);
+    Download again = d;
+    const auto refused = ApplyFreshAddresses(again, other);
+    ASSERT_TRUE(refused.failure);
+    EXPECT_EQ(again.tracks[0].sourceUrl, d.tracks[0].sourceUrl);
+}
+
+TEST(SiteRefresh, ProgressIsKeptOnlyForTheSamePieces)
+{
+    MediaTrack previous;
+    ldm::core::FillTrack(previous, PieceList("https://old.media.test/", 2));
+    previous.pieces[1].done = true;
+    previous.pieces[1].bytes = 77;
+
+    MediaTrack same;
+    ldm::core::FillTrack(same, PieceList("https://new.media.test/", 2));
+    EXPECT_TRUE(ldm::core::KeepProgress(same, previous));
+    EXPECT_TRUE(same.pieces[1].done);
+    EXPECT_EQ(same.pieces[1].bytes, 77);
+    EXPECT_EQ(same.pieces[1].url, "https://new.media.test/0.m4s");
+
+    MediaTrack longer;
+    ldm::core::FillTrack(longer, PieceList("https://new.media.test/", 3));
+    EXPECT_FALSE(ldm::core::KeepProgress(longer, previous));
+    EXPECT_FALSE(longer.pieces[1].done);
+
+    MediaTrack live;
+    ldm::core::FillTrack(live, PieceList("https://new.media.test/", 2));
+    live.live = true;
+    EXPECT_FALSE(ldm::core::KeepProgress(live, previous)) << "a recording is never matched";
 }
 
 }  // namespace

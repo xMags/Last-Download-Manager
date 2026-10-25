@@ -239,7 +239,7 @@ std::optional<std::string> CheckedUrl(std::string_view base, std::string_view ur
 
 // A DASH format the resolver listed piece by piece: `fragment_base_url` and `fragments`, each with
 // an absolute `url` or a `path` under the base, and its `duration`. yt-dlp lists the init section
-// as the first piece, so the pieces joined in order are the track's bytes.
+// as the first piece, without a duration; it becomes the track's init, as a DASH manifest's would.
 std::optional<TrackSegments> ReadPieces(const Json& format)
 {
     const auto fragments = format.find("fragments");
@@ -272,10 +272,19 @@ std::optional<TrackSegments> ReadPieces(const Json& format)
         if (!checked) {
             return std::nullopt;
         }
+        const auto seconds = Number(fragment, "duration");
+        if (track.inits.empty() && track.segments.empty() && !seconds && fragments->size() > 1) {
+            // The init section: what every later piece needs to be read (the MP4 header).
+            track.inits.push_back(InitSection{std::move(*checked), std::nullopt});
+            continue;
+        }
         Segment segment;
         segment.url = std::move(*checked);
-        segment.seconds = Number(fragment, "duration").value_or(0);
+        segment.seconds = seconds.value_or(0);
         segment.sequence = track.segments.size();
+        if (!track.inits.empty()) {
+            segment.init = 0;
+        }
         track.targetSeconds = std::max(track.targetSeconds, segment.seconds);
         track.segments.push_back(std::move(segment));
     }

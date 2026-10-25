@@ -34,12 +34,16 @@ inline constexpr std::chrono::minutes kSiteAddressMargin{10};
 struct FreshAddresses {
     std::vector<std::uint32_t> changed;    // tracks with a new address, to store
     std::vector<std::uint32_t> restarted;  // of those, the ones whose bytes on disk were dropped
-    std::optional<std::string> failure;    // a track's format is no longer offered; nothing changed
+    // HLS tracks with their format's playlist address now in sourceUrl, still listing the old
+    // pieces: their playlists are read again before the run, and KeepProgress decides what stays.
+    std::vector<std::uint32_t> relist;
+    std::optional<std::string> failure;  // a track's format is no longer offered; nothing changed
 };
 
-// Gives each track of `download` the address of its format in `video`. A track whose format now
-// has another length than the one recorded, or that had none, starts again from its first byte:
-// bytes of two different files are never put together.
+// Gives each track of `download` the address of its format in `video`. A whole-file track whose
+// format now has another length than the one recorded, or that had none, starts again from its
+// first byte, as does a piece list that no longer lists the same pieces (KeepProgress): bytes of
+// two different files are never put together.
 [[nodiscard]] FreshAddresses ApplyFreshAddresses(model::Download& download, const media::SiteVideo& video);
 
 }  // namespace ldm::core
