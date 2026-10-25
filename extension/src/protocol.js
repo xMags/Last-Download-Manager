@@ -76,6 +76,8 @@ export function parseConfig(message) {
     keys: keySettings(message),
     menu: menuSettings(message),
     media: mediaSettings(message.media),
+    // Site videos are on in LDM, which then takes site-page messages; older versions say nothing.
+    sitePages: message.sitePages === true,
   };
 }
 
@@ -347,6 +349,28 @@ export function makeMedia(media) {
     fileSize: Number.isSafeInteger(media.fileSize) && media.fileSize >= 0 ? media.fileSize : undefined,
     userAgent: cleanText(media.userAgent, 1024) || 'Mozilla/5.0',
     cookies,
+  };
+}
+
+/**
+ * The address of a tab on a supported video site (video-sites design, section 7), or null when LDM
+ * would refuse it. Sent only to an LDM whose config asked for them: an older one ends the
+ * connection on a message type it does not know.
+ * @param {{tabId: number, incognito: boolean, url: string, pageTitle?: string, userAgent: string}} page
+ */
+export function makeSitePage(page) {
+  if (!isBrowserId(page.tabId) || !isWebAddress(page.url)) {
+    return null;
+  }
+  return {
+    v: PROTOCOL_VERSION,
+    id: nextId(),
+    type: 'site-page',
+    tabId: page.tabId,
+    incognito: Boolean(page.incognito),
+    url: page.url,
+    pageTitle: cleanPageText(page.pageTitle, MAX_PAGE_TITLE_BYTES) || undefined,
+    userAgent: cleanText(page.userAgent, 1024) || 'Mozilla/5.0',
   };
 }
 
