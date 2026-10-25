@@ -42,7 +42,7 @@ async function loadPage({ keys = {}, enabled = true, answer = { handled: true } 
   vm.runInNewContext(source, sandbox);
   await new Promise((resolve) => setImmediate(resolve));  // settings load
   const event = (fields) => {
-    const result = { button: 0, altKey: false, shiftKey: false, ctrlKey: false, key: '', prevented: false, ...fields };
+    const result = { isTrusted: true, button: 0, altKey: false, shiftKey: false, ctrlKey: false, key: '', prevented: false, ...fields };
     result.composedPath = () => (fields.href ? [new FakeAnchor(fields.href)] : []);
     result.preventDefault = () => { result.prevented = true; };
     result.stopImmediatePropagation = () => {};
@@ -121,4 +121,14 @@ test('the page script and key-rules.js agree on which forced links go to LDM', a
       assert.equal(prevented, sendsForcedLinkToLdm(page.settings, href), `${href} with ${JSON.stringify(keys)}`);
     }
   }
+});
+
+test('events made up by page code are ignored', async () => {
+  const page = await loadPage({ keys: { force: { enabled: true, alt: true } } });
+  page.fire('keydown', { key: 'Insert', isTrusted: false });
+  page.fire('mousedown', { href: 'https://site.test/a.zip', altKey: true, isTrusted: false });
+  const click = page.fire('click', { href: 'https://site.test/a.zip', altKey: true, isTrusted: false });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(page.sent, []);
+  assert.equal(click.prevented, false);
 });
