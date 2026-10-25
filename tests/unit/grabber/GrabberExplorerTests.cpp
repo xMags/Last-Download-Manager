@@ -679,6 +679,26 @@ TEST_F(GrabberExplorerTest, SavesPagesForOfflineBrowsing)
     EXPECT_EQ(adds[0].fileName, "logo.png");
 }
 
+TEST_F(GrabberExplorerTest, AnOfflineCopyKeepsAFileItAlreadyHas)
+{
+    Start();
+    Page("https://example.com/", R"(<img src="img/logo.png">)");
+    auto definition = ldm::grabber::ApplyTemplate(Definition("https://example.com/"), ldm::model::GrabberTemplate::WholeSite);
+    definition.saveMode = ldm::model::GrabberSaveMode::OneFolder;
+    definition.folder = "C:\\Mirror";
+    files_.written["C:/Mirror/example.com/img/logo.png"] = "from the last run";
+    const GrabberProjectId id = Save(definition);
+    explorer_->Handle(ldm::core::GrabberExploreCommand{id, false, {}});
+    Serve();
+
+    explorer_->Handle(ldm::core::GrabberDownloadCommand{id});
+    EXPECT_TRUE(sink_.All<ldm::core::AddDownloadCommand>().empty()) << "not again as logo (2).png, which no page links to";
+    const auto items = Items(id);
+    const auto* logo = ByUrl(items, "https://example.com/img/logo.png");
+    ASSERT_TRUE(logo);
+    EXPECT_EQ(logo->state, GrabberItemState::Done);
+}
+
 TEST_F(GrabberExplorerTest, ASavedPageNoLongerTakesItsBaseFromTheWebsite)
 {
     Start();
