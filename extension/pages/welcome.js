@@ -6,6 +6,8 @@ const MESSAGES = {
   'not-running': () => 'Last Download Manager is not running. It starts by itself when a download is captured.',
   error: () => 'The browser cannot reach Last Download Manager. Start Last Download Manager once so it can ' +
                'register itself with this browser, then reopen this page.',
+  elevated: () => 'Last Download Manager runs as administrator, so the browser cannot reach it. Exit it and ' +
+                  'start it normally.',
 };
 
 async function showStatus() {

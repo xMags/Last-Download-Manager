@@ -29,6 +29,14 @@ export function toolbarAppearance({ enabled, connection }) {
              `it can register itself with this browser.\n${TOGGLE_HINT}`,
     };
   }
+  if (connection === State.Elevated) {
+    return {
+      icon: 'on',
+      badge: '!',
+      title: `${TITLE} [error]\nLDM runs as administrator, so the browser cannot reach it. Exit LDM and ` +
+             `start it normally.\n${TOGGLE_HINT}`,
+    };
+  }
   if (connection === State.NotRunning) {
     return {
       icon: 'on',

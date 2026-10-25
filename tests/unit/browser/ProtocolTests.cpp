@@ -309,6 +309,8 @@ TEST(BrowserProtocol, RejectsUnknownTypes)
 TEST(BrowserProtocol, HostInfoRoundTrips)
 {
     const HostInfo chrome{BrowserFamily::Chromium, kChromeId};
+    EXPECT_TRUE(ldm::browser::IsValidEnvelope(ldm::browser::EncodeHostError("ldm-elevated")));
+    EXPECT_NE(ldm::browser::EncodeHostError("ldm-elevated").find(R"("type":"host-error")"), std::string::npos);
     const auto parsedChrome = ldm::browser::ParseMessage(ldm::browser::EncodeHostInfo(chrome));
     ASSERT_TRUE(parsedChrome);
     const auto* info = std::get_if<HostInfo>(&parsedChrome->message);

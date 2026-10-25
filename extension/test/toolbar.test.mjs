@@ -42,3 +42,9 @@ test('icon paths are absolute and the files exist', () => {
     }
   }
 });
+
+test('an elevated LDM shows [error] and says how to fix it', () => {
+  const look = toolbarAppearance({ enabled: true, connection: State.Elevated });
+  assert.equal(look.badge, '!');
+  assert.match(look.title, /administrator/);
+});
