@@ -25,8 +25,16 @@ public:
     // The window of the browser behind host process `hostProcessId` that `position` describes
     // (by its bounds and page size), or nothing: minimized, closed, or no window matches well
     // enough to place anything over it.
+    //
+    // `known` is the window this tab was found in before, or null. The reported bounds are only as
+    // fresh as the extension's last report, so a window the user moves matches them badly until
+    // the next one, and another browser window of the same size may match better. So `known` is
+    // kept while it still shows a page of the reported size; with `recheck` (a new report just
+    // came), another window replaces it only when it matches the report clearly better (the tab
+    // was dragged to another window).
     [[nodiscard]] virtual std::optional<BrowserView> Find(std::uint32_t hostProcessId,
-                                                          const browser::VideoPosition& position) = 0;
+                                                          const browser::VideoPosition& position, HWND known,
+                                                          bool recheck) = 0;
 
     // True when the user sees `view` at `point`: no other window covers it (LDM's own `panel`
     // does not count).

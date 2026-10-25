@@ -8,6 +8,7 @@
 #include "ui/PanelPlacement.h"
 
 #include <algorithm>
+#include <utility>
 #include <vector>
 
 namespace ldm::ui {
@@ -141,10 +142,12 @@ void MediaPanelController::OnVideoPosition(BrowserConnectionId connection, const
 {
     const TabKey key{connection, position.tabId};
     if (position.visible) {
-        if (followed_ && followed_->tab != key) {
+        const bool sameTab = followed_ && followed_->tab == key;
+        if (followed_ && !sameTab) {
             panel_.SetMinWidth(0);  // the width matched another tab's menu
         }
-        followed_ = Followed{key, position};
+        followed_ = Followed{key, position, sameTab ? followed_->window : nullptr};
+        recheckWindow_ = true;
         panel_.StartTimer(kFollowIntervalMs);
     } else if (followed_ && followed_->tab == key) {
         followed_.reset();
@@ -172,6 +175,7 @@ void MediaPanelController::Place()
         panel_.Hide();
         if (!keepFollowing) {
             panel_.StopTimer();
+            moveWatch_.Watch(nullptr);
         }
     };
     if (!followed_) {
@@ -185,11 +189,14 @@ void MediaPanelController::Place()
     }
     const std::uint32_t host = hooks_.hostProcessOf ? hooks_.hostProcessOf(followed_->tab.first) : 0;
     const browser::VideoPosition& position = followed_->position;
-    const auto view = windows_.Find(host, position);
+    const auto view = windows_.Find(host, position, followed_->window, std::exchange(recheckWindow_, false));
     if (!view) {
         hide(true);  // minimized or moving between states: look again on the next tick
         return;
     }
+    // Followed from now on as it moves, not only at the next tick.
+    followed_->window = view->window;
+    moveWatch_.Watch(view->window);
     const SIZE size = panel_.SizeAt(POINT{view->page.left, view->page.top});
     const auto video = VideoOnScreen(view->page, position.video, position.pixelRatio, SIZE{size.cx, size.cy * 2});
     if (!video) {
