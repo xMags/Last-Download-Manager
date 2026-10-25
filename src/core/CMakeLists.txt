@@ -38,6 +38,8 @@ add_library(ldm_core STATIC
     SiteList.h
     SiteLookups.cpp
     SiteLookups.h
+    SiteRefresh.cpp
+    SiteRefresh.h
     SiteResolver.h
     SiteTools.cpp
     SiteTools.h

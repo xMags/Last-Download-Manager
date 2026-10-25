@@ -9,6 +9,7 @@
 #include "core/MediaPieces.h"
 #include "core/NetworkAddress.h"
 #include "core/SiteList.h"
+#include "core/SiteRefresh.h"
 #include "model/Cookie.h"
 
 #include <algorithm>
@@ -171,9 +172,11 @@ Coordinator::Coordinator(const CoordinatorPorts& ports, CoordinatorConfig config
         tools_ = std::make_unique<ToolUpdates>(*ports_.engine, *ports_.proxy, *ports_.tools);
     }
     if (ports_.sites != nullptr && ports_.proxy != nullptr && ports_.observer != nullptr && ports_.clock != nullptr) {
-        // Refreshes of expired addresses are asked for once downloads use them; nothing asks yet.
-        sites_ = std::make_unique<SiteLookups>(*ports_.sites, *ports_.proxy, *ports_.observer, *ports_.clock,
-                                               [](model::DownloadId, std::int64_t, const SiteLookupFinished&) {});
+        sites_ = std::make_unique<SiteLookups>(
+            *ports_.sites, *ports_.proxy, *ports_.observer, *ports_.clock,
+            [this](model::DownloadId id, std::int64_t epoch, const SiteLookupFinished& answer) {
+                OnSiteRefreshed(id, epoch, answer);
+            });
     }
 }
 
@@ -747,6 +750,7 @@ void Coordinator::Resume(const std::vector<model::DownloadId>& ids)
         }
         Entry* entry = Find(id);
         if (entry != nullptr && !entry->running && !entry->finalizing && CanStart(entry->download.status)) {
+            entry->expiredRestarts = 0;  // started by hand: an expired address may be asked for again
             Start(*entry);
         }
     }
@@ -1497,6 +1501,7 @@ void Coordinator::OnRunEnded(Entry& entry, TransferOutcome outcome, const std::o
     switch (outcome) {
     case TransferOutcome::Completed:
         StopWaitingForAddress(d.id);
+        entry.expiredRestarts = 0;
         if (d.awaitingConfirmation) {
             entry.holdFinalize = true;  // the user may still rename it in the open info dialog
             d.status = DownloadStatus::Finalizing;
@@ -1517,6 +1522,15 @@ void Coordinator::OnRunEnded(Entry& entry, TransferOutcome outcome, const std::o
             d.status = DownloadStatus::Paused;
             d.lastResult = DescribeFailure(failure);
             Save(entry);
+            break;
+        }
+        if (d.siteVideo && sites_ && LooksLikeExpiredAddress(failure) && entry.expiredRestarts < 1 &&
+            !entry.refreshedThisRun) {
+            // The site refused the addresses: they expired, or are bound to a connection LDM no
+            // longer has. Asked for again; a second refusal in a row is a failure like any other.
+            entry.expiredRestarts += 1;
+            entry.forceRefresh = true;
+            Start(entry);
             break;
         }
         const bool restartable =
@@ -1617,6 +1631,8 @@ void Coordinator::Start(Entry& entry)
     entry.reloadFailures = 0;
     entry.recordingFailure.reset();
     entry.finishRecording = false;
+    entry.pendingRefresh = false;
+    entry.refreshedThisRun = false;
     d.epoch += 1;
     d.status = DownloadStatus::Downloading;
     d.lastTryAtMs = ports_.clock->NowUnixMs();
@@ -1755,7 +1771,7 @@ void Coordinator::RequestStop(Entry& entry)
     if (!entry.running || entry.stopRequested) {
         return;
     }
-    if (entry.awaitingProxy || entry.pendingPlaylists > 0) {
+    if (entry.awaitingProxy || entry.pendingPlaylists > 0 || entry.pendingRefresh) {
         // The engine never started this run: finish it here, as the engine would have, so delete,
         // restart and shutdown follow their usual path. `entry` may be removed by this call.
         // Answers to playlist fetches still under way are dropped when they come.
@@ -1763,6 +1779,10 @@ void Coordinator::RequestStop(Entry& entry)
         if (entry.download.IsStream()) {
             std::erase_if(playlistFetches_, [&entry](const auto& fetch) { return fetch.second.id == entry.download.id; });
             entry.pendingPlaylists = 0;
+            if (entry.pendingRefresh && sites_) {
+                sites_->CancelRefresh(entry.download.id);
+            }
+            entry.pendingRefresh = false;
             MediaFinished stopped;
             stopped.outcome = TransferOutcome::Stopped;
             OnMediaFinished(entry, stopped);
@@ -1821,6 +1841,9 @@ void Coordinator::RemoveEntry(model::DownloadId id, bool deleteFinalFile)
     }
     if (waitingForAddress_ == id) {
         waitingForAddress_.reset();
+    }
+    if (entry->pendingRefresh && sites_) {
+        sites_->CancelRefresh(id);
     }
     for (auto& [queueId, run] : queueRuns_) {
         run.stoppedByUser.erase(id);  // row ids can be used again by a later download
@@ -1974,6 +1997,13 @@ void Coordinator::StartStream(Entry& entry)
         for (const std::uint32_t track : unlisted) {
             FetchPlaylist(entry, track, PlaylistPurpose::Initial);
         }
+        return;
+    }
+    if (d.siteVideo && sites_ && !entry.refreshedThisRun &&
+        (entry.forceRefresh || NeedsFreshAddresses(d, ports_.clock->NowUnixMs()))) {
+        // The run waits for the answer as it waits for playlists: running, without the engine.
+        entry.pendingRefresh = true;
+        sites_->Refresh(d.id, d.epoch, d.url);
         return;
     }
     if (!entry.listedThisRun && IsRecording(d)) {
@@ -2549,6 +2579,36 @@ void Coordinator::OnToolChecked(SiteTool tool)
         ReportError("Settings could not be saved: " + saved.GetError().message);
     }
     snapshotDirty_ = true;
+}
+
+void Coordinator::OnSiteRefreshed(model::DownloadId id, std::int64_t epoch, const SiteLookupFinished& answer)
+{
+    Entry* entry = Find(id);
+    if (entry == nullptr || !entry->pendingRefresh || entry->download.epoch != epoch || !entry->running) {
+        return;  // stopped, deleted or started again meanwhile
+    }
+    entry->pendingRefresh = false;
+    entry->refreshedThisRun = true;
+    entry->forceRefresh = false;
+    model::Download& d = entry->download;
+    if (!answer.video) {
+        MediaFinished failed;
+        failed.failure = TransferFailure{FailureReason::NotFound, FailureClass::NeedsUser, 0,
+                                         "the video's page could not be asked for fresh addresses: " + answer.failure};
+        OnMediaFinished(*entry, failed);
+        return;
+    }
+    const FreshAddresses fresh = ApplyFreshAddresses(d, *answer.video);
+    if (fresh.failure) {
+        MediaFinished failed;
+        failed.failure = TransferFailure{FailureReason::NotFound, FailureClass::Fatal, 0, *fresh.failure};
+        OnMediaFinished(*entry, failed);
+        return;
+    }
+    StoreTracks(*entry, fresh.changed);
+    entry->receivedBytes = d.DownloadedBytes();
+    MarkChanged(*entry);
+    StartStream(*entry);
 }
 
 void Coordinator::OnUpdateChecked(const UpdateCheckOutcome& outcome)

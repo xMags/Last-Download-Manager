@@ -16,6 +16,7 @@ add_executable(ldm_unit_tests
     core/SegmentPlannerTests.cpp
     core/SiteListTests.cpp
     core/SiteLookupsTests.cpp
+    core/SiteRefreshTests.cpp
     core/SiteToolsTests.cpp
     core/ToolUpdatesTests.cpp
     core/UpdateCheckTests.cpp
