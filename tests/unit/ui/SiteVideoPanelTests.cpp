@@ -246,6 +246,36 @@ TEST(SiteVideoCapture, AnHlsQualityOfASiteIsAnHlsDownloadOfItsPlaylist)
     EXPECT_FALSE(media.tracks[0].segments);
 }
 
+TEST(SiteVideoCapture, ALiveSiteVideoIsRecordedFromItsPlaylist)
+{
+    ldm::ui::TabMedia tab;
+    MediaItem item;
+    item.key = 1;
+    item.kind = MediaKind::Dash;  // every site item is; a live one is HLS all the same
+    item.url = "https://www.youtube.com/watch?v=jfKfPfyJRdk";
+    item.finalUrl = item.url;
+    item.siteVideo = true;
+    item.state = MediaItem::State::Ready;
+    ldm::media::MediaOffer offer;
+    offer.live = true;
+    ldm::media::Variant variant;
+    variant.resolution = ldm::media::Resolution{1280, 720};
+    variant.codecs = "avc1.4d401f,mp4a.40.2";
+    variant.source = ldm::media::PlaylistAddress{"https://live.example.test/720.m3u8"};
+    variant.site = ldm::media::SiteFormat{"95", std::nullopt};
+    offer.variants.push_back(variant);
+    item.offer = offer;
+    item.qualities = ldm::media::BuildQualityList(*item.offer, std::nullopt);
+
+    const auto menu = ldm::ui::BuildPanelMenu({&item}, false);
+    ASSERT_FALSE(menu.empty());
+    EXPECT_TRUE(menu[0].action) << "a quality, not the live DASH notice";
+    const auto capture = ldm::ui::BuildStreamCapture(tab, item, ldm::ui::PanelAction{ldm::ui::PanelAction::Kind::DownloadStream, 1, 0});
+    ASSERT_TRUE(capture) << capture.GetError().message;
+    EXPECT_EQ(capture.Value().media.kind, ldm::model::DownloadKind::Hls);
+    EXPECT_FALSE(capture.Value().media.approximateBytes);
+}
+
 TEST(SiteVideoCapture, SubtitlesOfASiteAreASiteDownloadOfTheirOwnWithTheirFormat)
 {
     ldm::ui::TabMedia tab;

@@ -43,13 +43,14 @@ struct SiteVideo {
     // Picked formats only: one video quality per height and frame rate, the best audio per kind
     // of delivery, language and codec. A picture whose sound is separate names its delivery as
     // its audioGroup, and the audio of that delivery carries it as groupId, so a quality pairs
-    // only tracks LDM downloads the same way. Never live, never DRM.
+    // only tracks LDM downloads the same way. Never DRM; a live stream (`offer.live`) offers its
+    // HLS formats only.
     MediaOffer offer;
     std::vector<SiteCookie> cookies;
 };
 
-// Reads an answer. Fails, with words to show the user, for a playlist, a live stream, a video
-// with nothing LDM can download (protected, or only kinds of formats it does not take), and for
+// Reads an answer. Fails, with words to show the user, for a playlist, a stream that has not
+// started yet, a video with nothing LDM can download (protected, or only kinds of formats it does not take), and for
 // anything that is not a well-formed answer.
 [[nodiscard]] base::Result<SiteVideo> ParseSiteVideo(std::string_view json);
 

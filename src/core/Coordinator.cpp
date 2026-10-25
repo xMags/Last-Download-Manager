@@ -2616,8 +2616,13 @@ void Coordinator::OnSiteRefreshed(model::DownloadId id, std::int64_t epoch, cons
     }
     StoreTracks(*entry, fresh.changed);
     for (const std::uint32_t t : fresh.relist) {
-        // Unlisted, so the run reads the playlist first; stored only once it is listed again.
         model::MediaTrack& track = d.tracks[t];
+        if (track.live) {
+            // A recording keeps what it has: its next reload reads the new playlist and adds on.
+            StoreTracks(*entry, {t});
+            continue;
+        }
+        // Unlisted, so the run reads the playlist first; stored only once it is listed again.
         entry->relistedFrom.insert_or_assign(t, track);
         track.keys.clear();
         track.pieces.clear();

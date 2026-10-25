@@ -696,9 +696,9 @@ base::Result<SiteVideo> ParseSiteVideo(std::string_view json)
     if (liveStatus == "is_upcoming") {
         return Refused("This video has not started yet.");
     }
-    if (Flag(root, "is_live") || liveStatus == "is_live") {
-        return Refused("Live streams from this site cannot be downloaded yet.");
-    }
+    // A live stream is recorded from its HLS playlists, as a live HLS stream of the media panel
+    // (checklist P-07); its other formats are left out.
+    const bool live = Flag(root, "is_live") || liveStatus == "is_live";
 
     SiteVideo video;
     video.id = Text(root, "id");
@@ -728,7 +728,7 @@ base::Result<SiteVideo> ParseSiteVideo(std::string_view json)
     const size_t count = std::min(formats->size(), kMaxSiteFormats);
     for (size_t i = 0; i < count; ++i) {
         auto candidate = ReadCandidate((*formats)[i], protectedSeen);
-        if (!candidate) {
+        if (!candidate || (live && candidate->delivery != Delivery::Hls)) {
             continue;
         }
         ReadCookies((*formats)[i], video.cookies);
@@ -790,7 +790,8 @@ base::Result<SiteVideo> ParseSiteVideo(std::string_view json)
     // The pairing goes by groups (HLS's rule in the quality list), so pictures with their own sound
     // and pictures with separate sound can be offered side by side.
     offer.format = StreamFormat::Hls;
-    offer.seconds = video.seconds;
+    offer.live = live;
+    offer.seconds = live ? std::nullopt : video.seconds;
     std::set<Delivery> paired;
     for (const auto& [key, index] : bestByPicture) {
         offer.variants.push_back(MakeVariant(pictures[index], video.seconds));
@@ -836,6 +837,9 @@ base::Result<SiteVideo> ParseSiteVideo(std::string_view json)
     }
 
     if (offer.variants.empty() && offer.audio.empty()) {
+        if (live) {
+            return Refused("This live stream offers no way of recording it that LDM has.");
+        }
         return Refused(protectedSeen ? "This video is protected and cannot be downloaded."
                                      : "This video has no format LDM can download.");
     }
