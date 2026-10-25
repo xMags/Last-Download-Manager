@@ -604,6 +604,37 @@ TEST(SqliteStore, StreamRoundTripsWithTracksKeysPiecesAndRanges)
     EXPECT_EQ(d.DownloadedBytes(), 1234 + 5010);
 }
 
+TEST(SqliteStore, SiteVideoKeepsItsFlagAndTrackFormatsAcrossUpdates)
+{
+    SqliteStore store = OpenMemoryStore();
+    Download original = SampleStream("site");
+    original.kind = ldm::model::DownloadKind::Dash;
+    original.siteVideo = true;
+    original.url = "https://www.youtube.com/watch?v=aqz-KE-bpKQ";
+    original.tracks[1].siteFormat = "140";
+    original.tracks[1].expectedBytes = 10'271'496;
+    auto id = store.InsertDownload(original);
+    ASSERT_TRUE(id.Ok()) << id.GetError().message;
+
+    auto loaded = store.LoadDownloads();
+    ASSERT_TRUE(loaded.Ok()) << loaded.GetError().message;
+    Download d = loaded.Value().front();
+    EXPECT_TRUE(d.siteVideo);
+    EXPECT_EQ(d.tracks[0].siteFormat, "");
+    EXPECT_FALSE(d.tracks[0].expectedBytes);
+    EXPECT_EQ(d.tracks[1].siteFormat, "140");
+    EXPECT_EQ(d.tracks[1].expectedBytes, 10'271'496);
+
+    d.siteVideo = false;
+    ASSERT_TRUE(store.SaveDownload(d).Ok());
+    EXPECT_FALSE(store.LoadDownloads().Value().front().siteVideo);
+    // Every other download is untouched by the new columns.
+    ASSERT_TRUE(store.InsertDownload(SampleDownload("plain")).Ok());
+    for (const Download& other : store.LoadDownloads().Value()) {
+        EXPECT_FALSE(other.siteVideo) << other.publicId;
+    }
+}
+
 TEST(SqliteStore, StreamProgressIsWrittenPieceByPiece)
 {
     SqliteStore store = OpenMemoryStore();

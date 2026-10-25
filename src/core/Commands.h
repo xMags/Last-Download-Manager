@@ -52,6 +52,9 @@ struct MediaTrackChoice {
     // DASH: the track's list, which the MPD already gave. HLS: nothing; LDM reads the media
     // playlist when the download first starts.
     std::optional<media::TrackSegments> segments;
+    // A site video's track: the resolver's format id and the exact length the site stated.
+    std::string siteFormat;
+    std::optional<std::int64_t> expectedBytes;
 };
 
 // A stream to download instead of a file (M3 design section 6). The command's `url` is then the
@@ -61,6 +64,9 @@ struct MediaChoice {
     // The manifest came from a loopback or private address (FetchFinished::fromPrivateNetwork);
     // otherwise the stream's pieces may not be on such addresses.
     bool fromPrivateNetwork = false;
+    // A video of a supported site (model::Download::siteVideo): a Dash stream of whole-file
+    // tracks, each with its format, and the command's `url` is the video's page.
+    bool siteVideo = false;
     std::vector<MediaTrackChoice> tracks;
     std::optional<std::int64_t> approximateBytes;  // shown until the stream's size is known
 };

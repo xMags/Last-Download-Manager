@@ -261,6 +261,13 @@ ALTER TABLE downloads ADD COLUMN listed INTEGER NOT NULL DEFAULT 1 CHECK (listed
     Migration{10, R"sql(
 ALTER TABLE downloads ADD COLUMN replace_final INTEGER NOT NULL DEFAULT 0 CHECK (replace_final IN (0, 1));
 )sql"},
+    // Videos of supported sites: a DASH stream whose expiring track addresses are asked for again
+    // by format, and checked against the length the site stated.
+    Migration{11, R"sql(
+ALTER TABLE downloads ADD COLUMN site_video INTEGER NOT NULL DEFAULT 0 CHECK (site_video IN (0, 1));
+ALTER TABLE media_tracks ADD COLUMN site_format TEXT NOT NULL DEFAULT '';
+ALTER TABLE media_tracks ADD COLUMN expected_bytes INTEGER CHECK (expected_bytes > 0);
+)sql"},
 };
 
 base::Result<int> CurrentVersion(Connection& connection)

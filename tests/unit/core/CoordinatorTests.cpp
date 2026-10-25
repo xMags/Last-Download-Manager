@@ -1043,6 +1043,76 @@ ldm::core::MediaChoice DashChoice()
     return media;
 }
 
+// A site video as the media panel builds it: whole-file video and audio, each with its format.
+ldm::core::MediaChoice SiteChoice()
+{
+    ldm::core::MediaChoice media;
+    media.kind = ldm::model::DownloadKind::Dash;
+    media.siteVideo = true;
+    for (const char* format : {"299", "140"}) {
+        ldm::core::MediaTrackChoice track;
+        track.role = std::string_view(format) == "299" ? ldm::model::TrackRole::Video : ldm::model::TrackRole::Audio;
+        track.sourceUrl = std::string("https://media.test/videoplayback?itag=") + format;
+        ldm::media::TrackSegments whole;
+        ldm::media::Segment segment;
+        segment.url = track.sourceUrl;
+        segment.seconds = 635;
+        whole.segments.push_back(segment);
+        track.segments = whole;
+        track.siteFormat = format;
+        track.expectedBytes = std::string_view(format) == "299" ? 257'619'653 : 10'271'496;
+        media.tracks.push_back(track);
+    }
+    return media;
+}
+
+TEST_F(CoordinatorTest, ASiteVideoIsStoredWithItsPageAndTrackFormats)
+{
+    const AddResult result = Add("https://www.youtube.com/watch?v=aqz-KE-bpKQ", AddMode::StartNow,
+                                 [](AddDownloadCommand& c) {
+                                     c.fileName = "Big Buck Bunny.mp4";
+                                     c.media = SiteChoice();
+                                 });
+    ASSERT_TRUE(result.id) << result.error.value_or("");
+    const auto stored = Stored(*result.id);
+    ASSERT_TRUE(stored);
+    EXPECT_TRUE(stored->siteVideo);
+    EXPECT_EQ(stored->kind, ldm::model::DownloadKind::Dash);
+    ASSERT_EQ(stored->tracks.size(), 2u);
+    EXPECT_TRUE(stored->tracks[0].wholeFile);
+    EXPECT_EQ(stored->tracks[0].siteFormat, "299");
+    EXPECT_EQ(stored->tracks[1].expectedBytes, 10'271'496);
+    ASSERT_EQ(engine_.mediaStarts.size(), 1u);
+    EXPECT_TRUE(engine_.mediaStarts[0].tracks[0].wholeFile);
+}
+
+TEST_F(CoordinatorTest, ASiteVideoNeedsItsCanonicalPageAndAFormatPerTrack)
+{
+    for (const char* page : {"https://youtu.be/aqz-KE-bpKQ", "https://www.youtube.com/watch?v=aqz-KE-bpKQ&list=PL1",
+                             "https://media.test/videoplayback?itag=299"}) {
+        const AddResult refused = Add(page, AddMode::StartNow, [](AddDownloadCommand& c) { c.media = SiteChoice(); });
+        EXPECT_FALSE(refused.id) << page;
+    }
+    const AddResult noFormat = Add("https://www.youtube.com/watch?v=aqz-KE-bpKQ", AddMode::StartNow,
+                                   [](AddDownloadCommand& c) {
+                                       ldm::core::MediaChoice media = SiteChoice();
+                                       media.tracks[1].siteFormat.clear();
+                                       c.media = media;
+                                   });
+    EXPECT_FALSE(noFormat.id);
+    const AddResult pieces = Add("https://www.youtube.com/watch?v=aqz-KE-bpKQ", AddMode::StartNow,
+                                 [](AddDownloadCommand& c) {
+                                     ldm::core::MediaChoice media = DashChoice();  // segmented: not one file
+                                     media.siteVideo = true;
+                                     for (auto& track : media.tracks) {
+                                         track.siteFormat = "1";
+                                     }
+                                     c.media = media;
+                                 });
+    EXPECT_FALSE(pieces.id);
+    EXPECT_TRUE(engine_.mediaStarts.empty());
+}
+
 TEST_F(CoordinatorTest, ADashStreamStartsWithEveryPieceInItsPartsFolder)
 {
     const AddResult result = Add("https://cdn.test/v.mpd", AddMode::StartNow, [](AddDownloadCommand& c) {
