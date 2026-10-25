@@ -315,8 +315,8 @@ bool ProgressWindow::OnCommand(int id, int code, HWND control)
         }
         return true;
     case IDCANCEL:
-        // Cancel stops the transfer and closes the window; the download stays in the list. A
-        // live recording asks first, and its Cancel keeps the window open.
+        // Stop (and Esc) stops the transfer and closes the window; the download stays in the list.
+        // A live recording asks first, and answering Cancel there keeps the window open.
         if (latest_ && IsRunning(latest_->download.status) && !StopThis()) {
             return true;
         }
