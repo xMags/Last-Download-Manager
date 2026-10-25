@@ -291,6 +291,16 @@ std::optional<TrackSegments> ReadPieces(const Json& format)
     return track;
 }
 
+bool IsSoundFileType(std::string_view ext)
+{
+    for (const std::string_view sound : {"mp3", "m4a", "aac", "opus", "ogg", "oga", "flac", "wav", "weba"}) {
+        if (ext == sound) {
+            return true;
+        }
+    }
+    return false;
+}
+
 // A format LDM can download: a direct http(s) file, an HLS media playlist or a DASH piece list,
 // no DRM, codecs it takes.
 std::optional<Candidate> ReadCandidate(const Json& format, bool& protectedSeen)
@@ -344,6 +354,11 @@ std::optional<Candidate> ReadCandidate(const Json& format, bool& protectedSeen)
     }
     candidate.video = VideoCodec(candidate.vcodec);
     candidate.audio = AudioCodec(candidate.acodec);
+    // A file of a sound-only type has no picture, whether or not the site said so (podcasts give
+    // "mp3" and no video codec).
+    if (candidate.video == Codec::Unstated && IsSoundFileType(candidate.ext)) {
+        candidate.video = Codec::None;
+    }
     if (candidate.video == Codec::Unknown || candidate.audio == Codec::Unknown ||
         (candidate.video == Codec::None && candidate.audio == Codec::None)) {
         return std::nullopt;
@@ -711,8 +726,19 @@ base::Result<SiteVideo> ReadVideo(const Json& root)
         video.seconds = seconds;
     }
 
-    const auto formats = root.find("formats");
-    if (formats == root.end() || !formats->is_array()) {
+    // A video with one format may come without a list: the format's fields stand in the answer
+    // itself (podcast episodes, Snapchat, Patreon).
+    Json single;
+    const Json* formats = nullptr;
+    if (const auto listed = root.find("formats"); listed != root.end()) {
+        if (!listed->is_array()) {
+            return Unreadable();
+        }
+        formats = &*listed;
+    } else if (root.contains("url")) {
+        single = Json::array({root});
+        formats = &single;
+    } else {
         return Unreadable();
     }
     bool protectedSeen = false;
@@ -763,6 +789,14 @@ base::Result<SiteVideo> ReadVideo(const Json& root)
     }
     for (const Candidate& candidate : combined) {
         pictures.push_back(Picture{&candidate, false});
+    }
+    // A video without any sound (a silent post, a clip made from a GIF) is offered as its pictures
+    // alone. Where sound exists, a picture without it is never offered: it would look like the
+    // same video.
+    if (audio.empty() && combined.empty()) {
+        for (const Candidate& candidate : videoOnly) {
+            pictures.push_back(Picture{&candidate, false});
+        }
     }
     std::map<std::pair<int, int>, size_t> bestByPicture;
     for (size_t i = 0; i < pictures.size(); ++i) {
