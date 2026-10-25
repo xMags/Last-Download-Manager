@@ -27,7 +27,7 @@ MemoryFetch::MemoryFetch(CURLM* multi, core::FetchRequest request, long connectT
     curl_easy_setopt(easy, CURLOPT_CONNECTTIMEOUT, connectTimeoutSeconds);
     curl_easy_setopt(easy, CURLOPT_LOW_SPEED_LIMIT, 1L);
     curl_easy_setopt(easy, CURLOPT_LOW_SPEED_TIME, stallTimeoutSeconds);
-    curl_easy_setopt(easy, CURLOPT_TIMEOUT, static_cast<long>(kTotalTimeout.count()));
+    curl_easy_setopt(easy, CURLOPT_TIMEOUT, static_cast<long>(request_.totalTimeout.value_or(kTotalTimeout).count()));
     curl_easy_setopt(easy, CURLOPT_ERRORBUFFER, error_.data());
     curl_easy_setopt(easy, CURLOPT_SSL_OPTIONS, static_cast<long>(CURLSSLOPT_REVOKE_BEST_EFFORT));
     // Manifests are text and compress well; libcurl decodes whatever it offered.

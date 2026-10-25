@@ -226,6 +226,13 @@ struct Settings {
     bool updatesAsked = false;
     std::int64_t updatesLastCheckUnixMs = 0;  // the last check that got an answer
     std::string updatesSkippedVersion;        // "Skip this version"
+
+    // Videos of supported sites (video-sites design): off until the user turns it on, which
+    // downloads yt-dlp and Deno into LDM's tools folder. The last checks for newer versions that
+    // got an answer, per program.
+    bool siteVideosEnabled = false;
+    std::int64_t siteVideosYtDlpCheckUnixMs = 0;
+    std::int64_t siteVideosDenoCheckUnixMs = 0;
 };
 
 using SettingsMap = std::map<std::string, std::string, std::less<>>;

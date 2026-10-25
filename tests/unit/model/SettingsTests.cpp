@@ -38,6 +38,9 @@ TEST(Settings, RoundTripsEveryChangedField)
     original.mediaMinimumKilobytes = 0;
     original.mediaSiteExceptions = "*.example.test";
     original.mediaDrmNotice = false;
+    original.siteVideosEnabled = true;
+    original.siteVideosYtDlpCheckUnixMs = 1'792'909'519'000;
+    original.siteVideosDenoCheckUnixMs = 1'792'000'000'000;
 
     const auto loaded = SettingsFromMap(SettingsToMap(original));
     ASSERT_TRUE(loaded.warnings.empty());
@@ -75,6 +78,7 @@ TEST(Settings, MapContainsEveryKey)
     const SettingsMap map = SettingsToMap(Settings{});
     EXPECT_TRUE(map.contains("proxy.socks.remoteDns"));
     EXPECT_TRUE(map.contains("confirm.deleteIncomplete"));
+    EXPECT_EQ(map.at("siteVideos.enabled"), "0") << "off until the user turns it on";
     EXPECT_GT(map.size(), 60u);
 }
 
