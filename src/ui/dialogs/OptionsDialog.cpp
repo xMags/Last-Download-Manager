@@ -457,7 +457,7 @@ void OptionsDialog::Load()
     UpdateProxyControls();
 
     RefreshLogins();
-    Edit_SetCueBannerText(Control(IDC_OPT_LOGIN_PASSWORD), L"(unchanged when updating)");
+    Edit_SetCueBannerText(Control(IDC_OPT_LOGIN_PASSWORD), L"(unchanged for the same login)");
 
     Check(IDC_OPT_SOUND_DONE_ON, s.soundComplete.enabled);
     Put(IDC_OPT_SOUND_DONE_FILE, base::ToUtf16(s.soundComplete.file));
@@ -792,7 +792,13 @@ void OptionsDialog::OnPageCommand(int id, int code)
         }
         const auto existing = std::find_if(logins_.begin(), logins_.end(), [&](const auto& l) { return l.pattern == login.pattern; });
         if (existing != logins_.end()) {
-            if (login.password.empty() && existing->username == login.username) {
+            // The core keeps the stored password only for the same server and login, so a new
+            // login name needs its password typed again.
+            if (login.password.empty() && existing->username != login.username) {
+                Warn(L"Enter the password for the new login.");
+                break;
+            }
+            if (login.password.empty()) {
                 login.password = existing->password;  // keep: empty means unchanged
             }
             *existing = login;
