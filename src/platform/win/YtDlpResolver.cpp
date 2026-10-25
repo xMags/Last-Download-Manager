@@ -100,6 +100,14 @@ ResolverFailure ReadResolverFailure(std::string_view errors)
     if (Contains(error, "not a bot")) {
         return {Problem::Video, "The site asked to confirm that this is not a bot. Try again later."};
     }
+    // yt-dlp's words for a video only signed-in users see, which advise its own options.
+    for (const std::string_view signIn : {"--cookies", "only works when logged-in", "authentication is required",
+                                          "Login required", "login required"}) {
+        if (Contains(error, signIn)) {
+            return {Problem::Video, "The site shows this video only to signed-in users. Sign in there in the browser, then "
+                                    "let LDM use it in Options > Site videos > Sign in on sites."};
+        }
+    }
     if (error.empty()) {
         return {Problem::Resolver, "The video site's page could not be read."};
     }
