@@ -49,6 +49,7 @@ private:
     bool detailsVisible_ = true;
     int fullHeight_ = 0;
     int collapsedHeight_ = 0;
+    int heightsDpi_ = 0;  // the scale fullHeight_ and collapsedHeight_ are measured at
     bool updating_ = false;
     bool rememberLimit_ = true;
 };

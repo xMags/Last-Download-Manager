@@ -105,6 +105,7 @@ bool ProgressWindow::OnInit()
     RECT segments{};
     ::GetWindowRect(Item(IDC_PROG_SEGMENTS), &segments);
     collapsedHeight_ = segments.top - window.top;
+    heightsDpi_ = static_cast<int>(::GetDpiForWindow(Handle()));
 
     const HWND list = Item(IDC_PROG_CONNECTIONS);
     ListView_SetExtendedListViewStyle(list, LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER);
@@ -373,6 +374,17 @@ bool ProgressWindow::OnMessage(UINT message, WPARAM wParam, LPARAM lParam, LRESU
         DrawSegments(*reinterpret_cast<const DRAWITEMSTRUCT*>(lParam));
         result = TRUE;
         return true;
+    }
+    if (message == WM_DPICHANGED) {
+        // The heights are pixels at the old scale; Windows rescales the window itself, so this
+        // only keeps Show and Hide details in step with it.
+        const int dpi = LOWORD(wParam);
+        if (heightsDpi_ > 0 && dpi > 0 && dpi != heightsDpi_) {
+            fullHeight_ = ::MulDiv(fullHeight_, dpi, heightsDpi_);
+            collapsedHeight_ = ::MulDiv(collapsedHeight_, dpi, heightsDpi_);
+            heightsDpi_ = dpi;
+        }
+        return false;
     }
     if (message == WM_CLOSE) {
         Close(IDCANCEL);  // closing the window keeps the download running
