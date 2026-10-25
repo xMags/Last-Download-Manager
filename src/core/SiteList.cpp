@@ -147,45 +147,12 @@ std::optional<std::string> TwitchVideo(const Url& url, const std::vector<std::st
     return std::nullopt;
 }
 
-std::optional<std::string> SoundCloudTrack(const Url& url, const std::vector<std::string_view>& path)
-{
-    // "/<user>/<track>"; the site's own pages and a user's lists have names of their own.
-    constexpr std::array<std::string_view, 20> kNotUsers{
-        "discover", "stream", "upload", "you", "search", "charts", "pages", "settings", "messages", "notifications",
-        "people", "terms-of-use", "jobs", "mobile", "imprint", "popular", "tags", "stations", "feed", "signin"};
-    constexpr std::array<std::string_view, 12> kNotTracks{
-        "sets", "likes", "reposts", "tracks", "albums", "followers", "following", "popular-tracks", "comments",
-        "spotlight", "toptracks", "playlists"};
-    if (!HostIs(url.host, {"soundcloud.com", "www.soundcloud.com", "m.soundcloud.com"}) || path.size() != 2 ||
-        !IsSlug(path[0]) || !IsSlug(path[1]) ||
-        std::find(kNotUsers.begin(), kNotUsers.end(), path[0]) != kNotUsers.end() ||
-        std::find(kNotTracks.begin(), kNotTracks.end(), path[1]) != kNotTracks.end()) {
-        return std::nullopt;
-    }
-    return Join("https://soundcloud.com", path);
-}
-
 std::optional<std::string> TedTalk(const Url& url, const std::vector<std::string_view>& path)
 {
     if (HostIs(url.host, {"ted.com", "www.ted.com"}) && path.size() == 2 && path[0] == "talks" && IsSlug(path[1])) {
         return Join("https://www.ted.com", path);
     }
     return std::nullopt;
-}
-
-std::optional<std::string> BandcampTrack(const Url& url, const std::vector<std::string_view>& path)
-{
-    // "<artist>.bandcamp.com/track/<name>"
-    constexpr std::string_view kSuffix = ".bandcamp.com";
-    if (!url.host.ends_with(kSuffix) || url.host.size() == kSuffix.size() || path.size() != 2 || path[0] != "track" ||
-        !IsSlug(path[1])) {
-        return std::nullopt;
-    }
-    const std::string_view artist = std::string_view(url.host).substr(0, url.host.size() - kSuffix.size());
-    if (!IsSlug(artist) || artist.find('.') != std::string_view::npos || artist == "www") {
-        return std::nullopt;
-    }
-    return Join("https://" + url.host, path);
 }
 
 std::optional<std::string> InstagramReel(const Url& url, const std::vector<std::string_view>& path)
@@ -201,20 +168,19 @@ using SiteMatcher = std::optional<std::string> (*)(const Url&, const std::vector
 
 // The listed sites: each one passed a manual test of its pages (round 2 design, section 4 step 9).
 // Pages where a video is only sometimes found (a post of a forum or a social site) are left to
-// the user's request, so browsing them never starts the resolver.
+// the user's request, so browsing them never starts the resolver; so are sound-only sites
+// (SoundCloud, Bandcamp), whose pages have no player for the panel to sit on.
 struct ListedSite {
     std::array<std::string_view, 4> hosts;  // for the extension; empty entries are unused
     SiteMatcher match;
 };
 
-constexpr std::array<ListedSite, 8> kListedSites{{
+constexpr std::array<ListedSite, 6> kListedSites{{
     {{"youtube.com", "youtu.be", "youtube-nocookie.com", ""}, YouTubeVideo},
     {{"dailymotion.com", "dai.ly", "", ""}, DailymotionVideo},
     {{"vimeo.com", "", "", ""}, VimeoVideo},
     {{"twitch.tv", "", "", ""}, TwitchVideo},
-    {{"soundcloud.com", "", "", ""}, SoundCloudTrack},
     {{"ted.com", "", "", ""}, TedTalk},
-    {{"bandcamp.com", "", "", ""}, BandcampTrack},
     {{"instagram.com", "", "", ""}, InstagramReel},
 }};
 

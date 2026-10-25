@@ -51,11 +51,8 @@ TEST(SiteList, OtherListedSitesGiveTheirVideoPagesWithoutWhatThePageAdded)
     EXPECT_EQ(Listed("https://www.twitch.tv/videos/6528877?t=1h"), "https://www.twitch.tv/videos/6528877");
     EXPECT_EQ(Listed("https://www.twitch.tv/riotgames/clip/AbcDef-123"), "https://www.twitch.tv/riotgames/clip/AbcDef-123");
     EXPECT_EQ(Listed("https://clips.twitch.tv/AbcDef-123"), "https://clips.twitch.tv/AbcDef-123");
-    EXPECT_EQ(Listed("https://soundcloud.com/ethmusic/lostin-powers-she-so-heavy?in=x"),
-              "https://soundcloud.com/ethmusic/lostin-powers-she-so-heavy");
     EXPECT_EQ(Listed("https://www.ted.com/talks/dan_dennett_on_our_consciousness"),
               "https://www.ted.com/talks/dan_dennett_on_our_consciousness");
-    EXPECT_EQ(Listed("https://artist.bandcamp.com/track/a-song"), "https://artist.bandcamp.com/track/a-song");
     EXPECT_EQ(Listed("https://www.instagram.com/reels/C9x5pUZvXmD/"), "https://www.instagram.com/reel/C9x5pUZvXmD/");
 }
 
@@ -86,12 +83,9 @@ TEST(SiteList, PagesThatAreNotCertainlyOneVideoAreNotListed)
              "https://vimeo.com/channels/staffpicks",
              "https://www.twitch.tv/riotgames",
              "https://www.twitch.tv/videos/latest",
-             "https://soundcloud.com/discover/sets",
-             "https://soundcloud.com/ethmusic/sets",
-             "https://soundcloud.com/ethmusic",
+             "https://soundcloud.com/ethmusic/lostin-powers-she-so-heavy",  // sound only: no player to sit on
              "https://www.ted.com/talks",
-             "https://bandcamp.com/track/a-song",
-             "https://artist.bandcamp.com/album/an-album",
+             "https://artist.bandcamp.com/track/a-song",
              "https://www.instagram.com/p/C9x5pUZvXmD/",
              "https://www.reddit.com/r/videos/comments/6rrwyj/that_small_heart_attack/",
              "https://x.com/NASA/status/1844412155573170387",
@@ -139,10 +133,12 @@ TEST(SiteList, AddressesTheResolverMustNeverSeeAreRefused)
 TEST(SiteList, TheExtensionIsToldTheListedSitesHosts)
 {
     const auto hosts = ldm::core::AutomaticSiteHosts();
-    for (const char* host : {"youtube.com", "youtu.be", "dailymotion.com", "twitch.tv", "bandcamp.com"}) {
+    for (const char* host : {"youtube.com", "youtu.be", "dailymotion.com", "twitch.tv", "instagram.com"}) {
         EXPECT_NE(std::find(hosts.begin(), hosts.end(), host), hosts.end()) << host;
     }
-    EXPECT_EQ(std::find(hosts.begin(), hosts.end(), "reddit.com"), hosts.end());
+    for (const char* host : {"reddit.com", "soundcloud.com", "bandcamp.com"}) {
+        EXPECT_EQ(std::find(hosts.begin(), hosts.end(), host), hosts.end()) << host;
+    }
 }
 
 TEST(SiteList, SignInIsOnlyForTheSitesTheUserChecked)
