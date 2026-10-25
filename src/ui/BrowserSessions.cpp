@@ -25,7 +25,7 @@ std::string ConfigInputs(const model::Settings& settings)
                             k.forceShift, k.forceCtrl, k.forceInsert, k.forceDelete, k.forceNeedsLinkClick,
                             k.skipWebContent, settings.chromiumMenu.downloadLink, settings.chromiumMenu.downloadAll,
                             settings.firefoxMenu.downloadLink, settings.firefoxMenu.downloadAll,
-                            settings.mediaPanelEnabled}) {
+                            settings.mediaPanelEnabled, settings.siteVideosEnabled}) {
         keys += flag ? '1' : '0';
     }
     return settings.capturedExtensions + kSeparator + settings.captureSiteExceptions + kSeparator +
@@ -132,6 +132,11 @@ void BrowserSessions::OnEvent(BrowserEvent event, const model::Settings& setting
     } else if (const auto* reset = std::get_if<browser::MediaReset>(&parsed.message)) {
         if (handlers_.onMediaReset) {
             handlers_.onMediaReset(event.connection, reset->tabId);
+        }
+    } else if (auto* page = std::get_if<browser::SitePage>(&parsed.message)) {
+        // Asked for only while site videos are on; one sent just before they were turned off is dropped.
+        if (handlers_.onSitePage && settings.siteVideosEnabled) {
+            handlers_.onSitePage(event.connection, std::move(*page));
         }
     } else if (const auto* position = std::get_if<browser::VideoPosition>(&parsed.message)) {
         if (handlers_.onVideoPosition) {
@@ -258,6 +263,7 @@ browser::Config BrowserSessions::MakeConfig(const model::Settings& settings, bro
     config.media.types = lowerWords(settings.mediaTypes);
     config.media.minimumBytes = std::int64_t{settings.mediaMinimumKilobytes} * 1024;
     config.media.siteExceptions = lowerWords(settings.mediaSiteExceptions);
+    config.sitePages = settings.siteVideosEnabled;
     config.siteExceptions = Words(settings.captureSiteExceptions);
     // Address patterns hold no spaces, so whitespace separates them as well as line breaks do.
     config.addressExceptions = Words(settings.captureAddressExceptions);

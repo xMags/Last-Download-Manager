@@ -40,10 +40,25 @@ core::MediaTrackChoice RenditionTrack(const media::Rendition& rendition, const s
 }
 
 // SanitizeFileName gives a fallback name for empty text, so emptiness is checked before it.
-std::string Title(const TabMedia& tab)
+std::string Title(const std::string& title)
 {
-    const bool blank = tab.pageTitle.find_first_not_of(" \t") == std::string::npos;
-    return blank ? std::string("video") : core::SanitizeFileName(tab.pageTitle);
+    const bool blank = title.find_first_not_of(" \t") == std::string::npos;
+    return blank ? std::string("video") : core::SanitizeFileName(title);
+}
+
+// A site video is named by its own title; the page's carries the site's name too.
+std::string Title(const TabMedia& tab, const MediaItem& item)
+{
+    return Title(item.siteVideo && !item.siteTitle.empty() ? item.siteTitle : tab.pageTitle);
+}
+
+// The site's format of a track, so a refresh can ask for the same bytes again.
+void TakeSiteFormat(core::MediaTrackChoice& track, const std::optional<media::SiteFormat>& site)
+{
+    if (site) {
+        track.siteFormat = site->id;
+        track.expectedBytes = site->bytes;
+    }
 }
 
 }  // namespace
@@ -68,6 +83,7 @@ base::Result<StreamCapture> BuildStreamCapture(const TabMedia& tab, const MediaI
     capture.cookies = item.cookies;
     capture.media.kind = item.kind == browser::MediaKind::Dash ? model::DownloadKind::Dash : model::DownloadKind::Hls;
     capture.media.fromPrivateNetwork = item.fromPrivateNetwork;
+    capture.media.siteVideo = item.siteVideo;
 
     if (action.kind == PanelAction::Kind::DownloadSubtitles) {
         if (action.entry >= item.qualities.subtitles.size()) {
@@ -80,7 +96,7 @@ base::Result<StreamCapture> BuildStreamCapture(const TabMedia& tab, const MediaI
         const media::Rendition& subtitles = offer.subtitles[index];
         capture.media.tracks.push_back(RenditionTrack(subtitles, capture.manifestUrl, model::TrackRole::Subtitles));
         const std::string language = subtitles.language.empty() ? std::string() : core::SanitizeFileName(subtitles.language);
-        capture.fileName = Title(tab) + (language.empty() ? "" : "." + language) + ".vtt";
+        capture.fileName = Title(tab, item) + (language.empty() ? "" : "." + language) + ".vtt";
         return capture;
     }
 
@@ -99,6 +115,7 @@ base::Result<StreamCapture> BuildStreamCapture(const TabMedia& tab, const MediaI
             entry.kind == media::QualityKind::AudioOnly ? model::TrackRole::Audio : model::TrackRole::Video;
         core::MediaTrackChoice track = TrackFrom(variant.source, capture.manifestUrl, role);
         track.codecs = variant.codecs;
+        TakeSiteFormat(track, variant.site);
         capture.media.tracks.push_back(std::move(track));
         picture = role == model::TrackRole::Video;
     }
@@ -108,7 +125,9 @@ base::Result<StreamCapture> BuildStreamCapture(const TabMedia& tab, const MediaI
         }
         const media::Rendition& audio = offer.audio[*entry.audio];
         if (audio.source) {  // without one, the sound is inside the variant's own segments
-            capture.media.tracks.push_back(RenditionTrack(audio, capture.manifestUrl, model::TrackRole::Audio));
+            core::MediaTrackChoice track = RenditionTrack(audio, capture.manifestUrl, model::TrackRole::Audio);
+            TakeSiteFormat(track, audio.site);
+            capture.media.tracks.push_back(std::move(track));
         }
     }
     if (capture.media.tracks.empty()) {
@@ -117,7 +136,7 @@ base::Result<StreamCapture> BuildStreamCapture(const TabMedia& tab, const MediaI
     if (!offer.live) {
         capture.media.approximateBytes = entry.approximateBytes;  // a recording's size depends on how long it runs
     }
-    capture.fileName = Title(tab) + (picture ? ".mp4" : ".m4a");
+    capture.fileName = Title(tab, item) + (picture ? ".mp4" : ".m4a");
     return capture;
 }
 

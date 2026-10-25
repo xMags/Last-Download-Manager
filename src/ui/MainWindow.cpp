@@ -108,6 +108,11 @@ MainWindow::MainWindow(const Services& services) : services_(services)
                 mediaPanel_->OnMediaReset(connection, tabId);
             }
         };
+        handlers.onSitePage = [this](BrowserConnectionId connection, browser::SitePage page) {
+            if (mediaPanel_) {
+                mediaPanel_->OnSitePage(connection, std::move(page));
+            }
+        };
         handlers.onVideoPosition = [this](BrowserConnectionId connection, browser::VideoPosition position) {
             if (mediaPanel_) {
                 mediaPanel_->OnVideoPosition(connection, position);
@@ -334,6 +339,8 @@ void MainWindow::CreateMediaPanel()
         (void)ShowMessage(window_, *theme_, MessageRequest{text, MessageKind::Information});
     };
     hooks.readXml = services_.readXml;
+    hooks.lookUp = [this](core::LookUpSiteVideoCommand command) { services_.commands->Post(std::move(command)); };
+    hooks.cancelLookup = [this](std::int64_t lookupId) { services_.commands->Post(core::CancelSiteLookupCommand{lookupId}); };
     mediaPanel_ = std::make_unique<MediaPanelController>(*services_.browserWindows, *theme_, std::move(hooks));
 }
 
@@ -861,8 +868,11 @@ LRESULT MainWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
     case kNotificationMessage: {
         auto notifications = services_.bridge->TakeNotifications();
         if (mediaPanel_) {
-            // Manifest fetches answer the media panel, not the download list.
+            // Manifest fetches and site lookups answer the media panel, not the download list.
             std::erase_if(notifications, [this](const core::Notification& notification) {
+                if (const auto* looked = std::get_if<core::SiteLookupFinished>(&notification)) {
+                    return mediaPanel_->OnSiteLookedUp(*looked);
+                }
                 const auto* fetched = std::get_if<core::FetchFinished>(&notification);
                 return fetched != nullptr && mediaPanel_->OnFetched(*fetched);
             });

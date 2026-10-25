@@ -361,6 +361,33 @@ TEST(BrowserProtocol, EncodesConfig)
     EXPECT_EQ(json["appVersion"], "5.0.0");
     EXPECT_EQ(json["capturedExtensions"], nlohmann::json({"zip", "exe"}));
     EXPECT_EQ(json["menu"], nlohmann::json({{"downloadLink", true}, {"downloadAll", true}}));
+    EXPECT_EQ(json["sitePages"], false) << "only while site videos are on";
+}
+
+TEST(BrowserProtocol, ParsesSitePages)
+{
+    const std::string json = R"({"v":1,"id":"s1","type":"site-page","tabId":12,"incognito":false,)"
+                             R"("url":"https://www.youtube.com/watch?v=aqz-KE-bpKQ","pageTitle":"Bunny - YouTube",)"
+                             R"("userAgent":"Mozilla/5.0"})";
+    const auto parsed = ldm::browser::ParseMessage(json);
+    ASSERT_TRUE(parsed);
+    const auto* page = std::get_if<ldm::browser::SitePage>(&parsed->message);
+    ASSERT_NE(page, nullptr);
+    EXPECT_EQ(page->tabId, 12);
+    EXPECT_EQ(page->url, "https://www.youtube.com/watch?v=aqz-KE-bpKQ");
+    EXPECT_EQ(page->pageTitle, "Bunny - YouTube");
+    EXPECT_EQ(page->userAgent, "Mozilla/5.0");
+
+    const auto with = [&json](const std::string& from, const std::string& to) {
+        std::string changed = json;
+        changed.replace(changed.find(from), from.size(), to);
+        return changed;
+    };
+    EXPECT_FALSE(ldm::browser::ParseMessage(with("https://www.youtube.com/watch?v=aqz-KE-bpKQ", "javascript:void")));
+    EXPECT_FALSE(ldm::browser::ParseMessage(with(R"("tabId":12)", R"("tabId":-1)")));
+    EXPECT_FALSE(ldm::browser::ParseMessage(with(R"("incognito":false,)", "")));
+    EXPECT_FALSE(ldm::browser::ParseMessage(with(R"(,"userAgent":"Mozilla/5.0")", "")));
+    EXPECT_FALSE(ldm::browser::ParseMessage(with("Bunny - YouTube", "Bunny\n")));
 }
 
 TEST(BrowserHostManifest, ChromiumManifestAllowsOnlyLdmExtension)

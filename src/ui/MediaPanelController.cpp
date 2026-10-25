@@ -59,6 +59,8 @@ MediaPanelController::MediaPanelController(BrowserWindows& windows, const Theme&
           [this](BrowserConnectionId connection, int tabId) { OnCatalogChanged(connection, tabId); },
           hooks_.readXml,
           [] { return std::chrono::system_clock::now(); },
+          hooks_.lookUp,
+          hooks_.cancelLookup,
       })
 {
     (void)panel_.Create(theme, MediaPanelWindow::Callbacks{

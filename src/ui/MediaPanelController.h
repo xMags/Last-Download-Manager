@@ -36,6 +36,8 @@ public:
         std::function<void(StreamCapture)> downloadStream;   // the add flow, for a stream
         std::function<void(const std::wstring&)> tell;       // a message to the user
         std::function<base::Result<media::XmlElement>(std::string_view)> readXml;
+        std::function<void(core::LookUpSiteVideoCommand)> lookUp;
+        std::function<void(std::int64_t lookupId)> cancelLookup;
     };
 
     MediaPanelController(BrowserWindows& windows, const Theme& theme, Hooks hooks);
@@ -47,6 +49,9 @@ public:
 
     void OnMedia(BrowserConnectionId connection, browser::MediaFound media) { catalog_.OnMediaFound(connection, std::move(media)); }
     void OnMediaReset(BrowserConnectionId connection, int tabId);
+    void OnSitePage(BrowserConnectionId connection, browser::SitePage page) { catalog_.OnSitePage(connection, std::move(page)); }
+    // A core answer; true when it was one of the panel's site lookups.
+    bool OnSiteLookedUp(const core::SiteLookupFinished& finished) { return catalog_.OnSiteLookedUp(finished); }
     void OnVideoPosition(BrowserConnectionId connection, const browser::VideoPosition& position);
     void OnConnectionClosed(BrowserConnectionId connection);
     // A core answer; true when it was one of the panel's manifest fetches.

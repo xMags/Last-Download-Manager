@@ -172,7 +172,19 @@ struct Cookies {
     std::vector<model::Cookie> cookies;
 };
 
-using Message = std::variant<HostInfo, Hello, Capture, Links, LinkInfo, MediaFound, MediaReset, VideoPosition, Cookies>;
+// The address of a tab's page on a video site LDM supports (video-sites design, section 7), sent
+// when it changes, also without a page load. Only when the config asked for them (sitePages), and
+// only for the sites' own pages: LDM checks the address and builds its own from it.
+struct SitePage {
+    int tabId = 0;
+    bool incognito = false;
+    std::string url;  // http or https
+    std::string pageTitle;
+    std::string userAgent;
+};
+
+using Message = std::variant<HostInfo, Hello, Capture, Links, LinkInfo, MediaFound, MediaReset, VideoPosition, Cookies,
+                             SitePage>;
 
 struct ParsedMessage {
     std::string id;  // echoed in answers
@@ -213,6 +225,9 @@ struct Config {
     model::CaptureKeys keys;
     model::BrowserMenu menu;  // for this browser's family
     MediaRules media;
+    // The extension sends SitePage messages: site videos are on. An LDM that says nothing gets none,
+    // since an unknown message type ends the connection.
+    bool sitePages = false;
 };
 
 [[nodiscard]] std::string EncodeConfig(const Config& config, std::string_view replyTo);
