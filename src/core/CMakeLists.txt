@@ -39,6 +39,11 @@ add_library(ldm_core STATIC
     SiteLookups.cpp
     SiteLookups.h
     SiteResolver.h
+    SiteTools.cpp
+    SiteTools.h
+    ToolInstaller.h
+    ToolUpdates.cpp
+    ToolUpdates.h
     Snapshot.h
     Store.h
     TransferEngine.h

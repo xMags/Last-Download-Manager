@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/ToolUpdates.h"
 #include "core/TransferEngine.h"
 #include "model/Category.h"
 #include "model/ConnectionRules.h"
@@ -72,6 +73,8 @@ struct Snapshot {
     std::int64_t quotaLimitBytes = 0;  // 0: no download quota
     std::int64_t quotaUsedBytes = 0;   // in the current quota period
     std::optional<std::int64_t> quotaEndsAtUnixMs;  // while downloads wait for the quota
+    // yt-dlp and Deno for site videos; Idle with no versions when this build has no installer.
+    SiteToolsView siteTools;
 };
 
 // Answer to AddDownloadCommand.

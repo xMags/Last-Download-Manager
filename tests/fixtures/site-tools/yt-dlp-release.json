@@ -1,0 +1,127 @@
+{
+ "tag_name": "2026.10.21",
+ "draft": false,
+ "prerelease": false,
+ "assets": [
+  {
+   "name": "SHA2-256SUMS",
+   "size": 1595,
+   "browser_download_url": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.21/SHA2-256SUMS"
+  },
+  {
+   "name": "SHA2-256SUMS.sig",
+   "size": 566,
+   "browser_download_url": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.21/SHA2-256SUMS.sig"
+  },
+  {
+   "name": "SHA2-512SUMS",
+   "size": 2811,
+   "browser_download_url": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.21/SHA2-512SUMS"
+  },
+  {
+   "name": "SHA2-512SUMS.sig",
+   "size": 566,
+   "browser_download_url": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.21/SHA2-512SUMS.sig"
+  },
+  {
+   "name": "yt-dlp",
+   "size": 3074818,
+   "browser_download_url": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.21/yt-dlp"
+  },
+  {
+   "name": "yt-dlp.exe",
+   "size": 17880111,
+   "browser_download_url": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.21/yt-dlp.exe"
+  },
+  {
+   "name": "yt-dlp.tar.gz",
+   "size": 6028705,
+   "browser_download_url": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.21/yt-dlp.tar.gz"
+  },
+  {
+   "name": "yt-dlp_arm64.exe",
+   "size": 21695356,
+   "browser_download_url": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.21/yt-dlp_arm64.exe"
+  },
+  {
+   "name": "yt-dlp_linux",
+   "size": 40569080,
+   "browser_download_url": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.21/yt-dlp_linux"
+  },
+  {
+   "name": "yt-dlp_linux.zip",
+   "size": 40639382,
+   "browser_download_url": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.21/yt-dlp_linux.zip"
+  },
+  {
+   "name": "yt-dlp_linux_aarch64",
+   "size": 40281264,
+   "browser_download_url": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.21/yt-dlp_linux_aarch64"
+  },
+  {
+   "name": "yt-dlp_linux_aarch64.zip",
+   "size": 40328850,
+   "browser_download_url": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.21/yt-dlp_linux_aarch64.zip"
+  },
+  {
+   "name": "yt-dlp_linux_armv7l.zip",
+   "size": 38772464,
+   "browser_download_url": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.21/yt-dlp_linux_armv7l.zip"
+  },
+  {
+   "name": "yt-dlp_macos",
+   "size": 37180736,
+   "browser_download_url": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.21/yt-dlp_macos"
+  },
+  {
+   "name": "yt-dlp_macos.zip",
+   "size": 53879210,
+   "browser_download_url": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.21/yt-dlp_macos.zip"
+  },
+  {
+   "name": "yt-dlp_musllinux",
+   "size": 40659256,
+   "browser_download_url": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.21/yt-dlp_musllinux"
+  },
+  {
+   "name": "yt-dlp_musllinux.zip",
+   "size": 40802017,
+   "browser_download_url": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.21/yt-dlp_musllinux.zip"
+  },
+  {
+   "name": "yt-dlp_musllinux_aarch64",
+   "size": 39923576,
+   "browser_download_url": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.21/yt-dlp_musllinux_aarch64"
+  },
+  {
+   "name": "yt-dlp_musllinux_aarch64.zip",
+   "size": 40028067,
+   "browser_download_url": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.21/yt-dlp_musllinux_aarch64.zip"
+  },
+  {
+   "name": "yt-dlp_win.zip",
+   "size": 18127019,
+   "browser_download_url": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.21/yt-dlp_win.zip"
+  },
+  {
+   "name": "yt-dlp_win_arm64.zip",
+   "size": 22022171,
+   "browser_download_url": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.21/yt-dlp_win_arm64.zip"
+  },
+  {
+   "name": "yt-dlp_win_x86.zip",
+   "size": 13303550,
+   "browser_download_url": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.21/yt-dlp_win_x86.zip"
+  },
+  {
+   "name": "yt-dlp_x86.exe",
+   "size": 13230782,
+   "browser_download_url": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.21/yt-dlp_x86.exe"
+  },
+  {
+   "name": "_update_spec",
+   "size": 2191,
+   "browser_download_url": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.21/_update_spec"
+  }
+ ]
+}
