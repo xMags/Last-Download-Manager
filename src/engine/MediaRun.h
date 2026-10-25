@@ -178,6 +178,7 @@ private:
     std::vector<std::unique_ptr<Connection>> connections_;
     std::uint32_t nextFile_ = 1;  // 0 is the run itself
     size_t unpauseRotation_ = 0;
+    int pieceConnections_ = 1;  // of maxConnections, what the pieces may use beside whole-file tracks
 
     std::vector<core::MediaPieceDone> doneSinceReport_;
     TokenBucket bucket_;
