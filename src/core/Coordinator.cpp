@@ -1562,6 +1562,12 @@ void Coordinator::OnRunEnded(Entry& entry, TransferOutcome outcome, const std::o
             Start(entry);
             break;
         }
+        if (failure.reason == FailureReason::InconsistentContent && !entry.syncCheck) {
+            // Still never mixed: which answer was right is unknown, so a later resume starts
+            // over, on one connection, instead of continuing the disputed bytes.
+            entry.forcedMaxConnections = 1;
+            ResetProgress(entry);
+        }
         Fail(entry, failure);
         break;
     }
