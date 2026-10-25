@@ -38,6 +38,12 @@ TEST(QualityList, AVariantThatSaysNothingAboutItsStreamsIsTakenAsVideo)
     ASSERT_EQ(list.entries.size(), 2u);
     EXPECT_EQ(list.entries[0].kind, QualityKind::Video);
     EXPECT_EQ(QualityLabel(list.entries[0]), "Media");
+
+    // A site's file whose type is a video, though it states nothing else (a Kick or Facebook clip).
+    MediaOffer site;
+    site.variants.emplace_back();
+    site.variants[0].mimeType = "video/mp4";
+    EXPECT_EQ(QualityLabel(BuildQualityList(site, std::nullopt).entries[0]), "Video");
     EXPECT_EQ(list.entries[1].kind, QualityKind::AudioOnly) << "codecs that name sound only still mean sound";
 }
 

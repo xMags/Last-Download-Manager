@@ -152,6 +152,7 @@ QualityList BuildQualityList(const MediaOffer& offer, std::optional<double> seco
         entry.videoCodec = VideoCodecFamily(variant.codecs);
         entry.audioCodec = AudioCodecFamily(variant.codecs);
         entry.bitsPerSecond = Rate(variant);
+        entry.statedVideo = variant.mimeType.starts_with("video/");
         if (!HasPicture(variant)) {
             entry.kind = QualityKind::AudioOnly;  // an HLS variant with sound only
             audioOnly.push_back(entry);
@@ -252,7 +253,9 @@ std::string QualityLabel(const QualityEntry& entry)
         add(std::to_string((entry.bitsPerSecond + 500) / 1000) + " kbps");  // no size to tell variants apart
     }
     if (label.empty()) {
-        label = "Media";
+        // Nothing about the picture is known: a site's file (a clip that states no size) is still
+        // known to be a video, a bare HLS playlist not even that.
+        label = entry.statedVideo ? "Video" : "Media";
     }
     return label;
 }
