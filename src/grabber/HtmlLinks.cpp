@@ -110,12 +110,15 @@ private:
     void Push(char c)
     {
         if (text_.size() >= kMaxLinkText) {
-            // Drop a character cut in two at the end.
-            while (!text_.empty() && (static_cast<unsigned char>(text_.back()) & 0xC0) == 0x80) {
-                text_.pop_back();
-            }
-            if (!text_.empty() && static_cast<unsigned char>(text_.back()) >= 0xC0) {
-                text_.pop_back();
+            // Drop a character cut in two at the end: only when the byte that does not fit continues
+            // it. Any other byte means the text ends with a whole character.
+            if ((static_cast<unsigned char>(c) & 0xC0) == 0x80) {
+                while (!text_.empty() && (static_cast<unsigned char>(text_.back()) & 0xC0) == 0x80) {
+                    text_.pop_back();
+                }
+                if (!text_.empty() && static_cast<unsigned char>(text_.back()) >= 0xC0) {
+                    text_.pop_back();
+                }
             }
             full_ = true;
             return;

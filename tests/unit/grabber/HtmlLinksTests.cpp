@@ -88,6 +88,16 @@ TEST(HtmlLinks, CutsLongTextOnACharacterBoundary)
     ASSERT_EQ(links.links.size(), 1u);
     EXPECT_LE(links.links[0].text.size(), ldm::grabber::kMaxLinkText);
     EXPECT_EQ(links.links[0].text.size() % 2, 0u);
+
+    // Text that fills the limit with whole characters keeps all of them.
+    std::string exact = "<a href=y.html>";
+    for (size_t i = 0; i < ldm::grabber::kMaxLinkText / 2; ++i) {
+        exact += "\xC3\xA9";
+    }
+    exact += "x</a>";
+    const PageLinks full = ScanLinks(exact, 10);
+    ASSERT_EQ(full.links.size(), 1u);
+    EXPECT_EQ(full.links[0].text.size(), ldm::grabber::kMaxLinkText);
 }
 
 TEST(HtmlLinks, SkipsCommentsScriptsAndStyles)
