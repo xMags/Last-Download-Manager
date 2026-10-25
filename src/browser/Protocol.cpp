@@ -506,6 +506,34 @@ std::optional<Cookies> ParseCookiesAnswer(const nlohmann::json& object)
     return answer;
 }
 
+std::optional<SitePage> ParseSitePage(const nlohmann::json& object)
+{
+    const auto tabId = BrowserId(object, "tabId");
+    const auto incognito = Boolean(object, "incognito");
+    const auto url = object.find("url");
+    if (!tabId || !incognito || url == object.end() || !url->is_string() || !IsWebAddress(url->get_ref<const std::string&>())) {
+        return std::nullopt;
+    }
+    SitePage page;
+    page.tabId = *tabId;
+    page.incognito = *incognito;
+    page.url = url->get<std::string>();
+    std::optional<std::string> title;
+    const auto plainTitle = [](const std::string& text) {
+        return !text.empty() && text.size() <= kMaxPageTitle && HasNoControlCharacters(text);
+    };
+    if (!OptionalField(object, "pageTitle", plainTitle, title)) {
+        return std::nullopt;
+    }
+    page.pageTitle = title.value_or(std::string());
+    auto userAgent = Text(object, "userAgent", kMaxUserAgent);
+    if (!userAgent || userAgent->empty()) {
+        return std::nullopt;
+    }
+    page.userAgent = std::move(*userAgent);
+    return page;
+}
+
 std::optional<MediaReset> ParseMediaReset(const nlohmann::json& object)
 {
     const auto tabId = BrowserId(object, "tabId");
@@ -625,6 +653,10 @@ std::optional<ParsedMessage> ParseMessage(std::string_view json)
         if (auto media = ParseMediaFound(message)) {
             return ParsedMessage{std::move(id), std::move(*media)};
         }
+    } else if (type == "site-page") {
+        if (auto page = ParseSitePage(message)) {
+            return ParsedMessage{std::move(id), std::move(*page)};
+        }
     } else if (type == "media-reset") {
         if (const auto reset = ParseMediaReset(message)) {
             return ParsedMessage{std::move(id), *reset};
@@ -693,6 +725,7 @@ std::string EncodeConfig(const Config& config, std::string_view replyTo)
                         {"types", config.media.types},
                         {"minimumBytes", config.media.minimumBytes},
                         {"siteExceptions", config.media.siteExceptions}};
+    message["sitePages"] = config.sitePages;
     return message.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
 }
 

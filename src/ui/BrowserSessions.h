@@ -42,6 +42,7 @@ public:
         // Media panel (M3 design section 6), after hello only.
         std::function<void(BrowserConnectionId, browser::MediaFound)> onMedia;
         std::function<void(BrowserConnectionId, int tabId)> onMediaReset;
+        std::function<void(BrowserConnectionId, browser::SitePage)> onSitePage;
         std::function<void(BrowserConnectionId, browser::VideoPosition)> onVideoPosition;
     };
 

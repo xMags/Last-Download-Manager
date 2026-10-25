@@ -46,6 +46,12 @@ struct MediaItem {
     std::optional<double> seconds;           // the stream's length, when known
     media::QualityList qualities;            // what the panel lists for a stream
     std::string failure;                     // why it failed, for the log
+    // A video of a supported site (video-sites design): `url` is its page as core::FindSiteVideo
+    // builds it, and the offer is the site resolver's. Offered while it is looked up and when that
+    // failed too, so the panel can say so; `failure` is then shown.
+    bool siteVideo = false;
+    std::string siteTitle;      // the video's own title, once known
+    std::int64_t lookupId = 0;  // of the LookUpSiteVideoCommand under way or answered
 };
 
 // The media of one tab of one connected browser.
@@ -57,6 +63,9 @@ struct TabMedia {
     bool incognito = false;
     std::string userAgent;
     std::vector<MediaItem> items;
+    // Set while the tab shows a video of a supported site: its page as core::FindSiteVideo builds
+    // it. The tab's items are then that video alone; what its player loads is parts of it.
+    std::optional<std::string> sitePage;
 };
 
 // What each tab of each browser offers for the media panel (M3 design section 6). UI thread only.
@@ -71,6 +80,9 @@ public:
         // Reads an MPD into its element tree (platform::ReadXml in LDM).
         std::function<base::Result<media::XmlElement>(std::string_view)> readXml;
         std::function<std::chrono::system_clock::time_point()> now;
+        // Asks the core what a site video page offers, and calls the question off.
+        std::function<void(core::LookUpSiteVideoCommand)> lookUp;
+        std::function<void(std::int64_t lookupId)> cancelLookup;
     };
 
     // A page that reports more than this is not one the panel can present sensibly.
@@ -80,6 +92,11 @@ public:
 
     void OnMediaFound(BrowserConnectionId connection, browser::MediaFound media);
     void OnReset(BrowserConnectionId connection, int tabId);
+    // A tab's page on a supported video site: a new video replaces the tab's offer and is looked
+    // up; any other page of the site ends the offer.
+    void OnSitePage(BrowserConnectionId connection, browser::SitePage page);
+    // The core's answer to a lookup; true when it was one of this catalog's.
+    bool OnSiteLookedUp(const core::SiteLookupFinished& finished);
     void OnConnectionClosed(BrowserConnectionId connection);
     // An answer of the core; true when it was one of this catalog's fetches.
     bool OnFetched(const core::FetchFinished& fetched);
@@ -109,12 +126,17 @@ private:
     void ReadManifest(TabMedia& tab, MediaItem& item, const core::FetchFinished& fetched);
     void ReadLength(MediaItem& item, const core::FetchFinished& fetched);
     [[nodiscard]] MediaItem* FindItem(TabMedia& tab, std::int64_t key);
+    // Ends the tab's site video, calling its lookup off.
+    void DropSiteVideo(TabMedia& tab);
+    void CancelLookups(const TabMedia& tab);
 
     Hooks hooks_;
     std::map<TabKey, TabMedia> tabs_;
     std::map<std::int64_t, PendingFetch> fetches_;  // by fetch id
     std::int64_t lastKey_ = 0;
     std::int64_t lastFetchId_ = 0;
+    std::map<std::int64_t, TabKey> lookups_;  // site lookups under way, by id
+    std::int64_t lastLookupId_ = 0;
 };
 
 }  // namespace ldm::ui

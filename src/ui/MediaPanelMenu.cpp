@@ -25,6 +25,9 @@ std::wstring WithSize(std::wstring text, std::optional<std::int64_t> bytes, bool
 
 std::wstring KindName(const MediaItem& item)
 {
+    if (item.siteVideo) {
+        return L"Video";
+    }
     if (item.kind == browser::MediaKind::File) {
         const auto url = core::ParseUrl(item.url);
         std::string type = url ? core::FileExtension(core::FileNameFromUrlPath(url->path)) : std::string();
@@ -72,6 +75,14 @@ std::wstring DrmText(const media::DrmInfo& drm)
 std::vector<PanelMenuItem> StreamLines(const MediaItem& item)
 {
     std::vector<PanelMenuItem> lines;
+    if (item.siteVideo && item.state == MediaItem::State::Fetching) {
+        lines.push_back(Notice(L"Finding qualities..."));
+        return lines;
+    }
+    if (item.siteVideo && item.state == MediaItem::State::Failed) {
+        lines.push_back(Notice(base::ToUtf16(item.failure)));
+        return lines;
+    }
     if (item.qualities.drm) {
         lines.push_back(Notice(DrmText(*item.qualities.drm)));
         return lines;
