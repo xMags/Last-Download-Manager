@@ -529,6 +529,13 @@ bool Transfer::AcceptFirstResponse(Connection& connection, Segment& segment)
         bool rangesPossible = false;
         bool resumable = false;
         if (http_) {
+            if (headers.status == 206 && !(headers.contentRange && headers.contentRange->total)) {
+                // A part of the file without the file's length: its Content-Length is the part's,
+                // and taking it as the whole would end the download early (a capped first request).
+                connection.failure = MakeFailure(FailureReason::Protocol, FailureClass::Fatal,
+                                                 "the server sent part of the file without saying how long the file is");
+                return false;
+            }
             const bool encoded = headers.HasContentEncoding();
             if (!encoded) {
                 size = headers.status == 206 && headers.contentRange ? headers.contentRange->total : headers.contentLength;
