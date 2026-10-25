@@ -28,6 +28,8 @@ add_library(ldm_core STATIC
     Quota.cpp
     Quota.h
     Ports.h
+    QualityTracks.cpp
+    QualityTracks.h
     QueueRunner.cpp
     QueueRunner.h
     Scheduler.cpp

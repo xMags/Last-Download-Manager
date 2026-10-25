@@ -635,6 +635,27 @@ TEST(SqliteStore, SiteVideoKeepsItsFlagAndTrackFormatsAcrossUpdates)
     }
 }
 
+TEST(SqliteStore, ASiteVideoFromAListKeepsItsQualityRule)
+{
+    SqliteStore store = OpenMemoryStore();
+    Download original = SampleDownload("listed");
+    original.kind = ldm::model::DownloadKind::Dash;
+    original.siteVideo = true;
+    original.siteQuality = ldm::model::SiteQuality::UpTo720;
+    original.url = "https://www.youtube.com/watch?v=GvgqDSnpRQM";
+    ASSERT_TRUE(store.InsertDownload(original).Ok());
+    Download d = store.LoadDownloads().Value().front();
+    EXPECT_EQ(d.siteQuality, ldm::model::SiteQuality::UpTo720);
+    EXPECT_TRUE(d.tracks.empty());
+
+    d.siteQuality = ldm::model::SiteQuality::AudioOnly;
+    ASSERT_TRUE(store.SaveDownload(d).Ok());
+    EXPECT_EQ(store.LoadDownloads().Value().front().siteQuality, ldm::model::SiteQuality::AudioOnly);
+    d.siteQuality.reset();
+    ASSERT_TRUE(store.SaveDownload(d).Ok());
+    EXPECT_FALSE(store.LoadDownloads().Value().front().siteQuality);
+}
+
 TEST(SqliteStore, StreamProgressIsWrittenPieceByPiece)
 {
     SqliteStore store = OpenMemoryStore();

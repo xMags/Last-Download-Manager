@@ -8,6 +8,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <variant>
 #include <vector>
 
 // A video page of a site the resolver (yt-dlp, run by platform/win) reads, as it described it in
@@ -53,5 +54,33 @@ struct SiteVideo {
 // started yet, a video with nothing LDM can download (protected, or only kinds of formats it does not take), and for
 // anything that is not a well-formed answer.
 [[nodiscard]] base::Result<SiteVideo> ParseSiteVideo(std::string_view json);
+
+// The most videos LDM lists of one page.
+inline constexpr size_t kMaxSitePlaylistEntries = 5000;
+
+// One video of a playlist, a channel or a page with several videos.
+struct SitePlaylistEntry {
+    std::string url;    // its page, to ask the resolver about; may be empty for a video given in full
+    std::string title;  // may be empty
+    std::optional<double> seconds;
+    std::string group;  // the list inside the page it is in (a channel's "Videos", "Shorts"); may be empty
+    // The video in full, when the page gave it so (the videos of an ordinary page): there is no
+    // page of its own to ask about.
+    std::optional<SiteVideo> video;
+};
+
+struct SitePlaylist {
+    std::string id;
+    std::string title;
+    std::vector<SitePlaylistEntry> entries;  // in the page's order; at least one
+    bool truncated = false;                  // the page listed more than kMaxSitePlaylistEntries
+};
+
+using SiteAnswer = std::variant<SiteVideo, SitePlaylist>;
+
+// Reads an answer that is one video or a list of them (a playlist, a channel and its tabs, a page
+// with several videos), as yt-dlp lists them without asking about each video. Fails as
+// ParseSiteVideo does, and for a list without one video LDM can download.
+[[nodiscard]] base::Result<SiteAnswer> ParseSiteAnswer(std::string_view json);
 
 }  // namespace ldm::media

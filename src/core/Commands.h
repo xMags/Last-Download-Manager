@@ -68,6 +68,9 @@ struct MediaChoice {
     // piece-list tracks, or an Hls stream of playlists, each track with its format; the command's
     // `url` is the video's page.
     bool siteVideo = false;
+    // A site video added from a list (model::Download::siteQuality): no tracks yet; it picks them
+    // this way when it first starts.
+    std::optional<model::SiteQuality> siteQuality;
     std::vector<MediaTrackChoice> tracks;
     std::optional<std::int64_t> approximateBytes;  // shown until the stream's size is known
 };

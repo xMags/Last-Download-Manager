@@ -90,6 +90,9 @@ public:
     void AddSiteVideo(browser::SiteRequest request);
     // The site resolver's answer for the open Download video dialog; false when it is not its.
     bool OnSiteLookedUp(const core::SiteLookupFinished& finished);
+    // The videos of a page that lists several (video-sites round 2, section 2.4): the checked ones
+    // are added, each picking its quality by the chosen rule when it first starts.
+    void AddSitePlaylist(const media::SitePlaylist& playlist, const browser::SiteRequest& request);
     // Adds every entry stopped, without questions: duplicates get numbered names (checklist A-11).
     void AddImported(const std::vector<ImportedEntry>& entries);
     void AddBatch();

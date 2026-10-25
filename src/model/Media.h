@@ -32,6 +32,21 @@ enum class TrackRole {
 [[nodiscard]] std::string_view ToString(TrackRole role) noexcept;
 [[nodiscard]] std::optional<TrackRole> ParseTrackRole(std::string_view text) noexcept;
 
+// How a site video added from a list (a playlist, a channel) picks its quality when it first
+// starts: the best picture, the best up to a height, or sound only (video-sites round 2, 2.4).
+enum class SiteQuality {
+    Best,
+    UpTo2160,
+    UpTo1440,
+    UpTo1080,
+    UpTo720,
+    UpTo480,
+    AudioOnly,
+};
+
+[[nodiscard]] std::string_view ToString(SiteQuality quality) noexcept;
+[[nodiscard]] std::optional<SiteQuality> ParseSiteQuality(std::string_view text) noexcept;
+
 using AesKey = std::array<std::uint8_t, 16>;
 
 // An AES-128 key: an address to fetch the 16 bytes from, or the bytes a playlist embedded.

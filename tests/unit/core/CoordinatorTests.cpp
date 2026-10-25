@@ -1206,6 +1206,71 @@ TEST_F(SiteRefreshTest, AFormatThatIsGoneFailsWithTheReason)
     EXPECT_NE(view.download.lastResult->find("no longer offers"), std::string::npos) << *view.download.lastResult;
 }
 
+TEST_F(SiteRefreshTest, AVideoFromAListPicksItsQualityWhenItFirstStarts)
+{
+    const AddResult result = Add("https://www.youtube.com/watch?v=GvgqDSnpRQM", AddMode::Later, [](AddDownloadCommand& c) {
+        c.fileName = "Andrew.mp4";
+        ldm::core::MediaChoice media;
+        media.siteVideo = true;
+        media.siteQuality = ldm::model::SiteQuality::UpTo720;
+        c.media = media;
+    });
+    ASSERT_TRUE(result.id) << result.error.value_or("");
+    const DownloadId id = *result.id;
+    auto stored = Stored(id);
+    ASSERT_TRUE(stored);
+    EXPECT_TRUE(stored->tracks.empty()) << "nothing is asked before it starts";
+    EXPECT_EQ(stored->siteQuality, ldm::model::SiteQuality::UpTo720);
+    EXPECT_TRUE(sites_.asked.empty());
+
+    coordinator_->Handle(ldm::core::ResumeCommand{{id}});
+    ASSERT_EQ(sites_.asked.size(), 1u);
+    EXPECT_EQ(sites_.asked[0].pageUrl, "https://www.youtube.com/watch?v=GvgqDSnpRQM");
+    EXPECT_TRUE(engine_.mediaStarts.empty());
+
+    ldm::core::SiteLookupFinished finished;
+    finished.lookupId = sites_.asked.back().lookupId;
+    ldm::media::SiteVideo video;
+    video.id = "GvgqDSnpRQM";
+    video.offer.format = ldm::media::StreamFormat::Hls;
+    for (const auto& [format, height] : {std::pair{"137", 1080}, std::pair{"136", 720}}) {
+        ldm::media::Variant variant;
+        variant.resolution = ldm::media::Resolution{height * 16 / 9, height};
+        variant.codecs = "avc1.640028";
+        variant.audioGroup = "file";
+        ldm::media::TrackSegments whole;
+        ldm::media::Segment segment;
+        segment.url = Address(format, 21'600);
+        whole.segments.push_back(segment);
+        variant.source = whole;
+        variant.site = ldm::media::SiteFormat{format, std::nullopt};
+        video.offer.variants.push_back(variant);
+    }
+    ldm::media::Rendition audio;
+    audio.groupId = "file";
+    audio.isDefault = true;
+    audio.codecs = "mp4a.40.2";
+    ldm::media::TrackSegments whole;
+    ldm::media::Segment segment;
+    segment.url = Address("140", 21'600);
+    whole.segments.push_back(segment);
+    audio.source = whole;
+    audio.site = ldm::media::SiteFormat{"140", std::nullopt};
+    video.offer.audio.push_back(audio);
+    finished.video = video;
+    Send(ldm::core::SiteLookupKey(finished.lookupId), 0, finished);
+
+    ASSERT_EQ(engine_.mediaStarts.size(), 1u);
+    ASSERT_EQ(engine_.mediaStarts[0].tracks.size(), 2u);
+    EXPECT_EQ(engine_.mediaStarts[0].tracks[0].url, Address("136", 21'600)) << "the best picture up to 720p";
+    EXPECT_EQ(engine_.mediaStarts[0].tracks[1].url, Address("140", 21'600));
+    stored = Stored(id);
+    ASSERT_TRUE(stored);
+    ASSERT_EQ(stored->tracks.size(), 2u);
+    EXPECT_EQ(stored->tracks[0].siteFormat, "136");
+    EXPECT_EQ(stored->kind, ldm::model::DownloadKind::Dash);
+}
+
 TEST_F(SiteRefreshTest, ARefusedHlsTrackReadsItsFreshPlaylistAndKeepsThePiecesOnDisk)
 {
     const AddResult result = Add("https://www.youtube.com/watch?v=aqz-KE-bpKQ", AddMode::StartNow, [](AddDownloadCommand& c) {
