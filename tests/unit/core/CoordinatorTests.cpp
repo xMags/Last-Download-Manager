@@ -109,6 +109,10 @@ public:
         Put(path, static_cast<std::int64_t>(bytes.size()));
         return {};
     }
+    ldm::base::Result<std::string> ReadFile(const fs::path&, std::size_t) override
+    {
+        return ldm::base::MakeError(ldm::base::ErrorCode::NotFound, "the fake keeps sizes only");
+    }
 
     void Put(const fs::path& path, std::int64_t size) { files[ldm::base::PathComparisonKey(path)] = size; }
 

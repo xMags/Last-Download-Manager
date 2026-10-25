@@ -53,6 +53,7 @@ struct ExplorerConfig {
     int maxFileAttempts = 2;  // the reference's two attempts per file
     // Pages to save are kept until exploring ends, up to this many bytes per project.
     std::size_t maxPendingPageBytes = 256 * 1024 * 1024;
+    std::size_t maxSavedPageBytes = 64 * 1024 * 1024;  // a saved page longer than this is not updated
     std::chrono::milliseconds snapshotInterval{500};
     std::chrono::milliseconds saveInterval{2000};
 };
@@ -176,6 +177,18 @@ private:
     void AddLink(Project& project, const Item& parent, const HtmlLink& link, const std::string& base);
     void ClassifyFile(Project& project, Item& item, std::optional<std::int64_t> size);
     void WritePage(Project& project, const PendingPage& page);
+    // Where `target`, the item at `url`, is saved below `root`: a page that was read, or a file
+    // that was downloaded there. Nothing while it has no copy there.
+    [[nodiscard]] std::optional<std::string> SavedCopy(const Project& project, const std::filesystem::path& root,
+                                                       const Item* target, const core::Url& url) const;
+    // Where a page saved at `pagePath` (below `root`) links to `target`, the item at `url` and
+    // web `address`: its saved copy once there is one, else the web address.
+    [[nodiscard]] std::string SavedLinkTarget(const Project& project, const std::filesystem::path& root,
+                                              const std::string& pagePath, const Item* target, const core::Url& url,
+                                              const std::string& address) const;
+    // Once a project's downloads ended: its saved pages link to the files that arrived, and back
+    // to the web for those that did not (checklist G-02).
+    void RelinkSavedPages(Project& project);
     void WritePendingPages(Project& project);
     void FinishExploreIfDone(Project& project);
 

@@ -177,6 +177,45 @@ base::Status WinFileSystem::WriteFile(const std::filesystem::path& path, std::st
     return {};
 }
 
+base::Result<std::string> WinFileSystem::ReadFile(const std::filesystem::path& path, std::size_t maxBytes)
+{
+    const std::wstring filePath = base::ToExtendedLengthPath(path);
+    HANDLE file = ::CreateFileW(filePath.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
+                                FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE) {
+        const DWORD error = ::GetLastError();
+        return base::MakeError(error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND ? base::ErrorCode::NotFound
+                                                                                              : base::ErrorCode::Io,
+                               Win32ErrorText(error));
+    }
+    LARGE_INTEGER size{};
+    if (!::GetFileSizeEx(file, &size)) {
+        const DWORD error = ::GetLastError();
+        ::CloseHandle(file);
+        return base::MakeError(base::ErrorCode::Io, Win32ErrorText(error));
+    }
+    if (size.QuadPart < 0 || static_cast<std::uint64_t>(size.QuadPart) > maxBytes) {
+        ::CloseHandle(file);
+        return base::MakeError(base::ErrorCode::Io, "the file is too large");
+    }
+    std::string bytes(static_cast<std::size_t>(size.QuadPart), '\0');
+    std::size_t read = 0;
+    bool ok = true;
+    while (ok && read < bytes.size()) {
+        const DWORD chunk = static_cast<DWORD>(std::min<std::size_t>(bytes.size() - read, 1u << 20));
+        DWORD done = 0;
+        ok = ::ReadFile(file, bytes.data() + read, chunk, &done, nullptr) != FALSE && done > 0;
+        read += done;
+    }
+    const DWORD readError = ok ? ERROR_SUCCESS : ::GetLastError();
+    ::CloseHandle(file);
+    if (!ok) {
+        return base::MakeError(base::ErrorCode::Io, readError == ERROR_SUCCESS ? "the file got shorter while it was read"
+                                                                                : Win32ErrorText(readError));
+    }
+    return bytes;
+}
+
 std::string RandomIdGenerator::NewPublicId()
 {
     std::array<unsigned char, 16> bytes{};

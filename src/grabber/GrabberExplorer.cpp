@@ -882,17 +882,8 @@ void GrabberExplorer::WritePage(Project& project, const PendingPage& page)
             const std::string key = definition.files.hideDuplicates ? NormalizeAddress(*url) : *resolved;
             const auto found = project.byAddress.find(key);
             const Item* target = found == project.byAddress.end() ? nullptr : FindItem(project, found->second);
-            const bool savedHere = target != nullptr &&
-                                   ((target->data.kind == model::GrabberItemKind::Page && target->readThisRun) ||
-                                    (target->data.kind == model::GrabberItemKind::File && target->data.checked));
-            std::string reference;
-            if (savedHere) {
-                const bool targetIsPage = target->data.kind == model::GrabberItemKind::Page;
-                reference = RelativeReference(pagePath, LocalRelativePath(*url, targetIsPage, definition.keepSiteFolders));
-            } else {
-                reference = AttributeSafeAddress(*resolved);
-            }
-            replacements.push_back(LinkReplacement{link.begin, link.end, std::move(reference)});
+            replacements.push_back(
+                LinkReplacement{link.begin, link.end, SavedLinkTarget(project, *root, pagePath, target, *url, *resolved)});
         }
         if (page.baseHrefRange) {
             // The converted links are relative to the saved copy or absolute; a <base> naming the
@@ -915,6 +906,128 @@ void GrabberExplorer::WritePage(Project& project, const PendingPage& page)
     if (Item* saved = FindItem(project, page.itemId)) {
         saved->data.localPath = PathToUtf8(target);
         Changed(project, *saved);
+    }
+}
+
+namespace {
+
+// `path` below `root` with '/' separators, as LocalRelativePath gives it; nothing when it is not
+// below `root`.
+std::optional<std::string> BelowFolder(const std::filesystem::path& root, const std::string& path)
+{
+    const std::filesystem::path relative = PathFromUtf8(path).lexically_relative(root);
+    std::string inFolder = PathToUtf8(relative);
+    std::replace(inFolder.begin(), inFolder.end(), '\\', '/');
+    if (relative.empty() || inFolder.starts_with("..")) {
+        return std::nullopt;
+    }
+    return inFolder;
+}
+
+}  // namespace
+
+std::optional<std::string> GrabberExplorer::SavedCopy(const Project& project, const std::filesystem::path& root,
+                                                      const Item* target, const core::Url& url) const
+{
+    if (target == nullptr || target->data.state != model::GrabberItemState::Done) {
+        return std::nullopt;
+    }
+    // A page that was read: queued is not enough, it may fail, or a stop or the page limit may
+    // come first.
+    if (target->data.kind == model::GrabberItemKind::Page) {
+        return LocalRelativePath(url, true, project.stored.definition.keepSiteFolders);
+    }
+    // A file once it is downloaded below the save folder, under whatever name it got.
+    if (target->data.localPath.empty()) {
+        return std::nullopt;
+    }
+    return BelowFolder(root, target->data.localPath);
+}
+
+std::string GrabberExplorer::SavedLinkTarget(const Project& project, const std::filesystem::path& root,
+                                             const std::string& pagePath, const Item* target, const core::Url& url,
+                                             const std::string& address) const
+{
+    if (const auto copy = SavedCopy(project, root, target, url)) {
+        return RelativeReference(pagePath, *copy);
+    }
+    return AttributeSafeAddress(address);  // the rest stay on the web
+}
+
+void GrabberExplorer::RelinkSavedPages(Project& project)
+{
+    const model::GrabberProjectDefinition& definition = project.stored.definition;
+    const auto root = SaveRoot(project);
+    if (!definition.savePages || !definition.convertLinks || !root) {
+        return;
+    }
+    // Where each item's link in a saved page points, to find the item again: its planned place,
+    // and a downloaded file's actual one.
+    std::map<std::string, std::int64_t, std::less<>> byLocalPath;
+    for (const Item& item : project.items) {
+        const auto url = core::ParseUrl(item.data.url);
+        if (!url) {
+            continue;
+        }
+        const bool page = item.data.kind == model::GrabberItemKind::Page;
+        byLocalPath.emplace(LocalRelativePath(*url, page, definition.keepSiteFolders), item.data.id);
+        if (!page && !item.data.localPath.empty()) {
+            if (const auto inFolder = BelowFolder(*root, item.data.localPath)) {
+                byLocalPath.insert_or_assign(*inFolder, item.data.id);
+            }
+        }
+    }
+    for (const Item& item : project.items) {
+        if (item.data.kind != model::GrabberItemKind::Page || item.data.localPath.empty()) {
+            continue;
+        }
+        const auto pageUrl = core::ParseUrl(item.data.url);
+        if (!pageUrl) {
+            continue;
+        }
+        const std::string pagePath = LocalRelativePath(*pageUrl, true, definition.keepSiteFolders);
+        const std::filesystem::path file = *root / PathFromUtf8(pagePath);
+        auto body = ports_.fileSystem->ReadFile(file, config_.maxSavedPageBytes);
+        if (!body) {
+            continue;  // moved or deleted by the user meanwhile
+        }
+        const std::string& html = body.Value();
+        std::vector<LinkReplacement> replacements;
+        for (const HtmlLink& link : ScanLinks(html, config_.maxLinksPerPage).links) {
+            // A link is the item's address when it stayed on the web, else a path to its copy.
+            const Item* target = nullptr;
+            std::optional<core::Url> url = core::ParseUrl(link.address);
+            const bool onWeb = url.has_value();
+            if (onWeb) {
+                const std::string key = definition.files.hideDuplicates ? NormalizeAddress(*url) : link.address;
+                if (const auto found = project.byAddress.find(key); found != project.byAddress.end()) {
+                    target = FindItem(project, found->second);
+                }
+            } else if (const auto local = ResolveLocalReference(pagePath, link.address)) {
+                if (const auto found = byLocalPath.find(*local); found != byLocalPath.end()) {
+                    target = FindItem(project, found->second);
+                    url = target != nullptr ? core::ParseUrl(target->data.url) : std::nullopt;
+                }
+            }
+            if (target == nullptr || !url) {
+                continue;  // nothing this project knows: as written
+            }
+            const auto copy = SavedCopy(project, *root, target, *url);
+            if (onWeb && !copy) {
+                continue;  // still on the web, as written
+            }
+            std::string reference = copy ? RelativeReference(pagePath, *copy) : AttributeSafeAddress(target->data.url);
+            if (reference != std::string_view(html).substr(link.begin, link.end - link.begin)) {
+                replacements.push_back(LinkReplacement{link.begin, link.end, std::move(reference)});
+            }
+        }
+        if (replacements.empty()) {
+            continue;
+        }
+        if (base::Status written = ports_.fileSystem->WriteFile(file, RewriteLinks(html, std::move(replacements)), true);
+            !written) {
+            ReportError("A saved page could not be updated: " + written.GetError().message);
+        }
     }
 }
 
@@ -1180,6 +1293,7 @@ void GrabberExplorer::FinishDownloadsIfDone(Project& project)
     }
     project.downloading = false;
     project.seenRunning.clear();
+    RelinkSavedPages(project);
     SaveItems(project);
     ports_.observer->OnGrabberNotification(
         GrabberRunFinished{project.stored.id, project.stored.name, false, project.scheduledRun});
