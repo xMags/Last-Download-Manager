@@ -121,8 +121,8 @@ std::vector<std::wstring> YtDlpArguments(const YtDlpTools& tools, const core::Si
     return arguments;
 }
 
-YtDlpResolver::YtDlpResolver(YtDlpTools tools, core::EngineListener& listener)
-    : tools_(std::move(tools)), listener_(listener)
+YtDlpResolver::YtDlpResolver(YtDlpTools tools, core::EngineListener& listener, std::shared_mutex* toolsLock)
+    : tools_(std::move(tools)), listener_(listener), toolsLock_(toolsLock)
 {
     for (int i = 0; i < kWorkers; ++i) {
         workers_.emplace_back([this] { RunWorker(); });
@@ -215,6 +215,10 @@ void YtDlpResolver::RunWorker()
 
 core::SiteLookupFinished YtDlpResolver::LookUp(const core::SiteLookupRequest& request, HANDLE stop) const
 {
+    std::shared_lock<std::shared_mutex> inUse;
+    if (toolsLock_ != nullptr) {
+        inUse = std::shared_lock(*toolsLock_);
+    }
     if (!IsFile(tools_.ytDlp) || !IsFile(tools_.deno)) {
         return Failure(Problem::ToolsMissing, "The components for downloading videos from sites are not installed.");
     }

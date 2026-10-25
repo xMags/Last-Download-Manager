@@ -10,6 +10,9 @@
 #include "platform/win/XmlLiteReader.h"
 #include "platform/win/BrowserHostRegistration.h"
 #include "platform/win/FfmpegMediaTools.h"
+#include "platform/win/SiteToolsFolder.h"
+#include "platform/win/WinToolInstaller.h"
+#include "platform/win/YtDlpResolver.h"
 #include "platform/win/InstanceChannel.h"
 #include "platform/win/SystemPorts.h"
 #include "platform/win/RunKeyStartup.h"
@@ -204,6 +207,11 @@ int WINAPI wWinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int sho
     auto engine = std::make_unique<ldm::engine::CurlEngine>(core);
     // ffmpeg.exe and ffprobe.exe ship next to ldm.exe; joins answer through the core thread.
     ldm::platform::FfmpegMediaTools mediaTools(ProgramFolder(), core);
+    // yt-dlp and Deno for site videos live in the profile, downloaded when the user turns the
+    // feature on; lookups and installs answer through the core thread.
+    ldm::platform::SiteToolsFolder siteTools(dataFolder / L"tools", ProgramFolder());
+    ldm::platform::YtDlpResolver siteResolver(siteTools.ResolverTools(), core, &siteTools.Lock());
+    ldm::platform::WinToolInstaller toolInstaller(siteTools, core);
 
     // The Site Grabber runs on the core thread beside the coordinator (M4 design section 6.2) and
     // sees the coordinator's output first, taking what belongs to its own downloads.
@@ -234,6 +242,8 @@ int WINAPI wWinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int sho
     ports.media = &mediaTools;
     ports.timeZone = &timeZone;
     ports.wakeTimer = &wakeTimer;
+    ports.sites = &siteResolver;
+    ports.tools = &toolInstaller;
     ldm::core::CoordinatorConfig config;
     config.downloadsFolder = *downloads;
     // The update check (checklist X-05) asks the repository the README links, only when the user

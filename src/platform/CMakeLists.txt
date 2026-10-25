@@ -21,6 +21,8 @@ add_library(ldm_platform STATIC
     win/InstanceChannel.h
     win/RunKeyStartup.cpp
     win/RunKeyStartup.h
+    win/SiteToolsFolder.cpp
+    win/SiteToolsFolder.h
     win/SystemPorts.cpp
     win/SystemPorts.h
     win/WinHttpProxyResolver.cpp
@@ -31,6 +33,8 @@ add_library(ldm_platform STATIC
     win/WinShellActions.h
     win/WinSystemActions.cpp
     win/WinSystemActions.h
+    win/WinToolInstaller.cpp
+    win/WinToolInstaller.h
     win/XmlLiteReader.cpp
     win/XmlLiteReader.h
     win/YtDlpResolver.cpp
