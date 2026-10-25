@@ -136,6 +136,14 @@ public:
         written[path.generic_string()] = std::string(bytes);
         return {};
     }
+    ldm::base::Result<std::string> ReadFile(const fs::path& path, std::size_t maxBytes) override
+    {
+        const auto found = written.find(path.generic_string());
+        if (found == written.end() || found->second.size() > maxBytes) {
+            return ldm::base::MakeError(ldm::base::ErrorCode::NotFound, "no such file");
+        }
+        return found->second;
+    }
     std::map<std::string, std::string> written;
 };
 
@@ -657,7 +665,8 @@ TEST_F(GrabberExplorerTest, StopsItsDownloads)
 TEST_F(GrabberExplorerTest, SavesPagesForOfflineBrowsing)
 {
     Start();
-    Page("https://example.com/", R"(<a href="docs/a.html">A</a><img src="img/logo.png"><a href="https://other.com/x">X</a>)");
+    Page("https://example.com/", R"(<a href="docs/a.html">A</a><img src="img/logo.png"><a href="https://other.com/x">X</a>)"
+                                 R"(<a href="gone.html">Gone</a>)");
     Page("https://example.com/docs/a.html", R"(<a href="../">Home</a><img src="../img/logo.png">)");
     auto definition = ldm::grabber::ApplyTemplate(Definition("https://example.com/"), ldm::model::GrabberTemplate::WholeSite);
     definition.saveMode = ldm::model::GrabberSaveMode::OneFolder;
@@ -666,17 +675,74 @@ TEST_F(GrabberExplorerTest, SavesPagesForOfflineBrowsing)
     explorer_->Handle(ldm::core::GrabberExploreCommand{id, false, {}});
     Serve();
 
+    // Saved pages link to the saved pages; a page that could not be read, and the picture that is
+    // not downloaded yet, stay on the web.
     ASSERT_EQ(files_.written.size(), 2u);
-    const std::string start = files_.written.at("C:/Mirror/example.com/index.html");
-    EXPECT_EQ(start, R"(<a href="docs/a.html">A</a><img src="img/logo.png"><a href="https://other.com/x">X</a>)");
-    const std::string page = files_.written.at("C:/Mirror/example.com/docs/a.html");
-    EXPECT_EQ(page, R"(<a href="../index.html">Home</a><img src="../img/logo.png">)");
+    EXPECT_EQ(files_.written.at("C:/Mirror/example.com/index.html"),
+              R"(<a href="docs/a.html">A</a><img src="https://example.com/img/logo.png"><a href="https://other.com/x">X</a>)"
+              R"(<a href="https://example.com/gone.html">Gone</a>)");
+    EXPECT_EQ(files_.written.at("C:/Mirror/example.com/docs/a.html"),
+              R"(<a href="../index.html">Home</a><img src="https://example.com/img/logo.png">)");
 
     explorer_->Handle(ldm::core::GrabberDownloadCommand{id});
     const auto adds = sink_.All<ldm::core::AddDownloadCommand>();
     ASSERT_EQ(adds.size(), 1u);
     EXPECT_EQ(adds[0].saveDir, "C:\\Mirror\\example.com\\img");
     EXPECT_EQ(adds[0].fileName, "logo.png");
+
+    // Once it is downloaded, the pages link to it.
+    Complete(adds[0].token, 100);
+    ldm::core::DownloadCompleted done;
+    done.id = DownloadId{100};
+    done.finalPath = "C:\\Mirror\\example.com\\img\\logo.png";
+    done.inMainList = false;
+    EXPECT_TRUE(explorer_->TakeNotification(done));
+    EXPECT_EQ(files_.written.at("C:/Mirror/example.com/index.html"),
+              R"(<a href="docs/a.html">A</a><img src="img/logo.png"><a href="https://other.com/x">X</a>)"
+              R"(<a href="https://example.com/gone.html">Gone</a>)");
+    EXPECT_EQ(files_.written.at("C:/Mirror/example.com/docs/a.html"), R"(<a href="../index.html">Home</a><img src="../img/logo.png">)");
+}
+
+TEST_F(GrabberExplorerTest, ASavedPageLinksToAFileThatFailedOnTheWeb)
+{
+    Start();
+    Page("https://example.com/", R"(<img src="a.png"><img src="b.png">)");
+    auto definition = ldm::grabber::ApplyTemplate(Definition("https://example.com/"), ldm::model::GrabberTemplate::WholeSite);
+    definition.saveMode = ldm::model::GrabberSaveMode::OneFolder;
+    definition.folder = "C:\\Mirror";
+    const GrabberProjectId id = Save(definition);
+    explorer_->Handle(ldm::core::GrabberExploreCommand{id, false, {}});
+    Serve();
+    explorer_->Handle(ldm::core::GrabberDownloadCommand{id});
+    const auto adds = sink_.All<ldm::core::AddDownloadCommand>();
+    ASSERT_EQ(adds.size(), 2u);
+    Complete(adds[0].token, 100);
+    Complete(adds[1].token, 101);
+    auto core = std::make_shared<ldm::core::Snapshot>(*core_);
+    for (const std::int64_t downloadId : {100, 101}) {
+        auto view = std::make_shared<ldm::core::DownloadView>();
+        view->download.id = DownloadId{downloadId};
+        view->download.projectId = id;
+        view->download.listed = false;
+        view->download.status = ldm::model::DownloadStatus::Downloading;
+        core->downloads.push_back(view);
+    }
+    explorer_->OnCoreSnapshot(core);
+
+    ldm::core::DownloadCompleted done;
+    done.id = DownloadId{100};
+    done.finalPath = "C:\\Mirror\\example.com\\a (2).png";  // renamed on the way: its real name counts
+    done.inMainList = false;
+    EXPECT_TRUE(explorer_->TakeNotification(done));
+    ldm::core::DownloadFailed failed;
+    failed.id = DownloadId{101};
+    failed.inMainList = false;
+    for (int attempt = 0; attempt < 5 && View(id)->downloading; ++attempt) {
+        EXPECT_TRUE(explorer_->TakeNotification(failed));
+    }
+    ASSERT_FALSE(View(id)->downloading);
+    EXPECT_EQ(files_.written.at("C:/Mirror/example.com/index.html"),
+              R"(<img src="a%20%282%29.png"><img src="https://example.com/b.png">)");
 }
 
 TEST_F(GrabberExplorerTest, AnOfflineCopyKeepsAFileItAlreadyHas)

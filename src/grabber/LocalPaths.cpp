@@ -168,6 +168,36 @@ std::string RelativeReference(std::string_view fromPath, std::string_view toPath
     return reference;
 }
 
+std::optional<std::string> ResolveLocalReference(std::string_view fromPath, std::string_view reference)
+{
+    if (reference.empty() || reference.front() == '/' || reference.find_first_of(":?#") != std::string_view::npos) {
+        return std::nullopt;
+    }
+    std::vector<std::string> path;
+    const std::vector<std::string_view> from = Split(fromPath, '/');
+    for (std::size_t i = 0; i + 1 < from.size(); ++i) {  // the page's folder, without its name
+        path.emplace_back(from[i]);
+    }
+    for (const std::string_view part : Split(reference, '/')) {
+        if (part == "..") {
+            if (path.empty()) {
+                return std::nullopt;
+            }
+            path.pop_back();
+        } else if (!part.empty() && part != ".") {
+            path.push_back(PercentDecode(part));
+        }
+    }
+    if (path.empty()) {
+        return std::nullopt;
+    }
+    std::string joined;
+    for (const std::string& part : path) {
+        joined += (joined.empty() ? "" : "/") + part;
+    }
+    return joined;
+}
+
 std::string AttributeSafeAddress(std::string_view address)
 {
     std::string out;

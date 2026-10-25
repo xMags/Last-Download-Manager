@@ -3,7 +3,10 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <string>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 namespace {
 
@@ -58,6 +61,23 @@ TEST(LocalPaths, BuildsRelativeReferences)
     EXPECT_EQ(RelativeReference("example.com/a.html", "example.com/a b,c&d\".jpg"), "a%20b%2Cc%26d%22.jpg");
     EXPECT_EQ(RelativeReference("index.html", "a.jpg"), "a.jpg");
     EXPECT_EQ(RelativeReference("example.com/a.html", "example.com/\xC3\xA9.jpg"), "%C3%A9.jpg");
+}
+
+TEST(LocalPaths, ResolvesTheReferencesItMakes)
+{
+    using ldm::grabber::ResolveLocalReference;
+    for (const auto& [from, to] : std::vector<std::pair<std::string, std::string>>{
+             {"example.com/docs/a.html", "example.com/img/a b,c&d.jpg"},
+             {"example.com/a/b/c.html", "cdn.com/x.css"},
+             {"index.html", "a.jpg"},
+             {"example.com/a.html", "example.com/\xC3\xA9.jpg"},
+             {"example.com/a.html", "example.com/a.html"}}) {
+        EXPECT_EQ(ResolveLocalReference(from, RelativeReference(from, to)), to) << from << " -> " << to;
+    }
+    EXPECT_FALSE(ResolveLocalReference("a.html", "https://example.com/x"));
+    EXPECT_FALSE(ResolveLocalReference("a.html", "/root.html"));
+    EXPECT_FALSE(ResolveLocalReference("a.html", "../above.html"));
+    EXPECT_FALSE(ResolveLocalReference("a.html", "b.html?x=1"));
 }
 
 TEST(LocalPaths, MakesAddressesSafeInAttributes)

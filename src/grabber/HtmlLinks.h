@@ -57,7 +57,7 @@ struct LinkReplacement {
     std::size_t begin = 0;
     std::size_t end = 0;
     // Written as is: the caller makes it safe in any attribute, quoted or not (percent-encoded,
-    // with no spaces, quotes, commas or '<', '>' and '&').
+    // with no spaces, quotes, commas or '<', '>', and '&' only as "&amp;").
     std::string address;
 };
 

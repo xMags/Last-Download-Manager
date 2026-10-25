@@ -21,6 +21,7 @@ public:
     base::Status CreateDirectories(const std::filesystem::path& path) override;
     base::Status RemoveFolder(const std::filesystem::path& path) override;
     base::Status WriteFile(const std::filesystem::path& path, std::string_view bytes, bool replace) override;
+    base::Result<std::string> ReadFile(const std::filesystem::path& path, std::size_t maxBytes) override;
 };
 
 // Random version 4 UUIDs from the system's cryptographic generator.

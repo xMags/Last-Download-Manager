@@ -2,6 +2,7 @@
 
 #include "core/Url.h"
 
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -19,6 +20,12 @@ namespace ldm::grabber {
 // LocalRelativePath results. Percent-encoded except for unreserved characters and '/', so it is
 // safe in any attribute, quoted or not.
 [[nodiscard]] std::string RelativeReference(std::string_view fromPath, std::string_view toPath);
+
+// The other way: the path below the save folder that `reference`, as a page saved at `fromPath`
+// has it, points to; RelativeReference(fromPath, result) gives `reference` back. Nothing for a
+// reference RelativeReference does not make: an address, one from the root, or one with a query,
+// a fragment or a way above the save folder.
+[[nodiscard]] std::optional<std::string> ResolveLocalReference(std::string_view fromPath, std::string_view reference);
 
 // The text with its valid "%XX" escapes decoded; others stay as written.
 [[nodiscard]] std::string PercentDecode(std::string_view text);

@@ -47,6 +47,9 @@ public:
     // and the file stays as it was.
     [[nodiscard]] virtual base::Status WriteFile(const std::filesystem::path& path, std::string_view bytes,
                                                  bool replace) = 0;
+    // Reads a small file whole: a page the Site Grabber saved. Fails for a file longer than
+    // `maxBytes`, rather than reading it.
+    [[nodiscard]] virtual base::Result<std::string> ReadFile(const std::filesystem::path& path, std::size_t maxBytes) = 0;
 };
 
 // Protects passwords at rest (DPAPI for the current user in production).
