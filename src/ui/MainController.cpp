@@ -716,6 +716,21 @@ void MainController::MoveSelected(HWND owner)
     if (!choice) {
         return;
     }
+    // The download may have started, completed or been deleted while the dialog was open, and a
+    // completed file is moved on disk below: decide on what it is now.
+    const auto latest = Snapshot();
+    const model::Download* current = nullptr;
+    if (latest) {
+        for (const auto& view : latest->downloads) {
+            if (view->download.id == download.id) {
+                current = &view->download;
+            }
+        }
+    }
+    if (current == nullptr || current->status != download.status || FinalPath(*current) != FinalPath(download)) {
+        ShowError(L"The download changed while the dialog was open. Try again.");
+        return;
+    }
     const std::filesystem::path target = std::filesystem::path(choice->folder) / choice->fileName;
     if (target == FinalPath(download)) {
         return;
