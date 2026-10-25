@@ -109,17 +109,26 @@ std::vector<std::wstring> CommandLineArguments()
     return arguments;
 }
 
+// Runs until the main window is destroyed. WM_QUIT alone cannot be relied on: it is taken by
+// whichever message loop asks for messages next, and a loop running inside one of ours while the
+// window goes away (a menu's, a dialog's, a COM call's) may take it without posting it again.
+// GetMessage would then wait for ever, with no window left and the instance lock held, so the
+// next launch could not show LDM. Everything the UI thread does runs inside a message this loop
+// dispatched, so the window's destruction is seen as soon as that message returns.
 int RunMessageLoop(ldm::ui::MainWindow& window)
 {
     MSG message{};
-    while (::GetMessageW(&message, nullptr, 0, 0) > 0) {
+    while (!window.Destroyed()) {
+        if (::GetMessageW(&message, nullptr, 0, 0) <= 0) {
+            return static_cast<int>(message.wParam);  // WM_QUIT, or a failure
+        }
         if (window.PreTranslate(message)) {
             continue;
         }
         ::TranslateMessage(&message);
         ::DispatchMessageW(&message);
     }
-    return static_cast<int>(message.wParam);
+    return 0;
 }
 
 }  // namespace

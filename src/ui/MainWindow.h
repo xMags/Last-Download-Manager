@@ -75,6 +75,8 @@ public:
     void Restore();
     // Leaves the message loop after saving view state (Tasks > Exit, tray Exit).
     void Exit();
+    // The window was destroyed: LDM is exiting, whether or not the WM_QUIT it posted arrives.
+    [[nodiscard]] bool Destroyed() const noexcept { return destroyed_; }
 
     // Queues a launch request for the UI thread. Safe to call from any thread.
     void PostLaunchRequest(core::LaunchRequest request);
@@ -153,6 +155,7 @@ private:
     bool categoriesHidden_ = false;
     bool draggingSplitter_ = false;
     bool exiting_ = false;
+    bool destroyed_ = false;  // WM_DESTROY ran
     int initialShowCommand_ = SW_SHOWNORMAL;
     bool draining_ = false;
     bool updatesQuestionQueued_ = false;
