@@ -379,6 +379,45 @@ TEST(SiteVideo, AFileWhosePictureSizeIsUnknownIsOfferedWhenItIsTheOnlyOne)
     EXPECT_FALSE(video.offer.variants[0].resolution);
 }
 
+TEST(SiteVideo, AnAnswerWithoutAFormatListIsItsOwnFormat)
+{
+    // As yt-dlp gives a video with one format (a podcast episode, a Snapchat clip).
+    const SiteVideo video = Parse(
+        R"({"_type":"video","id":"ep1","title":"Episode","duration":60,"format_id":"0","protocol":"https",)"
+        R"("url":"https://media.example.test/ep1.m4a","ext":"m4a","vcodec":"none"})");
+    EXPECT_TRUE(video.offer.variants.empty());
+    ASSERT_EQ(video.offer.audio.size(), 1u);
+    EXPECT_EQ(video.offer.audio[0].site->id, "0");
+
+    const SiteVideo clip = Parse(
+        R"({"id":"c1","format_id":"0","protocol":"https","url":"https://media.example.test/c1","ext":"mp4"})");
+    EXPECT_EQ(VariantIds(clip), (std::vector<std::string>{"0"}));
+
+    // A sound file whose site names no video codec is sound, not a picture.
+    const SiteVideo episode = Parse(
+        R"({"id":"ep2","format_id":"0","protocol":"https","url":"https://media.example.test/ep2.mp3","ext":"mp3","acodec":"mp3"})");
+    EXPECT_TRUE(episode.offer.variants.empty());
+    EXPECT_EQ(episode.offer.audio.size(), 1u);
+
+    EXPECT_EQ(Refusal(R"({"id":"x","title":"neither a list nor an address"})"),
+              "The video site's answer could not be read.");
+}
+
+TEST(SiteVideo, AVideoWithoutAnySoundOffersItsPicturesAlone)
+{
+    // An Instagram post without sound: every format says "acodec": "none".
+    const SiteVideo silent = Parse(Answer("[" + Format("v360", "avc1.42c01e", "none", R"(,"height":360)") + "," +
+                                          Format("v640", "avc1.42c01f", "none", R"(,"height":640)") + "]"));
+    EXPECT_EQ(VariantIds(silent), (std::vector<std::string>{"v640", "v360"}));
+    EXPECT_TRUE(silent.offer.variants[0].audioGroup.empty());
+    EXPECT_TRUE(silent.offer.audio.empty());
+
+    // A picture with its own sound next to a silent better one: only the one with sound.
+    const SiteVideo mixed = Parse(Answer("[" + Format("both", "avc1.42c01e", "mp4a.40.2", R"(,"height":360)") + "," +
+                                         Format("v1080", "avc1.640028", "none", R"(,"height":1080)") + "]"));
+    EXPECT_EQ(VariantIds(mixed), (std::vector<std::string>{"both"}));
+}
+
 TEST(SiteVideo, TheSitesRefererIsKeptAndOtherHeadersAreNot)
 {
     const SiteVideo video = Parse(Answer("[" +
