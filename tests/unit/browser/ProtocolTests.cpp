@@ -194,6 +194,9 @@ TEST(BrowserCookies, ValidityRules)
     EXPECT_TRUE(ldm::model::IsValidCookie({"a.test", true, "/", false, 0, "n", ""}));
     EXPECT_FALSE(ldm::model::IsValidCookie({"", true, "/", false, 0, "n", "v"}));
     EXPECT_FALSE(ldm::model::IsValidCookie({"a test", true, "/", false, 0, "n", "v"}));
+    EXPECT_TRUE(ldm::model::IsValidCookie({"fd00::1", true, "/", false, 0, "n", "v"}));
+    EXPECT_FALSE(ldm::model::IsValidCookie({"fd00::1", false, "/", false, 0, "n", "v"})) << "an address has no subdomains";
+    EXPECT_FALSE(ldm::model::IsValidCookie({"[fd00::1]", true, "/", false, 0, "n", "v"}));
     EXPECT_FALSE(ldm::model::IsValidCookie({"a.test", true, "/", false, 0, "", "v"}));
     EXPECT_FALSE(ldm::model::IsValidCookie({"a.test", true, "/", false, -1, "n", "v"}));
     EXPECT_FALSE(ldm::model::IsValidCookie({"a.test", true, "/", false, 0, "n", "v\r"}));

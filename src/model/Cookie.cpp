@@ -26,11 +26,22 @@ bool IsHostName(std::string_view domain)
            });
 }
 
+// An IPv6 address as Url keeps a host: without brackets.
+bool IsIpv6Address(std::string_view domain)
+{
+    return domain.size() >= 2 && domain.size() <= 45 && domain.find(':') != std::string_view::npos &&
+           std::all_of(domain.begin(), domain.end(), [](char c) {
+               return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F') || c == ':' || c == '.';
+           });
+}
+
 }  // namespace
 
 bool IsValidCookie(const Cookie& cookie) noexcept
 {
-    return IsHostName(cookie.domain) && !cookie.path.empty() && cookie.path.front() == '/' &&
+    // An address has no subdomains, so its cookies are always for that host only.
+    const bool validHost = IsHostName(cookie.domain) || (cookie.hostOnly && IsIpv6Address(cookie.domain));
+    return validHost && !cookie.path.empty() && cookie.path.front() == '/' &&
            cookie.path.size() <= kMaxPath && HasNoControlCharacters(cookie.path) && !cookie.name.empty() &&
            cookie.name.size() <= kMaxName && HasNoControlCharacters(cookie.name) && cookie.value.size() <= kMaxValue &&
            HasNoControlCharacters(cookie.value) && cookie.expires >= 0;
