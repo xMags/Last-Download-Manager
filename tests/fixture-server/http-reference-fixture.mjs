@@ -181,6 +181,7 @@ export function createReferenceFixture({
   const nonce = randomBytes(16).toString('hex');
   let requestId = 0;
   let active = 0;
+  let limitedActive = 0;  // requests of /limited.bin under way
   let maxActive = 0;
   let version = 0;
   let versioned = data;
@@ -435,6 +436,19 @@ export function createReferenceFixture({
           return;
         }
         serveBody(request, response, id, data, { etag: strong, lastModified: modified, name: 'cookie.bin' });
+        return;
+      }
+      case '/limited.bin': {
+        // A file server that takes two connections per client and refuses more with 404, as
+        // BitChute's do.
+        if (limitedActive >= 2) {
+          record({ event: 'refused', id, path });
+          finish(404, { 'Content-Type': 'text/plain' }, 'too many connections');
+          return;
+        }
+        limitedActive += 1;
+        response.once('close', () => { limitedActive -= 1; });
+        serveBody(request, response, id, data, { etag: strong, lastModified: modified, name: 'limited.bin' });
         return;
       }
       case '/site-header.bin': {
