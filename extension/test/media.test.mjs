@@ -190,6 +190,44 @@ test('positions go to LDM only for tracked tabs, and only when they change', asy
   assert.deepEqual(sent.at(-1), ['tab', 7, { type: 'ldm-track-video', on: false }]);
 });
 
+test('a tab with the panel turned off reports no video until it is turned on again', async () => {
+  const { api, connection, sent } = fakeApi();
+  const off = new Set();
+  const positions = new VideoPositions(api, connection, (tabId) => off.has(tabId));
+  const sender = { tab: { id: 7 }, frameId: 0 };
+  const report = { type: 'video-rect', video: { x: 10, y: 20, width: 640, height: 360 }, score: 5, hidden: false,
+    fullscreen: false, viewport: { x: 0, y: 0, width: 1200, height: 800 }, viewportPositionKnown: false, pixelRatio: 1 };
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+  const posted = () => sent.filter(([kind]) => kind === 'post').map(([, message]) => message);
+  positions.setHasMedia(7, true);
+  positions.onFrameReport(report, sender);
+  await settle();
+  assert.equal(posted().at(-1).visible, true);
+
+  off.add(7);
+  positions.panelSwitched(7);
+  await settle();
+  assert.equal(posted().at(-1).visible, false, 'LDM hears at once that the video is gone');
+  const told = () => sent.filter(([kind]) => kind === 'tab').at(-1);
+  assert.deepEqual(told(), ['tab', 7, { type: 'ldm-track-video', on: false }]);
+  const count = posted().length;
+  positions.onFrameReport(report, sender);
+  positions.frameReady(sender);
+  await settle();
+  assert.equal(posted().length, count, 'late reports of the switched-off tab are ignored');
+  assert.deepEqual(told(), ['tab', 7, { type: 'ldm-track-video', on: false }], 'a new frame is not told to track');
+
+  off.delete(7);
+  positions.panelSwitched(7);
+  assert.deepEqual(sent.at(-1), ['tab', 7, { type: 'ldm-track-video', on: true }]);
+  positions.onFrameReport(report, sender);
+  await settle();
+  assert.equal(posted().at(-1).visible, true, 'shown again once the frames report');
+
+  positions.panelSwitched(9);
+  assert.ok(!sent.some(([kind, tabId]) => kind === 'tab' && tabId === 9), 'a tab LDM has nothing for is left alone');
+});
+
 test('only an answer that replaces the page clears the tab\'s media', () => {
   const page = (statusCode, headers = {}, extra = {}) => replacesPage({
     statusCode, responseHeaders: Object.entries(headers).map(([name, value]) => ({ name, value })), ...extra,

@@ -9,6 +9,7 @@ export const MenuId = Object.freeze({
   All: 'ldm-all',
   VideoPage: 'ldm-video-page',  // the video on the page, found by LDM's site resolver
   VideoLink: 'ldm-video-link',  // the video on the page a link leads to
+  Integration: 'ldm-integration',  // the toolbar button's own menu: integration on or off
 });
 
 const WEB_PAGES = ['http://*/*', 'https://*/*'];
@@ -18,10 +19,13 @@ const WEB_PAGES = ['http://*/*', 'https://*/*'];
  * downloads page: current Chrome shows no link for a running download there, and a finished one
  * links to the file on disk. The video items appear while LDM takes site requests (site videos
  * on, in an LDM that sends its list of sites).
- * @param {{downloadLink: boolean, downloadAll: boolean, videos?: boolean}} menu
+ * The toolbar button's right-click menu always has the switch for integration in this browser,
+ * since a click on the button is about the video panel of one tab.
+ * @param {{downloadLink: boolean, downloadAll: boolean, videos?: boolean, enabled?: boolean}} menu
  */
 export function menuItems(menu) {
-  const items = [];
+  const items = [{ id: MenuId.Integration, type: 'checkbox', title: 'Browser integration', checked: menu.enabled !== false,
+    contexts: ['action'] }];
   if (menu.downloadLink) {
     items.push(
       { id: MenuId.Link, title: 'Download with LDM', contexts: ['link', 'image', 'video', 'audio'],
