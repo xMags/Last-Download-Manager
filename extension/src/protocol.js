@@ -160,8 +160,19 @@ export function toLdmCookie(cookie) {
  *          post?: {contentType: string, body: string}, chosen?: boolean}} download post body is
  *   base64; chosen: the user picked LDM (right-click menu or force keys), so LDM does not count a
  *   cancel of it as a sign that the capture rules are wrong
+ * @returns {object|null} null when LDM could not make the request as the browser made it (an
+ *   address or form it would refuse): the browser keeps that download
  */
 export function makeCapture(download) {
+  if (!isDownloadAddress(download.url)) {
+    return null;
+  }
+  // A form LDM cannot send again would turn the request into a plain GET of the address.
+  const post = download.post;
+  if (post && (!isPostContentType(post.contentType) || typeof post.body !== 'string' ||
+               post.body.length > MAX_POST_BASE64 || !BASE64.test(post.body))) {
+    return null;
+  }
   const optionalAddress = (value) => (isDownloadAddress(value) ? value : undefined);
   const optionalText = (value, max) => {
     const text = String(value ?? '');
@@ -190,11 +201,18 @@ export function makeCapture(download) {
     mimeType: optionalText(download.mimeType, 256),
     userAgent: cleanText(download.userAgent, 1024) || 'Mozilla/5.0',
     cookies,
-    post: download.post && optionalText(download.post.contentType, 256)
-      ? { contentType: download.post.contentType, body: download.post.body }
-      : undefined,
+    post: post ? { contentType: post.contentType, body: post.body } : undefined,
     chosen: download.chosen === true ? true : undefined,
   };
+}
+
+// LDM takes a form body of at most 1 MiB, base64 encoded, with one header value as its type.
+const MAX_POST_BYTES = 1024 * 1024;
+const MAX_POST_BASE64 = (Math.floor(MAX_POST_BYTES / 3) + 1) * 4;
+const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
+
+function isPostContentType(value) {
+  return typeof value === 'string' && value.length > 0 && utf8Length(value) <= 256 && !CONTROL.test(value);
 }
 
 /** True only for an answer that accepts the capture with the given id. */
