@@ -79,6 +79,10 @@ export class DownloadCapture {
         post: this.options.postFor?.(url) ?? undefined,
         chosen: verdict === 'force',
       });
+      if (message === null) {
+        await this.resume(item.id);
+        return false;
+      }
       const answer = await this.connection.oneShot(message, ANSWER_TIMEOUT_MS);
       if (!isAcceptedCapture(answer, message.id)) {
         await this.resume(item.id);
@@ -142,6 +146,9 @@ export class DownloadCapture {
       cookies: await this.cookiesFor([href], storeId),
       chosen: true,  // the menu or the force keys: never an automatic capture
     });
+    if (message === null) {
+      return false;
+    }
     return isAcceptedCapture(await this.connection.oneShot(message, ANSWER_TIMEOUT_MS), message.id);
   }
 

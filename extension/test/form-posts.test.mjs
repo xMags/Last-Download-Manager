@@ -47,7 +47,14 @@ test('the capture message carries the form', () => {
   const message = makeCapture({ url: 'https://a.test/get', userAgent: 'UA', cookies: [], post: { contentType: 'application/x-www-form-urlencoded', body: 'dG9rZW49YWJj' } });
   assert.deepEqual(message.post, { contentType: 'application/x-www-form-urlencoded', body: 'dG9rZW49YWJj' });
   const unsafe = makeCapture({ url: 'https://a.test/get', userAgent: 'UA', cookies: [], post: { contentType: 'text/plain' + String.fromCharCode(13, 10) + 'X: 1', body: 'YQ==' } });
-  assert.equal(unsafe.post, undefined);
+  assert.equal(unsafe, null, 'a form LDM cannot send again is not turned into a plain GET');
+  const garbled = makeCapture({ url: 'https://a.test/get', userAgent: 'UA', cookies: [], post: { contentType: 'text/plain', body: 'not base64!' } });
+  assert.equal(garbled, null);
+});
+
+test('an address LDM would refuse is not captured', () => {
+  assert.equal(makeCapture({ url: 'blob:https://a.test/1', userAgent: 'UA', cookies: [] }), null);
+  assert.equal(makeCapture({ url: 'https://a.test/' + 'x'.repeat(17000), userAgent: 'UA', cookies: [] }), null);
 });
 
 test('a submission answered with a page is forgotten, one answered with a file is kept', () => {

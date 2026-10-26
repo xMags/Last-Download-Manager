@@ -116,9 +116,10 @@ function fakeConnection({ answer = 'accept' } = {}) {
   };
 }
 
-function newCapture(api, connection, { enabled = true, verdict = 'none', offTab = false } = {}) {
+function newCapture(api, connection, { enabled = true, verdict = 'none', offTab = false, post } = {}) {
   return new DownloadCapture(api, connection, {
     ready: Promise.resolve(),
+    postFor: () => post,
     isEnabled: () => enabled,
     fromOffTab: async () => offTab,
     keyVerdict: () => verdict,
@@ -149,6 +150,15 @@ test('a refused or unanswered capture lets the browser continue', async () => {
     assert.equal(await newCapture(api, fakeConnection({ answer })).take(ITEM, 'x.zip'), false);
     assert.deepEqual(calls, [['ui', false], ['pause', 7], ['resume', 7], ['ui', true]], answer);
   }
+});
+
+test('a download whose form LDM could not send again stays in the browser, unasked', async () => {
+  const { api, calls } = fakeBrowser();
+  const connection = fakeConnection();
+  const post = { contentType: 'text/plain' + String.fromCharCode(13, 10) + 'X: 1', body: 'YQ==' };
+  assert.equal(await newCapture(api, connection, { post }).take(ITEM, 'x.zip'), false);
+  assert.equal(connection.sent.length, 0, 'not sent as a plain GET');
+  assert.deepEqual(calls, [['ui', false], ['pause', 7], ['resume', 7], ['ui', true]]);
 });
 
 test('a download that already finished or failed is left alone', async () => {
