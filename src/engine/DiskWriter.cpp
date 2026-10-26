@@ -9,7 +9,9 @@
 
 #include <algorithm>
 #include <limits>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <utility>
 
@@ -132,6 +134,47 @@ void SetFileTimeFromHttpDate(const std::filesystem::path& path, const std::strin
     if (file.Valid()) {
         ::SetFileTime(file.Get(), nullptr, nullptr, &fileTime);
     }
+}
+
+// Moves the finished file to its final name. Without `replace` a file already there is never
+// overwritten. With it that file is replaced in one step, so a move that fails leaves it as it
+// was: a rename over it on the same volume, or from another volume a copy beside it, made durable
+// and then renamed over it.
+std::optional<TransferFailure> MoveToFinalName(const std::wstring& from, const std::wstring& to, bool replace)
+{
+    if (!replace) {
+        if (!::MoveFileExW(from.c_str(), to.c_str(), MOVEFILE_COPY_ALLOWED | MOVEFILE_WRITE_THROUGH)) {
+            return FailureFromWin32(::GetLastError(), "move to final name");
+        }
+        return std::nullopt;
+    }
+    if (::MoveFileExW(from.c_str(), to.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+        return std::nullopt;
+    }
+    if (const DWORD error = ::GetLastError(); error != ERROR_NOT_SAME_DEVICE) {
+        return FailureFromWin32(error, "replace the existing file");
+    }
+    const std::wstring copy = to + L".ldmtmp";
+    const auto failWith = [&copy](std::string_view operation) {
+        const DWORD error = ::GetLastError();
+        ::DeleteFileW(copy.c_str());
+        return FailureFromWin32(error, operation);
+    };
+    if (!::CopyFileW(from.c_str(), copy.c_str(), FALSE)) {
+        return failWith("copy to the final folder");
+    }
+    {
+        FileHandle written(::CreateFileW(copy.c_str(), GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL,
+                                         nullptr));
+        if (!written.Valid() || !::FlushFileBuffers(written.Get())) {
+            return failWith("copy to the final folder");
+        }
+    }
+    if (!::MoveFileExW(copy.c_str(), to.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+        return failWith("replace the existing file");
+    }
+    ::DeleteFileW(from.c_str());  // best effort: the file is complete at its final name either way
+    return std::nullopt;
 }
 
 }  // namespace
@@ -369,11 +412,7 @@ void DiskWriter::Handle(FinalizeJob& job)
     if (from != to) {
         std::error_code ignored;
         std::filesystem::create_directories(request.finalPath.parent_path(), ignored);
-        // No MOVEFILE_REPLACE_EXISTING: an existing final file is never overwritten here.
-        if (!::MoveFileExW(from.c_str(), to.c_str(), MOVEFILE_COPY_ALLOWED | MOVEFILE_WRITE_THROUGH)) {
-            const DWORD error = ::GetLastError();
-            result.failure = FailureFromWin32(error, "move to final name");
-        }
+        result.failure = MoveToFinalName(from, to, request.replaceExisting);
     }
     if (!result.failure && request.lastModified) {
         SetFileTimeFromHttpDate(request.finalPath, *request.lastModified);

@@ -1584,7 +1584,8 @@ void Coordinator::OnFinalized(Entry& entry, const FinalizeFinished& finalized)
     model::Download& d = entry.download;
     if (finalized.failure) {
         // Another program may have created the final name meanwhile: pick a free one and retry.
-        if (!entry.deleteWhenStopped && ports_.fileSystem->Exists(FinalPath(d)) &&
+        // A file this download replaces is there on purpose: failing to replace it is the answer.
+        if (!entry.deleteWhenStopped && !d.replaceFinalFile && ports_.fileSystem->Exists(FinalPath(d)) &&
             entry.finalizeAttempts < kMaxFinalizeAttempts) {
             // No exception for this download: the file at its final name is someone else's now,
             // and treating it as its own would retry the same name until the attempts run out.
@@ -1901,13 +1902,6 @@ void Coordinator::BeginFinalize(Entry& entry)
     model::Download& d = entry.download;
     d.status = DownloadStatus::Finalizing;
     const std::filesystem::path target = FinalPath(d);
-    if (entry.download.replaceFinalFile && ports_.fileSystem->Exists(target)) {
-        if (base::Status removed = ports_.fileSystem->Remove(target); !removed) {
-            Fail(entry, TransferFailure{FailureReason::PermissionDenied, FailureClass::NeedsUser, 0,
-                                        "the existing file could not be replaced: " + removed.GetError().message});
-            return;
-        }
-    }
     entry.finalizeAttempts += 1;
     entry.finalizing = true;
     Save(entry);
@@ -1917,6 +1911,8 @@ void Coordinator::BeginFinalize(Entry& entry)
     request.epoch = d.epoch;
     request.partialPath = PathFromUtf8(d.partialPath.value_or(std::string()));
     request.finalPath = target;
+    // The engine replaces the old file in one step, so a move that fails keeps it.
+    request.replaceExisting = d.replaceFinalFile;
     if (d.IsStream()) {
         // The joined file is moved; the folder of pieces goes once it is in place.
         request.partialPath = entry.muxOutput.value_or(std::filesystem::path());

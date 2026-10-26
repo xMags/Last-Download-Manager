@@ -422,9 +422,10 @@ TEST_F(CoordinatorTest, ExistingFilePolicies)
     // The old file is replaced only when the new one is complete.
     EXPECT_TRUE(files_.Exists(kRoot / L"Compressed" / L"a.zip"));
     Finish(*replaced.id, 1, TransferOutcome::Completed, {{0, 5, 5}}, std::nullopt, 5);
-    EXPECT_FALSE(files_.Exists(kRoot / L"Compressed" / L"a.zip"));
+    EXPECT_TRUE(files_.Exists(kRoot / L"Compressed" / L"a.zip")) << "kept until the engine replaces it in one step";
     ASSERT_EQ(engine_.finalizes.size(), 1u);
     EXPECT_EQ(engine_.finalizes.back().finalPath, kRoot / L"Compressed" / L"a.zip");
+    EXPECT_TRUE(engine_.finalizes.back().replaceExisting);
 }
 
 TEST_F(CoordinatorTest, FullLifecycleWithServerNameCheckpointsAndCompletion)
@@ -905,8 +906,9 @@ TEST_F(CoordinatorTest, RedownloadReplacesTheCompletedFile)
     ASSERT_EQ(engine_.starts.size(), 2u);
     EXPECT_TRUE(engine_.starts.back().segments.empty());
     Finish(id, 2, TransferOutcome::Completed, {{0, 4, 4}}, std::nullopt, 4);
-    EXPECT_FALSE(files_.Exists(kRoot / L"a.dat")) << "replaced only after the new copy is complete";
+    EXPECT_TRUE(files_.Exists(kRoot / L"a.dat")) << "kept until the engine replaces it in one step";
     EXPECT_EQ(engine_.finalizes.back().finalPath, kRoot / L"a.dat");
+    EXPECT_TRUE(engine_.finalizes.back().replaceExisting) << "replaced only after the new copy is complete";
 }
 
 TEST_F(CoordinatorTest, SlowProxyLookupDelaysTheEngineWithoutBlocking)
@@ -2509,7 +2511,9 @@ TEST_F(QueueTest, ACompletedDownloadAddedToAQueueIsDownloadedAgainWhenItsTurnCom
     ASSERT_EQ(engine_.starts.size(), 2u);
     EXPECT_TRUE(engine_.starts.back().segments.empty()) << "from the start";
     Finish(id, 2, TransferOutcome::Completed, {{0, 4, 4}}, std::nullopt, 4);
-    EXPECT_FALSE(files_.Exists(kRoot / L"a.dat")) << "the old file goes only once the new one is complete";
+    EXPECT_TRUE(files_.Exists(kRoot / L"a.dat")) << "kept until the engine replaces it in one step";
+    ASSERT_FALSE(engine_.finalizes.empty());
+    EXPECT_TRUE(engine_.finalizes.back().replaceExisting) << "the old file goes only once the new one is complete";
     Send(id, 2, ldm::core::FinalizeFinished{});
     Publish();
     EXPECT_FALSE(View(id).download.queueId);
@@ -2730,8 +2734,9 @@ TEST_F(SyncTest, AChangedFileReplacesTheOldOneAndStaysInTheQueue)
     const DownloadId id = CompletedMember();
     coordinator_->Handle(ldm::core::StartQueueCommand{SyncQueue()});
     Finish(id, 2, TransferOutcome::Completed, {{0, 6, 6}}, std::nullopt, 6);
-    EXPECT_FALSE(files_.Exists(kRoot / L"a.dat")) << "replaced once the new copy is complete";
+    EXPECT_TRUE(files_.Exists(kRoot / L"a.dat")) << "kept until the engine replaces it in one step";
     EXPECT_EQ(engine_.finalizes.back().finalPath, kRoot / L"a.dat");
+    EXPECT_TRUE(engine_.finalizes.back().replaceExisting) << "replaced once the new copy is complete";
     Send(id, 2, ldm::core::FinalizeFinished{});
     Publish();
     EXPECT_EQ(View(id).download.status, DownloadStatus::Completed);
@@ -2794,6 +2799,32 @@ TEST_F(SyncTest, ANewFileFoundByACheckReplacesTheOldOneAfterARestart)
     Finish(id, epoch, TransferOutcome::Completed, {{0, 6, 6}}, std::nullopt, 6);
     ASSERT_FALSE(engine_.finalizes.empty());
     EXPECT_EQ(engine_.finalizes.back().finalPath, kRoot / L"a.dat") << "no numbered copy beside the old file";
+    EXPECT_TRUE(engine_.finalizes.back().replaceExisting);
+    EXPECT_EQ(std::count(files_.removed.begin(), files_.removed.end(), kRoot / L"a.dat"), 0)
+        << "the old file stays until the engine replaces it";
+}
+
+TEST_F(SyncTest, AReplaceThatFailsKeepsTheOldFileAndTakesNoNumberedName)
+{
+    const DownloadId id = CompletedMember();
+    coordinator_->Handle(ldm::core::StartQueueCommand{SyncQueue()});
+    coordinator_->Handle(ldm::core::StopQueueCommand{SyncQueue()});
+    Finish(id, 2, TransferOutcome::Stopped, {{0, 6, 3}}, std::nullopt, 6);
+    coordinator_->Handle(ldm::core::ResumeCommand{{id}});
+    const std::int64_t resumed = engine_.starts.back().epoch;
+    Finish(id, resumed, TransferOutcome::Completed, {{0, 6, 6}}, std::nullopt, 6);
+    ASSERT_FALSE(engine_.finalizes.empty());
+    ASSERT_TRUE(engine_.finalizes.back().replaceExisting);
+    const size_t finalizes = engine_.finalizes.size();
+
+    ldm::core::FinalizeFinished failed;
+    failed.failure = ldm::core::TransferFailure{ldm::core::FailureReason::PermissionDenied,
+                                                ldm::core::FailureClass::NeedsUser, 0, "in use"};
+    Send(id, resumed, failed);
+    EXPECT_EQ(engine_.finalizes.size(), finalizes) << "not moved to a numbered name beside the old file";
+    EXPECT_EQ(View(id).download.status, DownloadStatus::Failed);
+    EXPECT_TRUE(files_.Exists(kRoot / L"a.dat"));
+    EXPECT_EQ(std::count(files_.removed.begin(), files_.removed.end(), kRoot / L"a.dat"), 0);
 }
 
 TEST_F(SyncTest, AMemberMovedToAnotherQueueDuringACheckLeavesIt)

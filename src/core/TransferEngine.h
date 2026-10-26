@@ -244,10 +244,12 @@ struct FinalizeRequest {
     model::DownloadId id;
     std::int64_t epoch = 0;
     std::filesystem::path partialPath;
-    std::filesystem::path finalPath;  // must not exist; the engine never overwrites
+    std::filesystem::path finalPath;  // must not exist, unless replaceExisting
     std::optional<std::string> lastModified;  // set as the file time when present (checklist ENG-16)
     // A stream's parts folder, removed with everything in it once the move succeeded.
     std::optional<std::filesystem::path> removeFolder;
+    // A file at finalPath is replaced, in one step: a move that fails leaves it as it was.
+    bool replaceExisting = false;
 };
 
 struct FinalizeFinished {
