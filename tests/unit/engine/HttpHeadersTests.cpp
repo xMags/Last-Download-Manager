@@ -45,6 +45,7 @@ TEST(ContentDisposition, HandlesQuotedAndEscaped)
               "a \"quoted\" name.zip");
     EXPECT_EQ(ParseContentDispositionFileName("inline;filename=plain.bin"), "plain.bin");
     EXPECT_EQ(ParseContentDispositionFileName("attachment; filename=with space.iso ; size=10"), "with space.iso");
+    EXPECT_EQ(ParseContentDispositionFileName("attachment; foo; filename=a.zip"), "a.zip");
 }
 
 TEST(ContentDisposition, ConvertsLatin1ExtendedValue)
