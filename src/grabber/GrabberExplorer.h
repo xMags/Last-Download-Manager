@@ -104,6 +104,9 @@ private:
         bool readThisRun = false;  // a page read, or queued to be read, in this exploration
         bool sizeAsked = false;    // a HEAD request asked for the size in this exploration
         int failures = 0;          // download attempts that failed in this run
+        // The '/' path below the save folder this item has in the project (ClaimedPath); empty
+        // until claimed. Not stored: rebuilt from data.localPath after the list is loaded.
+        std::string claimedPath;
     };
 
     struct Project {
@@ -119,6 +122,10 @@ private:
         std::vector<Item> items;  // items[i] has id i + 1
         std::unordered_map<std::string, std::int64_t> byAddress;
         std::set<std::int64_t> unsaved;
+        // Paths below the save folder claimed by items, by base::PathComparisonKey (Windows names
+        // ignore case), so two items never save to one file. Built once the list is loaded.
+        std::unordered_map<std::wstring, std::int64_t> claimedPaths;
+        bool claimsBuilt = false;
 
         bool exploring = false;
         // Counts explorations and stops: an answer to a fetch of an earlier one is dropped, since
@@ -177,15 +184,20 @@ private:
     void AddLink(Project& project, const Item& parent, const HtmlLink& link, const std::string& base);
     void ClassifyFile(Project& project, Item& item, std::optional<std::int64_t> size);
     void WritePage(Project& project, const PendingPage& page);
-    // Where `target`, the item at `url`, is saved below `root`: a page that was read, or a file
-    // that was downloaded there. Nothing while it has no copy there.
-    [[nodiscard]] std::optional<std::string> SavedCopy(const Project& project, const std::filesystem::path& root,
-                                                       const Item* target, const core::Url& url) const;
-    // Where a page saved at `pagePath` (below `root`) links to `target`, the item at `url` and
-    // web `address`: its saved copy once there is one, else the web address.
-    [[nodiscard]] std::string SavedLinkTarget(const Project& project, const std::filesystem::path& root,
-                                              const std::string& pagePath, const Item* target, const core::Url& url,
-                                              const std::string& address) const;
+    // Where `target` is saved below `root`: a page that was read, or a file that was downloaded
+    // there. Nothing while it has no copy there.
+    [[nodiscard]] std::optional<std::string> SavedCopy(Project& project, const std::filesystem::path& root,
+                                                       Item* target);
+    // Where a page saved at `pagePath` (below `root`) links to `target`, the item at web
+    // `address`: its saved copy once there is one, else the web address.
+    [[nodiscard]] std::string SavedLinkTarget(Project& project, const std::filesystem::path& root,
+                                              const std::string& pagePath, Item* target, const std::string& address);
+    // The '/' path below the save folder where `item` is saved or goes: the path it was saved
+    // under, else its LocalRelativePath, numbered ("about (2).html") when another item of the
+    // project has that path. Claimed for the item from then on; empty for an item without one.
+    [[nodiscard]] std::string ClaimedPath(Project& project, Item& item);
+    void ClaimSavedPaths(Project& project);
+    static void ForgetClaims(Project& project);
     // Once a project's downloads ended: its saved pages link to the files that arrived, and back
     // to the web for those that did not (checklist G-02).
     void RelinkSavedPages(Project& project);
