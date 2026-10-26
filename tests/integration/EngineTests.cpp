@@ -7,6 +7,7 @@
 #include "model/Cookie.h"
 
 #include <gtest/gtest.h>
+#include <windows.h>
 
 #include <algorithm>
 #include <chrono>
@@ -851,6 +852,34 @@ TEST_F(EngineTest, FinalizeMovesWithoutOverwriting)
     ASSERT_TRUE(refused);
     EXPECT_TRUE(refused->failure);
     EXPECT_TRUE(HoldsPayload(directory_ / "out" / "range.bin", server_->Size()));
+}
+
+TEST_F(EngineTest, FinalizeReplacesAnExistingFileOnlyInOneStep)
+{
+    const auto finished = Run(Request("/range.bin"));
+    ASSERT_EQ(finished.outcome, TransferOutcome::Completed);
+    const auto target = directory_ / "range.bin";
+    { std::ofstream(target) << "old"; }
+    // Open without delete sharing, the old file cannot be replaced: the move fails and keeps it.
+    HANDLE held = ::CreateFileW(target.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
+    ASSERT_NE(held, INVALID_HANDLE_VALUE);
+    ldm::core::FinalizeRequest finalize{DownloadId{1}, 1, PartialPath(), target};
+    finalize.replaceExisting = true;
+    engine_->Finalize(finalize);
+    const auto refused = listener_.WaitFor<ldm::core::FinalizeFinished>(DownloadId{1}, 1, 10s);
+    ::CloseHandle(held);
+    ASSERT_TRUE(refused);
+    EXPECT_TRUE(refused->failure);
+    EXPECT_EQ(ReadFile(target).size(), 3u) << "the old file is kept";
+    EXPECT_TRUE(HoldsPayload(PartialPath(), server_->Size())) << "and the new one waits to be tried again";
+
+    finalize.epoch = 2;
+    engine_->Finalize(finalize);
+    const auto replaced = listener_.WaitFor<ldm::core::FinalizeFinished>(DownloadId{1}, 2, 10s);
+    ASSERT_TRUE(replaced);
+    EXPECT_FALSE(replaced->failure) << replaced->failure->message;
+    EXPECT_TRUE(HoldsPayload(target, server_->Size()));
+    EXPECT_FALSE(std::filesystem::exists(PartialPath()));
 }
 
 TEST_F(EngineTest, ShutdownStopsRunningTransfers)
