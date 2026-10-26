@@ -101,6 +101,9 @@ TEST(FileNames, SanitizesForWindows)
     EXPECT_EQ(SanitizeFileName(spaced), std::string(199, 'y'));
     EXPECT_EQ(SanitizeFileName(std::string(250, '.') + std::string(20, 'x')), "download");
     EXPECT_EQ(SanitizeFileName("CONOUT$.log"), "_CONOUT$.log");
+    EXPECT_EQ(SanitizeFileName("COM\xC2\xB9.txt"), "_COM\xC2\xB9.txt");  // superscript one, UTF-8
+    EXPECT_EQ(SanitizeFileName("lpt\xC2\xB3"), "_lpt\xC2\xB3");
+    EXPECT_EQ(SanitizeFileName("COM\xC2\xB9" "0.txt"), "COM\xC2\xB9" "0.txt");
 }
 
 TEST(FileNames, ExtensionAndNumbering)
