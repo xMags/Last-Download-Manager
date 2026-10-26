@@ -1942,8 +1942,10 @@ void Coordinator::Fail(Entry& entry, const TransferFailure& failure)
 // ---------------------------------------------------------------------------------------------
 // Streams (M3 design section 6)
 
-std::optional<std::string> Coordinator::ValidateMedia(const MediaChoice& media, model::Download& download)
+std::optional<std::string> Coordinator::ValidateMedia(const MediaChoice& media, model::Download& target)
 {
+    // Checked on a copy: a refusal halfway must not leave the download with half its tracks.
+    model::Download download = target;
     if (media.kind != model::DownloadKind::Hls && media.kind != model::DownloadKind::Dash) {
         return "Only HLS and DASH streams can be downloaded.";
     }
@@ -1957,6 +1959,7 @@ std::optional<std::string> Coordinator::ValidateMedia(const MediaChoice& media, 
         download.siteVideo = true;
         download.siteQuality = media.siteQuality;
         download.tracks.clear();
+        target = std::move(download);
         return std::nullopt;
     }
     if (media.tracks.empty() || media.tracks.size() > kMaxMediaTracks) {
@@ -2024,6 +2027,7 @@ std::optional<std::string> Coordinator::ValidateMedia(const MediaChoice& media, 
     if (const auto refused = CheckPrivateAddresses(download)) {
         return "The stream comes from the internet but points into your own network, which LDM refuses.";
     }
+    target = std::move(download);
     return std::nullopt;
 }
 
