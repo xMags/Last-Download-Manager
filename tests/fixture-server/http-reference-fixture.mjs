@@ -7,6 +7,7 @@
 //   /quiet-no-range.bin  ignores Range without saying so (no Accept-Ranges header); unpaced, and
 //                        answers requests with a Range a second late
 //   /redirect            302 to /range.bin
+//   /redirect-to?to=URL  302 to URL (another host: localhost instead of 127.0.0.1)
 //   /changing.bin        ranges, but every request serves different bytes (overlap mismatch)
 //   /versioned.bin       ranges; content, ETag and Last-Modified follow /control/bump
 //   /drop.bin?after=N    ranges; every response is cut after N bytes
@@ -294,7 +295,7 @@ export function createReferenceFixture({
       event: 'request', id, method: request.method, path, range: request.headers.range ?? null,
       ifRange: request.headers['if-range'] ?? null, userAgent: request.headers['user-agent'] ?? null,
       referer: request.headers.referer ?? null, acceptEncoding: request.headers['accept-encoding'] ?? null,
-      streamKey: request.headers['x-stream-key'] ?? null,
+      streamKey: request.headers['x-stream-key'] ?? null, host: request.headers.host ?? null,
     });
     active += 1;
     maxActive = Math.max(maxActive, active);
@@ -397,6 +398,9 @@ export function createReferenceFixture({
     switch (path) {
       case '/redirect':
         finish(302, { Location: '/range.bin' });
+        return;
+      case '/redirect-to':
+        finish(302, { Location: url.searchParams.get('to') ?? '/range.bin' });
         return;
       case '/range.bin':
         serveBody(request, response, id, data, { etag: strong, lastModified: modified, name: 'range.bin' });

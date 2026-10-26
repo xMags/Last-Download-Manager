@@ -61,8 +61,11 @@ MemoryFetch::MemoryFetch(CURLM* multi, core::FetchRequest request, long connectT
         curl_easy_setopt(easy, CURLOPT_HTTPHEADER, headers);
     }
     // Through a proxy the connection goes to the proxy, which says nothing about the server.
-    addressGuard_.refuse = request_.refusePrivateAddresses && !request_.proxy;
-    InstallAddressGuard(easy, &addressGuard_);
+    guards_.address.refuse = request_.refusePrivateAddresses && !request_.proxy;
+    if (!request_.headers.empty()) {
+        guards_.host.first = core::ParseUrl(request_.url);  // the site's headers are for this host only
+    }
+    InstallGuards(easy, &guards_);
     // libcurl refuses an announced length over the limit before any byte arrives; with body types
     // the type decides first, so a large file is reported as skipped rather than too large. The
     // write callback holds the limit either way.
@@ -124,17 +127,29 @@ bool MemoryFetch::WantsBody() const
     });
 }
 
+bool MemoryFetch::ContinueElsewhere(CURLcode result)
+{
+    if (!added_ || !StoppedForOtherHost(guards_, result)) {
+        return false;
+    }
+    if (ResendElsewhere(multi_, guards_, nullptr)) {
+        return true;
+    }
+    resendFailed_ = true;
+    return false;
+}
+
 core::FetchFinished MemoryFetch::Finish(CURLcode result)
 {
     core::FetchFinished finished;
     finished.fetchId = request_.fetchId;
-    if (!added_) {
+    if (!added_ || resendFailed_) {
         finished.failure = core::TransferFailure{core::FailureReason::Internal, core::FailureClass::Fatal, 0,
                                                  "the request could not be started"};
         return finished;
     }
     CURL* easy = easy_.get();
-    if (addressGuard_.refuse && addressGuard_.reachedPrivate) {
+    if (guards_.address.refuse && guards_.address.reachedPrivate) {
         finished.failure = core::TransferFailure{core::FailureReason::PrivateAddress, core::FailureClass::Fatal, 0,
                                                  "the address leads to a loopback or private network address"};
         return finished;
@@ -183,7 +198,7 @@ core::FetchFinished MemoryFetch::Finish(CURLcode result)
     finished.bodySkipped = bodySkipped_;
     finished.body = std::move(body_);
     const auto url = core::ParseUrl(finished.finalUrl);
-    finished.fromPrivateNetwork = (!request_.proxy && addressGuard_.reachedPrivate) || (url && core::IsPrivateHost(url->host));
+    finished.fromPrivateNetwork = (!request_.proxy && guards_.address.reachedPrivate) || (url && core::IsPrivateHost(url->host));
     return finished;
 }
 

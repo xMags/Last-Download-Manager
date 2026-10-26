@@ -127,8 +127,9 @@ private:
         Transfer* owner = nullptr;
         CurlEasy easy;
         CurlSlist headerList;
+        CurlSlist ownHeaderList;  // headerList without the site's headers; only when it has some
         std::array<char, CURL_ERROR_SIZE> errorBuffer{};
-        AddressGuard addressGuard;
+        ConnectionGuards guards;
         std::uint32_t segmentKey = 0;
         std::int64_t requestStart = 0;
         bool probe = false;  // the first connection of the run; its response is validated in full

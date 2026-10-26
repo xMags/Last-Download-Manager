@@ -295,6 +295,59 @@ TEST_F(EngineTest, RedirectReportsFinalUrlAndServerName)
     EXPECT_TRUE(HoldsPayload(PartialPath(), server_->Size()));
 }
 
+// The same fixture address under another host name, as a redirect to another host gives it.
+std::string OnOtherHost(std::string url)
+{
+    const std::string from = "127.0.0.1";
+    return url.replace(url.find(from), from.size(), "localhost");
+}
+
+TEST_F(EngineTest, ASitesOwnHeadersStayOffARedirectToAnotherHost)
+{
+    TransferRequest request = Request("/redirect-to?to=" + OnOtherHost(server_->Url("/range.bin")));
+    request.headers = {"X-Stream-Key: k1"};
+    const auto finished = Run(std::move(request));
+    ASSERT_EQ(finished.outcome, TransferOutcome::Completed) << (finished.failure ? finished.failure->message : "");
+    EXPECT_TRUE(HoldsPayload(PartialPath(), server_->Size()));
+    const auto asked = Requests("/redirect-to");
+    ASSERT_FALSE(asked.empty());
+    for (const auto& entry : asked) {
+        EXPECT_EQ(entry.value("streamKey", std::string()), "k1") << entry.dump();
+    }
+    const auto served = Requests("/range.bin");
+    ASSERT_FALSE(served.empty());
+    for (const auto& entry : served) {
+        EXPECT_TRUE(entry.at("streamKey").is_null()) << "the key reached the other host: " << entry.dump();
+        EXPECT_TRUE(entry.value("host", std::string()).starts_with("localhost:")) << entry.dump();
+    }
+}
+
+TEST_F(EngineTest, ASitesOwnHeadersFollowARedirectOnTheSameHost)
+{
+    TransferRequest request = Request("/redirect-to?to=/range.bin");
+    request.headers = {"X-Stream-Key: k1"};
+    const auto finished = Run(std::move(request));
+    ASSERT_EQ(finished.outcome, TransferOutcome::Completed) << (finished.failure ? finished.failure->message : "");
+    const auto served = Requests("/range.bin");
+    ASSERT_FALSE(served.empty());
+    for (const auto& entry : served) {
+        EXPECT_EQ(entry.value("streamKey", std::string()), "k1") << entry.dump();
+    }
+}
+
+TEST_F(EngineTest, CredentialsStayOffTheHostARedirectWithSiteHeadersLeadsTo)
+{
+    // Asked again at the other host, the request is that host's first: libcurl would answer its
+    // login prompt with the credentials if they were still set.
+    TransferRequest request = Request("/redirect-to?to=" + OnOtherHost(server_->Url("/auth/basic.bin")));
+    request.headers = {"X-Stream-Key: k1"};
+    request.credentials = ldm::core::TransferCredentials{"ldm", "secret"};
+    const auto finished = Run(std::move(request));
+    EXPECT_EQ(finished.outcome, TransferOutcome::Failed);
+    ASSERT_TRUE(finished.failure);
+    EXPECT_EQ(finished.failure->reason, FailureReason::AuthRequired);
+}
+
 TEST_F(EngineTest, PauseAndResumeProducesIdenticalFile)
 {
     engine_->Start(Request("/range.bin", 1));
@@ -577,6 +630,21 @@ TEST_F(EngineTest, FetchSendsASitesOwnHeaders)
     ASSERT_TRUE(fetched);
     EXPECT_FALSE(fetched->failure) << fetched->failure->message;
     EXPECT_EQ(fetched->body.size(), static_cast<size_t>(server_->Size()));
+}
+
+TEST_F(EngineTest, AFetchKeepsASitesOwnHeadersOffAnotherHost)
+{
+    auto request = FetchOf(server_->Url("/redirect-to?to=" + OnOtherHost(server_->Url("/range.bin"))), 8 * 1024 * 1024);
+    request.headers = {"X-Stream-Key: k1"};
+    engine_->Fetch(std::move(request));
+    const auto fetched = listener_.WaitFor<ldm::core::FetchFinished>(DownloadId{}, 0, 60s);
+    ASSERT_TRUE(fetched);
+    ASSERT_FALSE(fetched->failure) << fetched->failure->message;
+    EXPECT_TRUE(fetched->finalUrl.starts_with("http://localhost:")) << fetched->finalUrl;
+    EXPECT_EQ(fetched->body.size(), static_cast<size_t>(server_->Size()));
+    const auto served = Requests("/range.bin");
+    ASSERT_EQ(served.size(), 1u);
+    EXPECT_TRUE(served.front().at("streamKey").is_null()) << served.front().dump();
 }
 
 // The Grabber's fetches (M4 design section 6.2): HEAD requests, pages only, site logins.

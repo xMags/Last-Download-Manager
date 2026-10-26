@@ -26,6 +26,11 @@ public:
     [[nodiscard]] bool Started() const noexcept { return added_; }
     [[nodiscard]] CURL* Handle() const noexcept { return easy_.get(); }
 
+    // Once libcurl reported the handle done with `result`: true when the request stopped before a
+    // redirect to another host and goes on there without the site's headers (see HostGuard). The
+    // handle is then running again, so Finish waits for its next result.
+    [[nodiscard]] bool ContinueElsewhere(CURLcode result);
+
     // The answer, once libcurl reported the handle done with `result` (or it never started).
     [[nodiscard]] core::FetchFinished Finish(CURLcode result);
 
@@ -47,8 +52,9 @@ private:
     bool typeChecked_ = false;
     bool bodySkipped_ = false;
     bool added_ = false;
+    bool resendFailed_ = false;  // ContinueElsewhere could not start the request again
     std::array<char, CURL_ERROR_SIZE> error_{};
-    AddressGuard addressGuard_;
+    ConnectionGuards guards_;
 };
 
 }  // namespace ldm::engine
