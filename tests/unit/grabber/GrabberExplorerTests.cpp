@@ -780,6 +780,72 @@ TEST_F(GrabberExplorerTest, ASavedPageNoLongerTakesItsBaseFromTheWebsite)
     EXPECT_EQ(start, R"(<base href="index.html"><a href="docs/a.html">A</a>)");
 }
 
+TEST_F(GrabberExplorerTest, PagesThatWouldShareAFileGetNumberedNamesAndTheirOwnLinks)
+{
+    Start();
+    // "about" is saved as about.html, like the page that is about.html; A.html is a.html to Windows.
+    Page("https://example.com/",
+         R"(<a href="about">1</a><a href="about.html">2</a><a href="a.html">3</a><a href="A.html">4</a><img src="logo.png">)");
+    Page("https://example.com/about", R"(<p>one</p>)");
+    Page("https://example.com/about.html", R"(<p>two</p>)");
+    Page("https://example.com/a.html", R"(<p>three</p>)");
+    Page("https://example.com/A.html", R"(<p>four</p>)");
+    auto definition = ldm::grabber::ApplyTemplate(Definition("https://example.com/"), ldm::model::GrabberTemplate::WholeSite);
+    definition.saveMode = ldm::model::GrabberSaveMode::OneFolder;
+    definition.folder = "C:\\Mirror";
+    const GrabberProjectId id = Save(definition);
+    explorer_->Handle(ldm::core::GrabberExploreCommand{id, false, {}});
+    Serve();
+
+    ASSERT_EQ(files_.written.size(), 5u) << "every page in a file of its own";
+    EXPECT_EQ(files_.written.at("C:/Mirror/example.com/index.html"),
+              R"(<a href="about.html">1</a><a href="about%20%282%29.html">2</a>)"
+              R"(<a href="a.html">3</a><a href="A%20%282%29.html">4</a><img src="https://example.com/logo.png">)");
+    EXPECT_EQ(files_.written.at("C:/Mirror/example.com/about.html"), R"(<p>one</p>)");
+    EXPECT_EQ(files_.written.at("C:/Mirror/example.com/about (2).html"), R"(<p>two</p>)");
+    EXPECT_EQ(files_.written.at("C:/Mirror/example.com/a.html"), R"(<p>three</p>)");
+    EXPECT_EQ(files_.written.at("C:/Mirror/example.com/A (2).html"), R"(<p>four</p>)");
+    const auto items = Items(id);
+    const auto* two = ByUrl(items, "https://example.com/about.html");
+    ASSERT_TRUE(two);
+    EXPECT_EQ(two->localPath, "C:\\Mirror\\example.com\\about (2).html");
+
+    // Relinked once the picture is downloaded: the numbered links stay as they are.
+    explorer_->Handle(ldm::core::GrabberDownloadCommand{id});
+    const auto adds = sink_.All<ldm::core::AddDownloadCommand>();
+    ASSERT_EQ(adds.size(), 1u);
+    Complete(adds[0].token, 100);
+    ldm::core::DownloadCompleted done;
+    done.id = DownloadId{100};
+    done.finalPath = "C:\\Mirror\\example.com\\logo.png";
+    done.inMainList = false;
+    EXPECT_TRUE(explorer_->TakeNotification(done));
+    EXPECT_EQ(files_.written.at("C:/Mirror/example.com/index.html"),
+              R"(<a href="about.html">1</a><a href="about%20%282%29.html">2</a>)"
+              R"(<a href="a.html">3</a><a href="A%20%282%29.html">4</a><img src="logo.png">)");
+}
+
+TEST_F(GrabberExplorerTest, WithoutSiteFoldersEachFolderPageKeepsItsOwnFile)
+{
+    Start();
+    Page("https://example.com/", R"(<a href="docs/">Docs</a><a href="blog/">Blog</a>)");
+    Page("https://example.com/docs/", R"(<a href="../">Home</a>)");
+    Page("https://example.com/blog/", R"(<p>blog</p>)");
+    auto definition = ldm::grabber::ApplyTemplate(Definition("https://example.com/"), ldm::model::GrabberTemplate::WholeSite);
+    definition.saveMode = ldm::model::GrabberSaveMode::OneFolder;
+    definition.folder = "C:\\Mirror";
+    definition.keepSiteFolders = false;
+    const GrabberProjectId id = Save(definition);
+    explorer_->Handle(ldm::core::GrabberExploreCommand{id, false, {}});
+    Serve();
+
+    ASSERT_EQ(files_.written.size(), 3u);
+    EXPECT_EQ(files_.written.at("C:/Mirror/index.html"),
+              R"(<a href="index%20%282%29.html">Docs</a><a href="index%20%283%29.html">Blog</a>)");
+    EXPECT_EQ(files_.written.at("C:/Mirror/index (2).html"), R"(<a href="index.html">Home</a>)");
+    EXPECT_EQ(files_.written.at("C:/Mirror/index (3).html"), R"(<p>blog</p>)");
+}
+
 TEST_F(GrabberExplorerTest, ValidatesProjects)
 {
     Start();
