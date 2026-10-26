@@ -383,6 +383,26 @@ TEST_F(EngineTest, PauseAndResumeProducesIdenticalFile)
     }
 }
 
+TEST_F(EngineTest, AFileThatIsAllOnDiskCompletesWithoutTheServerEvenWhenItCannotResume)
+{
+    // Downloaded whole, then its move to the final name failed (a program had the old file open):
+    // the next start has every byte, and a server that cannot resume has nothing to say about it.
+    const auto first = Run(Request("/no-range.bin", 1));
+    ASSERT_EQ(first.outcome, TransferOutcome::Completed) << (first.failure ? first.failure->message : "");
+    const auto info = listener_.WaitFor<ResponseInfo>(DownloadId{1}, 1, 1s);
+    ASSERT_TRUE(info);
+    ASSERT_FALSE(info->resumable);
+    server_->Reset();
+    auto again = Request("/no-range.bin", 2);
+    again.segments = first.segments;
+    again.knownSize = first.totalSize;
+    again.resumable = info->resumable;
+    const auto finished = Run(std::move(again));
+    ASSERT_EQ(finished.outcome, TransferOutcome::Completed) << (finished.failure ? finished.failure->message : "");
+    EXPECT_TRUE(HoldsPayload(PartialPath(), server_->Size()));
+    EXPECT_TRUE(Requests("/no-range.bin").empty()) << "nothing left to ask for";
+}
+
 TEST_F(EngineTest, FtpSegmentedDownloadMatchesPayload)
 {
     const auto finished = Run(FtpRequest());
