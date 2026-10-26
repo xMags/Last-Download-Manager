@@ -1328,6 +1328,62 @@ TEST_F(SiteRefreshTest, AVideoFromAListPicksItsQualityWhenItFirstStarts)
     EXPECT_EQ(stored->kind, ldm::model::DownloadKind::Dash);
 }
 
+TEST_F(SiteRefreshTest, AVideoFromAListWhoseSoundIsRefusedKeepsNoHalfOfItsTracks)
+{
+    const AddResult result = Add("https://www.youtube.com/watch?v=GvgqDSnpRQM", AddMode::Later, [](AddDownloadCommand& c) {
+        c.fileName = "Andrew.mp4";
+        ldm::core::MediaChoice media;
+        media.siteVideo = true;
+        media.siteQuality = ldm::model::SiteQuality::UpTo720;
+        c.media = media;
+    });
+    ASSERT_TRUE(result.id) << result.error.value_or("");
+    const DownloadId id = *result.id;
+    coordinator_->Handle(ldm::core::ResumeCommand{{id}});
+    ASSERT_EQ(sites_.asked.size(), 1u);
+
+    // The picture is fine; the sound comes with a format name LDM cannot ask for again.
+    const auto answer = [this](const std::string& audioFormat) {
+        ldm::core::SiteLookupFinished finished;
+        finished.lookupId = sites_.asked.back().lookupId;
+        ldm::media::SiteVideo video;
+        video.id = "GvgqDSnpRQM";
+        video.offer.format = ldm::media::StreamFormat::Hls;
+        ldm::media::Variant variant;
+        variant.resolution = ldm::media::Resolution{1280, 720};
+        variant.codecs = "avc1.640028";
+        variant.audioGroup = "file";
+        ldm::media::TrackSegments picture;
+        picture.segments.push_back(ldm::media::Segment{});
+        picture.segments.back().url = Address("136", 21'600);
+        variant.source = picture;
+        variant.site = ldm::media::SiteFormat{"136", std::nullopt};
+        video.offer.variants.push_back(variant);
+        ldm::media::Rendition audio;
+        audio.groupId = "file";
+        audio.isDefault = true;
+        audio.codecs = "mp4a.40.2";
+        ldm::media::TrackSegments sound;
+        sound.segments.push_back(ldm::media::Segment{});
+        sound.segments.back().url = Address("140", 21'600);
+        audio.source = sound;
+        audio.site = ldm::media::SiteFormat{audioFormat, std::nullopt};
+        video.offer.audio.push_back(audio);
+        finished.video = video;
+        Send(ldm::core::SiteLookupKey(finished.lookupId), 0, finished);
+    };
+    answer(std::string(65, 'a'));
+    EXPECT_TRUE(engine_.mediaStarts.empty());
+    EXPECT_EQ(View(id).download.status, DownloadStatus::Failed);
+    EXPECT_TRUE(View(id).download.tracks.empty()) << "not the picture alone";
+
+    // The next start picks its tracks again (from the same recent answer, refused again) instead
+    // of starting a video without sound.
+    coordinator_->Handle(ldm::core::ResumeCommand{{id}});
+    EXPECT_TRUE(engine_.mediaStarts.empty());
+    EXPECT_TRUE(View(id).download.tracks.empty());
+}
+
 TEST_F(SiteRefreshTest, ARefusedHlsTrackReadsItsFreshPlaylistAndKeepsThePiecesOnDisk)
 {
     const AddResult result = Add("https://www.youtube.com/watch?v=aqz-KE-bpKQ", AddMode::StartNow, [](AddDownloadCommand& c) {

@@ -273,7 +273,9 @@ private:
     void CancelMediaTools(Entry& entry);
     // Stores tracks whose lists or progress changed as a whole.
     void StoreTracks(Entry& entry, const std::vector<std::uint32_t>& tracks);
-    [[nodiscard]] std::optional<std::string> ValidateMedia(const MediaChoice& media, model::Download& download);
+    // Sets `target`'s stream and tracks from `media`, or gives the reason it is refused and
+    // leaves `target` as it was.
+    [[nodiscard]] std::optional<std::string> ValidateMedia(const MediaChoice& media, model::Download& target);
     void RequestStop(Entry& entry);
     void ResetProgress(Entry& entry);
     void RemoveEntry(model::DownloadId id, bool deleteFinalFile);
