@@ -128,6 +128,16 @@ void Transfer::Begin(Clock::time_point now)
 
     const bool segmentsBounded = std::all_of(segments_.begin(), segments_.end(),
                                              [](const Segment& segment) { return segment.end.has_value(); });
+    // Everything already on disk (its move to the final name failed last time) needs nothing from
+    // the server, which may not be able to resume at all; Service() completes the run.
+    if (totalSize_ && segmentsBounded &&
+        std::all_of(segments_.begin(), segments_.end(), [](const Segment& segment) { return segment.Received(); })) {
+        // Reported as the last run learned it, so the download keeps what it knows of the server.
+        resumable_ = request_.resumable.value_or(false);
+        rangesPossible_ = resumable_;
+        phase_ = Phase::Running;
+        return;
+    }
     if (!totalSize_ || request_.resumable == false || !segmentsBounded) {
         Fail(MakeFailure(FailureReason::ResumeUnsupported, FailureClass::NeedsUser,
                          "the server does not support resuming this download"));
@@ -135,10 +145,6 @@ void Transfer::Begin(Clock::time_point now)
     }
     rangesPossible_ = true;
     resumable_ = true;
-    if (std::all_of(segments_.begin(), segments_.end(), [](const Segment& segment) { return segment.Received(); })) {
-        phase_ = Phase::Running;  // everything is already on disk; Service() completes the run
-        return;
-    }
     FillSlots(now);
 }
 
