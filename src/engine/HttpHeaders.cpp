@@ -197,6 +197,10 @@ std::optional<std::string> ParseContentDispositionFileName(std::string_view valu
         if (equals == std::string_view::npos) {
             break;
         }
+        if (const size_t next = value.find(';', pos); next < equals) {
+            pos = next;  // a parameter without a value ("attachment; foo; filename=a.zip")
+            continue;
+        }
         const std::string name = ToLower(Trim(value.substr(pos, equals - pos)));
         pos = equals + 1;
         while (pos < value.size() && IsSpace(value[pos])) {
