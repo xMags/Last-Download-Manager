@@ -13,9 +13,12 @@ constexpr std::string_view kFallbackName = "download";
 // Leaves room for " (999)" and the ".ldmpart" suffix inside the 255 UTF-16 unit component limit.
 constexpr size_t kMaxNameUnits = 200;
 
-constexpr std::array<std::wstring_view, 24> kDeviceNames{
-    L"CON",  L"PRN",  L"AUX",  L"NUL",  L"CONIN$", L"CONOUT$", L"COM1", L"COM2", L"COM3", L"COM4", L"COM5", L"COM6",
-    L"COM7", L"COM8", L"COM9", L"LPT1", L"LPT2", L"LPT3", L"LPT4", L"LPT5", L"LPT6",   L"LPT7",    L"LPT8", L"LPT9",
+// Windows also reserves COM and LPT with the superscript digits 1, 2 and 3.
+constexpr std::array<std::wstring_view, 30> kDeviceNames{
+    L"CON",       L"PRN",       L"AUX",       L"NUL",       L"CONIN$",    L"CONOUT$",   L"COM1",      L"COM2",
+    L"COM3",      L"COM4",      L"COM5",      L"COM6",      L"COM7",      L"COM8",      L"COM9",      L"COM¹",
+    L"COM²", L"COM³", L"LPT1",      L"LPT2",      L"LPT3",      L"LPT4",      L"LPT5",      L"LPT6",
+    L"LPT7",      L"LPT8",      L"LPT9",      L"LPT¹", L"LPT²", L"LPT³",
 };
 
 int HexValue(char c) noexcept
