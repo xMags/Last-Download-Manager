@@ -21,6 +21,7 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <utility>
 
 namespace ldm::ui {
 
@@ -615,6 +616,8 @@ void MainController::RemoveSelected()
     if (selection.empty() || !snapshot) {
         return;
     }
+    // The downloads the question is about: the list goes on changing while it is open.
+    auto ids = context_.list->SelectedIds();
     const bool anyCompleted = std::any_of(selection.begin(), selection.end(), [](const auto* v) {
         return v->download.status == model::DownloadStatus::Completed;
     });
@@ -641,7 +644,7 @@ void MainController::RemoveSelected()
             });
         }
     }
-    Post(core::DeleteCommand{context_.list->SelectedIds(), deleteFiles});
+    Post(core::DeleteCommand{std::move(ids), deleteFiles});
 }
 
 void MainController::OpenSelected()
