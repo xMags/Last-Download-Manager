@@ -161,7 +161,9 @@ private:
                 CURL* easy = message->easy_handle;
                 const CURLcode result = message->data.result;
                 if (const auto fetch = fetches_.find(easy); fetch != fetches_.end()) {
-                    FinishFetch(fetch, result);
+                    if (!fetch->second->ContinueElsewhere(result)) {
+                        FinishFetch(fetch, result);
+                    }
                     continue;
                 }
                 if (ConnectionOwner* owner = ConnectionOwner::Of(easy)) {

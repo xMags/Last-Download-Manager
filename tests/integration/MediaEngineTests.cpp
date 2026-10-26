@@ -402,6 +402,38 @@ TEST_F(MediaEngineTest, ASitesOwnHeadersGoWithEveryPieceAndKey)
     EXPECT_GT(requests, static_cast<int>(track.pieces.size())) << "the pieces and the key";
 }
 
+TEST_F(MediaEngineTest, ASitesOwnHeadersStayOffAPieceRedirectedToAnotherHost)
+{
+    const auto track = Track(fixtures_->hlsTs);
+    auto redirected = track;
+    const std::string from = "127.0.0.1";
+    std::string other = track.pieces[1].url;
+    other.replace(other.find(from), from.size(), "localhost");
+    redirected.pieces[1].url = server_->Url("/redirect-to?to=" + other);
+    MediaRequest request = Request({TrackRequest(redirected)});
+    request.headers = {"X-Stream-Key: k1"};
+    engine_->StartMedia(std::move(request));
+    const auto finished = Finished(1);
+    ASSERT_TRUE(finished);
+    ASSERT_EQ(finished->outcome, TransferOutcome::Completed) << (finished->failure ? finished->failure->message : "");
+    const std::string served = ReadFile(fixtures_->hlsTs.parent_path() / other.substr(other.find_last_of('/') + 1));
+    EXPECT_EQ(ReadFile(ldm::core::PiecePath(parts_, 0, redirected, 1)), served);
+    const nlohmann::json log = server_->Log();
+    int elsewhere = 0;
+    for (const auto& entry : log.at("entries")) {
+        if (entry.value("event", "") != "request" || !entry.value("path", "").starts_with("/media")) {
+            continue;
+        }
+        if (entry.value("host", "").starts_with("localhost:")) {
+            EXPECT_TRUE(entry.at("streamKey").is_null()) << "the key reached the other host: " << entry.dump();
+            ++elsewhere;
+        } else {
+            EXPECT_EQ(entry.value("streamKey", std::string()), "k1") << entry.dump();
+        }
+    }
+    EXPECT_EQ(elsewhere, 1);
+}
+
 TEST_F(MediaEngineTest, AMissingPieceFailsTheRun)
 {
     auto track = Track(fixtures_->hlsTs);

@@ -1,5 +1,6 @@
 #include "engine/MediaRun.h"
 
+#include "core/Url.h"
 #include "engine/FailurePolicy.h"
 
 #include <algorithm>
@@ -297,8 +298,11 @@ CurlEasy MediaRun::NewEasy(Connection& connection, const std::string& url)
     curl_easy_setopt(handle, CURLOPT_HEADERFUNCTION, &MediaRun::HeaderCallback);
     curl_easy_setopt(handle, CURLOPT_HEADERDATA, &connection);
     ConnectionOwner::Attach(handle, this);
-    connection.addressGuard.refuse = request_.refusePrivateAddresses && !request_.proxy;
-    InstallAddressGuard(handle, &connection.addressGuard);
+    connection.guards.address.refuse = request_.refusePrivateAddresses && !request_.proxy;
+    if (!request_.headers.empty()) {
+        connection.guards.host.first = core::ParseUrl(url);  // the site's headers are for this host only
+    }
+    InstallGuards(handle, &connection.guards);
     return easy;
 }
 
@@ -519,7 +523,7 @@ void MediaRun::RemoveConnection(Connection& connection)
 
 std::optional<TransferFailure> MediaRun::ConnectionFailure(const Connection& connection, CURLcode result) const
 {
-    if (connection.addressGuard.refuse && connection.addressGuard.reachedPrivate) {
+    if (connection.guards.address.refuse && connection.guards.address.reachedPrivate) {
         return MakeFailure(FailureReason::PrivateAddress, FailureClass::Fatal,
                            "the address leads to a loopback or private network address");
     }
@@ -557,6 +561,14 @@ void MediaRun::OnConnectionDone(CURL* easy, CURLcode result, Clock::time_point n
         return;
     }
     Connection& connection = **it;
+    if (StoppedForOtherHost(connection.guards, result) && phase_ == Phase::Running && !closeRequested_) {
+        // Redirected to another host before any byte arrived: asked there again, without the
+        // site's headers.
+        if (ResendElsewhere(services_.multi, connection.guards, nullptr)) {
+            return;
+        }
+        connection.failure = MakeFailure(FailureReason::Internal, FailureClass::Fatal, "could not start a connection");
+    }
     if (connection.kind == Connection::Kind::Key) {
         FinishKey(connection, result, now);
     } else {

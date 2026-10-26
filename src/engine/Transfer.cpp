@@ -1,10 +1,13 @@
 #include "engine/Transfer.h"
 
+#include "core/Url.h"
 #include "engine/FailurePolicy.h"
 
 #include <algorithm>
 #include <cassert>
+#include <string>
 #include <utility>
+#include <vector>
 
 namespace ldm::engine {
 
@@ -298,19 +301,19 @@ void Transfer::StartConnection(Segment& segment, bool probe, Clock::time_point n
         }
         curl_easy_setopt(easy, CURLOPT_RANGE, range.c_str());  // copied by libcurl
     }
-    curl_slist* headers = nullptr;
+    std::vector<std::string> ownHeaders;  // the engine's own; the site's are added below
     if (connection->ranged && http_) {
         if (const auto ifRange = IfRangeValue()) {
-            headers = curl_slist_append(headers, ("If-Range: " + *ifRange).c_str());
+            ownHeaders.push_back("If-Range: " + *ifRange);
         }
     }
     if (probe && !resumeRun_ && http_ && request_.skipIfUnchanged && !request_.post) {
         // Synchronization asks the server whether its file is still the known one (RFC 9110 13.1).
         if (request_.validators.etag) {
-            headers = curl_slist_append(headers, ("If-None-Match: " + *request_.validators.etag).c_str());
+            ownHeaders.push_back("If-None-Match: " + *request_.validators.etag);
             conditionalRequest_ = true;
         } else if (request_.validators.lastModified && !request_.ignoreLastModified) {
-            headers = curl_slist_append(headers, ("If-Modified-Since: " + *request_.validators.lastModified).c_str());
+            ownHeaders.push_back("If-Modified-Since: " + *request_.validators.lastModified);
             conditionalRequest_ = true;
         }
     }
@@ -319,7 +322,21 @@ void Transfer::StartConnection(Segment& segment, bool probe, Clock::time_point n
         // browsers do.
         curl_easy_setopt(easy, CURLOPT_POSTFIELDSIZE_LARGE, static_cast<curl_off_t>(request_.post->body.size()));
         curl_easy_setopt(easy, CURLOPT_COPYPOSTFIELDS, request_.post->body.data());
-        headers = curl_slist_append(headers, ("Content-Type: " + request_.post->contentType).c_str());
+        ownHeaders.push_back("Content-Type: " + request_.post->contentType);
+    }
+    curl_slist* headers = nullptr;
+    for (const std::string& line : ownHeaders) {
+        headers = curl_slist_append(headers, line.c_str());
+    }
+    if (!request_.headers.empty()) {
+        // A site's headers are for its own host; a redirect to another host is asked again with
+        // the engine's headers only (OnConnectionDone).
+        connection->guards.host.first = core::ParseUrl(request_.url);
+        curl_slist* own = nullptr;
+        for (const std::string& line : ownHeaders) {
+            own = curl_slist_append(own, line.c_str());
+        }
+        connection->ownHeaderList.reset(own);
     }
     for (const std::string& line : request_.headers) {
         headers = curl_slist_append(headers, line.c_str());
@@ -334,8 +351,8 @@ void Transfer::StartConnection(Segment& segment, bool probe, Clock::time_point n
     curl_easy_setopt(easy, CURLOPT_HEADERFUNCTION, &Transfer::HeaderCallback);
     curl_easy_setopt(easy, CURLOPT_HEADERDATA, connection.get());
     ConnectionOwner::Attach(easy, this);
-    connection->addressGuard.refuse = request_.refusePrivateAddresses && !request_.proxy;
-    InstallAddressGuard(easy, &connection->addressGuard);
+    connection->guards.address.refuse = request_.refusePrivateAddresses && !request_.proxy;
+    InstallGuards(easy, &connection->guards);
 
     if (curl_multi_add_handle(services_.multi, easy) != CURLM_OK) {
         Fail(MakeFailure(FailureReason::Internal, FailureClass::Fatal, "could not start a connection"));
@@ -638,6 +655,15 @@ void Transfer::OnConnectionDone(CURL* easy, CURLcode result, Clock::time_point n
     if (connection == nullptr) {
         return;
     }
+    if (StoppedForOtherHost(connection->guards, result) && phase_ != Phase::Closing && phase_ != Phase::Done &&
+        !closeRequested_) {
+        // Redirected to another host before any byte arrived: asked there again, without the
+        // site's headers.
+        if (ResendElsewhere(services_.multi, connection->guards, connection->ownHeaderList.get())) {
+            return;
+        }
+        connection->failure = MakeFailure(FailureReason::Internal, FailureClass::Fatal, "could not start a connection");
+    }
     if (!connection->accepted && !connection->failure && !connection->rangeRejected && result == CURLE_OK &&
         phase_ != Phase::Closing && !closeRequested_) {
         // A response without a body (an error status, or an empty file) never reached OnData.
@@ -651,7 +677,7 @@ void Transfer::OnConnectionDone(CURL* easy, CURLcode result, Clock::time_point n
     const bool rangeRejected = connection->rangeRejected || restRefused;
     const bool finishedNormally = connection->reachedEnd || (result == CURLE_OK && connection->accepted);
     std::optional<TransferFailure> failure = connection->failure;
-    if (!failure && connection->addressGuard.refuse && connection->addressGuard.reachedPrivate) {
+    if (!failure && connection->guards.address.refuse && connection->guards.address.reachedPrivate) {
         failure = MakeFailure(FailureReason::PrivateAddress, FailureClass::Fatal,
                               "the address leads to a loopback or private network address");
     }

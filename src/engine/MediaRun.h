@@ -103,7 +103,7 @@ private:
         CurlEasy easy;
         CurlSlist headerList;
         std::array<char, CURL_ERROR_SIZE> errorBuffer{};
-        AddressGuard addressGuard;
+        ConnectionGuards guards;
         ResponseHeaders headers;
         bool accepted = false;
         std::optional<core::TransferFailure> failure;
