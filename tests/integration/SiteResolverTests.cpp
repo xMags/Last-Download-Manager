@@ -137,6 +137,16 @@ TEST_F(SiteResolverTest, AFailureGivesYtDlpsReasonAndWhoseProblemItIs)
     EXPECT_FALSE(garbage->video);
 }
 
+TEST_F(SiteResolverTest, SignInFilesLeftByAnEarlierRunAreRemovedAtStart)
+{
+    std::filesystem::create_directories(tools_.cacheFolder);
+    WriteFile(tools_.cacheFolder / L"sign-in-3.txt", "# Netscape HTTP Cookie File");
+    WriteFile(tools_.cacheFolder / L"other.txt", "yt-dlp's own");
+    ldm::platform::YtDlpResolver resolver(tools_, listener_);
+    EXPECT_FALSE(std::filesystem::exists(tools_.cacheFolder / L"sign-in-3.txt")) << "it held cookies in plain text";
+    EXPECT_TRUE(std::filesystem::exists(tools_.cacheFolder / L"other.txt"));
+}
+
 TEST_F(SiteResolverTest, MissingToolsAreSaidSoWithoutRunningAnything)
 {
     std::filesystem::remove(tools_.deno);

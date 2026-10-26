@@ -144,9 +144,32 @@ std::vector<std::wstring> YtDlpArguments(const YtDlpTools& tools, const core::Si
     return arguments;
 }
 
+namespace {
+
+// Sign-in files of lookups that never ended, because LDM was killed or crashed during them: they
+// hold the user's cookies in plain text. One LDM runs at a time, and no lookup of this one has
+// started yet.
+void RemoveLeftoverSignIns(const std::filesystem::path& folder)
+{
+    std::error_code error;
+    std::filesystem::directory_iterator entries(folder, error);
+    if (error) {
+        return;  // no folder yet: nothing was ever left there
+    }
+    for (const std::filesystem::directory_entry& entry : entries) {
+        const std::wstring name = entry.path().filename().wstring();
+        if (name.starts_with(L"sign-in-") && name.ends_with(L".txt")) {
+            std::filesystem::remove(entry.path(), error);
+        }
+    }
+}
+
+}  // namespace
+
 YtDlpResolver::YtDlpResolver(YtDlpTools tools, core::EngineListener& listener, std::shared_mutex* toolsLock)
     : tools_(std::move(tools)), listener_(listener), toolsLock_(toolsLock)
 {
+    RemoveLeftoverSignIns(tools_.cacheFolder);
     for (int i = 0; i < kWorkers; ++i) {
         workers_.emplace_back([this] { RunWorker(); });
     }
