@@ -11,9 +11,36 @@
 #include <shellapi.h>
 #include <windowsx.h>
 
+#include <algorithm>
 #include <filesystem>
 
 namespace ldm::ui {
+
+namespace {
+
+// A multi-line read-only field keeps its scroll bar only while its text is longer than the field;
+// a greyed-out bar beside one short line looks broken.
+void ShowScrollBarWhenNeeded(HWND edit)
+{
+    const HDC dc = ::GetDC(edit);
+    if (dc == nullptr) {
+        return;
+    }
+    const auto font = reinterpret_cast<HFONT>(::SendMessageW(edit, WM_GETFONT, 0, 0));  // WM_GETFONT returns the HFONT
+    const HGDIOBJ previous = ::SelectObject(dc, font != nullptr ? static_cast<HGDIOBJ>(font) : ::GetStockObject(DEFAULT_GUI_FONT));
+    TEXTMETRICW metrics{};
+    const BOOL measured = ::GetTextMetricsW(dc, &metrics);
+    ::SelectObject(dc, previous);
+    ::ReleaseDC(edit, dc);
+    RECT client{};
+    if (measured == FALSE || metrics.tmHeight <= 0 || ::GetClientRect(edit, &client) == FALSE) {
+        return;
+    }
+    const int visibleLines = std::max(1, static_cast<int>(client.bottom - client.top) / static_cast<int>(metrics.tmHeight));
+    ::ShowScrollBar(edit, SB_VERT, Edit_GetLineCount(edit) > visibleLines ? TRUE : FALSE);
+}
+
+}  // namespace
 
 PropertiesDialog::PropertiesDialog(const Theme& theme, core::DownloadView view, Callbacks callbacks)
     : Dialog(IDD_PROPERTIES, theme), view_(std::move(view)), callbacks_(std::move(callbacks))
@@ -59,6 +86,7 @@ bool PropertiesDialog::OnInit()
     }
     SetText(IDC_PROP_LASTTRY, FormatDateTime(d.lastTryAtMs));
     SetText(IDC_PROP_RESULT, base::ToUtf16(d.lastResult.value_or(d.status == model::DownloadStatus::Completed ? "Complete" : "")));
+    ShowScrollBarWhenNeeded(Item(IDC_PROP_RESULT));
     const bool running = d.status == model::DownloadStatus::Downloading || d.status == model::DownloadStatus::Stopping;
     Enable(IDC_PROP_OPEN, d.status == model::DownloadStatus::Completed);
     Enable(IDC_PROP_MOVE, !running && d.status != model::DownloadStatus::Finalizing);
@@ -138,6 +166,7 @@ std::optional<MoveDialog::Choice> MoveDialog::Run(HWND owner)
 
 bool MoveDialog::OnInit()
 {
+    AlignWithField(IDC_MOVE_BROWSE, IDC_MOVE_FOLDER);
     for (const std::string& folder : recentFolders_) {
         ComboBox_AddString(Item(IDC_MOVE_FOLDER), base::ToUtf16(folder).c_str());
     }

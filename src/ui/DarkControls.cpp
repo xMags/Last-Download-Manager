@@ -311,8 +311,14 @@ void PaintTab(HWND tab, HDC dc, const Theme& theme)
 
     const int count = TabCtrl_GetItemCount(tab);
     const int selected = TabCtrl_GetCurSel(tab);
-    RECT first{};
-    const int stripBottom = count > 0 && TabCtrl_GetItemRect(tab, 0, &first) ? first.bottom : client.top;
+    // The page starts below the lowest tab: with several rows of tabs, the first one may not be there.
+    int stripBottom = client.top;
+    for (int i = 0; i < count; ++i) {
+        RECT item{};
+        if (TabCtrl_GetItemRect(tab, i, &item)) {
+            stripBottom = std::max(stripBottom, static_cast<int>(item.bottom));
+        }
+    }
     UniqueBrush border(::CreateSolidBrush(colors.listBorder));
     UniqueBrush idle(::CreateSolidBrush(colors.window));
     const RECT page{client.left, stripBottom, client.right, client.bottom};

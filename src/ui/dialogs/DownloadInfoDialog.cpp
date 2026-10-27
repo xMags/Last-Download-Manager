@@ -30,6 +30,8 @@ bool DownloadInfoDialog::OnInit()
     settingText_ = true;
     nameEdited_ = initial_.fileNameFixed;
     folderEdited_ = initial_.saveDirFixed;
+    AlignWithField(IDC_INFO_ADD_CATEGORY, IDC_INFO_CATEGORY);
+    AlignWithField(IDC_INFO_BROWSE, IDC_INFO_FOLDER);
     SetText(IDC_INFO_URL, base::ToUtf16(initial_.url));
     SetText(IDC_INFO_NAME, base::ToUtf16(initial_.fileName));
     const HWND folders = Item(IDC_INFO_FOLDER);
