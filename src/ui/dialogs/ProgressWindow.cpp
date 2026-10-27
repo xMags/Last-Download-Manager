@@ -40,6 +40,56 @@ bool IsRunning(model::DownloadStatus status)
     return status == model::DownloadStatus::Downloading || status == model::DownloadStatus::Stopping;
 }
 
+struct PlaceSearch {
+    HWND self;
+    POINT topLeft;
+    bool taken;
+};
+
+BOOL CALLBACK FindWindowAtPlace(HWND window, LPARAM lParam)
+{
+    auto& search = *reinterpret_cast<PlaceSearch*>(lParam);  // passed by CascadeFromOpenWindows
+    RECT rect{};
+    if (window == search.self || ::IsWindowVisible(window) == FALSE || ::GetWindowRect(window, &rect) == FALSE) {
+        return TRUE;
+    }
+    if (rect.left == search.topLeft.x && rect.top == search.topLeft.y) {
+        search.taken = true;
+        return FALSE;
+    }
+    return TRUE;
+}
+
+// The template centers every progress window on the screen, so downloads that start together
+// would open exactly on top of each other. Each one steps down and right past any LDM window
+// already there, within the work area.
+void CascadeFromOpenWindows(HWND window)
+{
+    RECT rect{};
+    ::GetWindowRect(window, &rect);
+    MONITORINFO monitor{sizeof(monitor)};
+    ::GetMonitorInfoW(::MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST), &monitor);
+    const RECT& work = monitor.rcWork;
+    const UINT dpi = ::GetDpiForWindow(window);
+    const int step = ::GetSystemMetricsForDpi(SM_CYCAPTION, dpi) + ::GetSystemMetricsForDpi(SM_CYFRAME, dpi);
+    PlaceSearch search{window, {rect.left, rect.top}, false};
+    for (int i = 0; i < 32; ++i) {
+        search.taken = false;
+        ::EnumThreadWindows(::GetCurrentThreadId(), &FindWindowAtPlace, reinterpret_cast<LPARAM>(&search));
+        if (!search.taken) {
+            break;
+        }
+        search.topLeft.x += step;
+        search.topLeft.y += step;
+        if (search.topLeft.x + (rect.right - rect.left) > work.right || search.topLeft.y + (rect.bottom - rect.top) > work.bottom) {
+            return;  // no free step left on screen: stay centered
+        }
+    }
+    if (search.topLeft.x != rect.left) {
+        ::SetWindowPos(window, nullptr, search.topLeft.x, search.topLeft.y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+    }
+}
+
 }  // namespace
 
 ProgressWindow::ProgressWindow(const Theme& theme, model::DownloadId id, Callbacks callbacks)
@@ -56,6 +106,7 @@ void ProgressWindow::Open(HWND owner, const core::DownloadView& view, const mode
     if (Handle() == nullptr) {
         return;
     }
+    CascadeFromOpenWindows(Handle());
     // Tabs depend on the settings, so they are built here rather than in OnInit.
     const HWND tab = Item(IDC_PROG_TAB);
     const auto addTab = [&](const wchar_t* title, int page) {
