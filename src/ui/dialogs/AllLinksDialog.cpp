@@ -76,9 +76,9 @@ std::optional<AllLinksDialog::Choice> AllLinksDialog::Run(HWND owner)
 bool AllLinksDialog::OnInit()
 {
     if (!initial_.title.empty()) {
-        ::SetWindowTextW(Handle(), initial_.title.c_str());
+        SetTitle(initial_.title);
     } else if (initial_.selection) {
-        ::SetWindowTextW(Handle(), L"Download Selected Links with LDM");
+        SetTitle(L"Download Selected Links with LDM");
     }
     if (checkingStopped_) {
         // No browser checks these links: types come from their names, sizes are not known.
@@ -501,7 +501,7 @@ bool LinkEditDialog::OnInit()
     SetText(IDC_LINK_EDIT_NAME, values_.name);
     SetText(IDC_LINK_EDIT_DESC, values_.description);
     if (count_ > 1) {
-        ::SetWindowTextW(Handle(), (L"Rename " + std::to_wstring(count_) + L" links").c_str());
+        SetTitle(L"Rename " + std::to_wstring(count_) + L" links");
         SetText(IDC_LINK_EDIT_NAME_LABEL, L"&File name pattern:");
         SetText(IDC_LINK_EDIT_HINT, L"* becomes a number in list order: photo* names them photo1, photo2 and so on, "
                                     L"each keeping its own extension unless the pattern gives one.");

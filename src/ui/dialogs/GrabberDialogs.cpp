@@ -255,7 +255,7 @@ std::optional<std::string> GrabberNameDialog::Run(HWND owner)
 
 bool GrabberNameDialog::OnInit()
 {
-    ::SetWindowTextW(Handle(), title_.c_str());
+    SetTitle(title_);
     ::SendMessageW(Item(IDC_GN_NAME), EM_LIMITTEXT, kMaxNameCharacters, 0);
     SetText(IDC_GN_NAME, initial_);
     ::SendMessageW(Item(IDC_GN_NAME), EM_SETSEL, 0, -1);

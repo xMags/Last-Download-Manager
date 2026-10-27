@@ -97,10 +97,6 @@ const grabber::GrabberProjectView* GrabberWindow::View() const
 
 bool GrabberWindow::OnInit()
 {
-    ::SendMessageW(Handle(), WM_SETICON, ICON_BIG,
-                   reinterpret_cast<LPARAM>(::LoadIconW(::GetModuleHandleW(nullptr), MAKEINTRESOURCEW(IDI_LDM))));
-    ::SendMessageW(Handle(), WM_SETICON, ICON_SMALL,
-                   reinterpret_cast<LPARAM>(::LoadIconW(::GetModuleHandleW(nullptr), MAKEINTRESOURCEW(IDI_LDM))));
     const HWND list = Item(IDC_GG_LIST);
     ListView_SetExtendedListViewStyle(list, LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER | LVS_EX_CHECKBOXES);
     for (int i = 0; i < kColumnCount; ++i) {
@@ -174,10 +170,8 @@ void GrabberWindow::Update(std::shared_ptr<const grabber::GrabberSnapshot> snaps
     }
     seen_ = true;
     const std::wstring title = L"Site Grabber - " + base::ToUtf16(view->project.name);
-    wchar_t current[512] = {};
-    ::GetWindowTextW(Handle(), current, 512);
-    if (title != current) {
-        ::SetWindowTextW(Handle(), title.c_str());
+    if (title != Title()) {
+        SetTitle(title);
     }
     RefreshTree();
     RefreshRows();

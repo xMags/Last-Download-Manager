@@ -72,7 +72,7 @@ bool GrabberWizard::OnInit()
 {
     loading_ = true;
     if (project_.isTemplate) {
-        ::SetWindowTextW(Handle(), L"Site Grabber template");
+        SetTitle(L"Site Grabber template");
     }
     for (const TemplateChoice& choice : TemplateChoices()) {
         ComboBox_AddString(Item(IDC_GW_TEMPLATE), choice.name);

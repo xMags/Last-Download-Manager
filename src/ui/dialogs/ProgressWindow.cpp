@@ -222,7 +222,7 @@ void ProgressWindow::Update(const core::DownloadView& view, const model::Setting
     if (fraction) {
         title = std::to_wstring(static_cast<int>(std::floor(*fraction * 100.0))) + L"% " + title;
     }
-    ::SetWindowTextW(Handle(), title.c_str());
+    SetTitle(title);
     SetText(IDC_PROG_URL, base::ToUtf16(d.url));
     std::wstring status = FormatStatus(view);
     if (view.retrying && d.status == model::DownloadStatus::Downloading) {

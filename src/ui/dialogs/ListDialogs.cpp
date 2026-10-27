@@ -244,7 +244,7 @@ std::optional<UrlListDialog::Choice> UrlListDialog::Run(HWND owner)
 
 bool UrlListDialog::OnInit()
 {
-    ::SetWindowTextW(Handle(), title_.c_str());
+    SetTitle(title_);
     const HWND list = Item(IDC_LIST_URLS);
     ListView_SetExtendedListViewStyle(list, LVS_EX_CHECKBOXES | LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER | LVS_EX_LABELTIP);
     ApplyListTheme(list, CurrentTheme());

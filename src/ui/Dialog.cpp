@@ -1,11 +1,13 @@
 #include "ui/Dialog.h"
 
+#include "resource.h"
 #include "ui/dialogs/MessageDialog.h"
 
 #include <commctrl.h>
 
 #include <cwchar>
 #include <iterator>
+#include <string_view>
 #include <vector>
 
 namespace ldm::ui {
@@ -14,6 +16,26 @@ namespace {
 
 // Private to Dialog's window procedure; dialogs use no other WM_APP messages.
 constexpr UINT kBringToFrontMessage = WM_APP + 0x3F0;
+
+constexpr std::wstring_view kProgramName = L"Last Download Manager";
+
+std::wstring WindowText(HWND window)
+{
+    const int length = ::GetWindowTextLengthW(window);
+    std::wstring text(static_cast<size_t>(length) + 1, L'\0');
+    text.resize(static_cast<size_t>(::GetWindowTextW(window, text.data(), length + 1)));
+    return text;
+}
+
+UniqueIcon LoadProgramIcon(int metric, UINT dpi)
+{
+    const int size = ::GetSystemMetricsForDpi(metric, dpi);
+    HICON icon = nullptr;
+    if (FAILED(::LoadIconWithScaleDown(::GetModuleHandleW(nullptr), MAKEINTRESOURCEW(IDI_LDM), size, size, &icon))) {
+        return nullptr;
+    }
+    return UniqueIcon(icon);
+}
 
 bool IsLink(HWND control)
 {
@@ -69,6 +91,8 @@ INT_PTR CALLBACK Dialog::DialogProc(HWND window, UINT message, WPARAM wParam, LP
         auto* self = reinterpret_cast<Dialog*>(lParam);  // passed by RunModal/CreateModeless
         ::SetWindowLongPtrW(window, DWLP_USER, lParam);
         self->window_ = window;
+        self->ApplyIcons();
+        self->SetTitle(WindowText(window));
         self->theme_.ApplyToTopLevel(window);
         self->theme_.ApplyToChildren(window);
         if (self->modal_) {
@@ -165,6 +189,29 @@ bool Dialog::OnCommand(int id, int code, HWND control)
     return false;
 }
 
+void Dialog::SetTitle(const std::wstring& title)
+{
+    title_ = title;
+    // Titles that already name the program (About, the plain notices) keep it once.
+    std::wstring shown = title;
+    if (shown.empty()) {
+        shown = kProgramName;
+    } else if (shown.find(kProgramName) == std::wstring::npos) {
+        shown.append(L" - ").append(kProgramName);
+    }
+    ::SetWindowTextW(window_, shown.c_str());
+}
+
+void Dialog::ApplyIcons()
+{
+    // Without its own icon a dialog shows none in the title bar and a generic one on the taskbar.
+    const UINT dpi = ::GetDpiForWindow(window_);
+    bigIcon_ = LoadProgramIcon(SM_CXICON, dpi);
+    smallIcon_ = LoadProgramIcon(SM_CXSMICON, dpi);
+    ::SendMessageW(window_, WM_SETICON, ICON_BIG, reinterpret_cast<LPARAM>(bigIcon_.get()));
+    ::SendMessageW(window_, WM_SETICON, ICON_SMALL, reinterpret_cast<LPARAM>(smallIcon_.get()));
+}
+
 void Dialog::Close(INT_PTR result)
 {
     if (modal_) {
@@ -212,6 +259,18 @@ void Dialog::Enable(int id, bool enabled)
 void Dialog::Show(int id, bool visible)
 {
     ::ShowWindow(Item(id), visible ? SW_SHOW : SW_HIDE);
+}
+
+void Dialog::AlignWithField(int buttonId, int fieldId)
+{
+    RECT field{};
+    RECT button{};
+    if (::GetWindowRect(Item(fieldId), &field) == FALSE || ::GetWindowRect(Item(buttonId), &button) == FALSE) {
+        return;
+    }
+    ::MapWindowPoints(nullptr, window_, reinterpret_cast<POINT*>(&field), 2);
+    ::MapWindowPoints(nullptr, window_, reinterpret_cast<POINT*>(&button), 2);
+    ::MoveWindow(Item(buttonId), button.left, field.top, button.right - button.left, field.bottom - field.top, TRUE);
 }
 
 std::optional<int> Dialog::Number(int id) const

@@ -42,9 +42,7 @@ std::vector<std::pair<HWND, std::wstring>> TransferWindows::Windows() const
         if (window->Handle() == nullptr) {
             continue;
         }
-        wchar_t title[256] = {};
-        ::GetWindowTextW(window->Handle(), title, static_cast<int>(std::size(title)));
-        windows.emplace_back(window->Handle(), title);
+        windows.emplace_back(window->Handle(), window->Title());  // the tray menu needs no program name
     }
     return windows;
 }
