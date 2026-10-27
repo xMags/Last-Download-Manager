@@ -489,15 +489,27 @@ void MainWindow::RestorePlacement(const std::string& placement, int showCommand)
     RECT rect{};
     UINT storedShow = SW_SHOWNORMAL;
     int treeWidth = treeWidth96_;
-    if (ParsePlacement(placement, rect, storedShow, treeWidth)) {
-        treeWidth96_ = treeWidth;
-        WINDOWPLACEMENT data{sizeof(data)};
-        data.rcNormalPosition = rect;
-        data.showCmd = SW_HIDE;
-        ::SetWindowPlacement(window_, &data);
-        if (storedShow == SW_SHOWMAXIMIZED && showCommand == SW_SHOWNORMAL) {
-            initialShowCommand_ = SW_SHOWMAXIMIZED;
-        }
+    if (!ParsePlacement(placement, rect, storedShow, treeWidth)) {
+        // Nothing remembered yet (first start): open in the middle of the screen rather than
+        // where Windows cascades new windows, near the top-left corner.
+        RECT window{};
+        ::GetWindowRect(window_, &window);
+        MONITORINFO monitor{sizeof(monitor)};
+        ::GetMonitorInfoW(::MonitorFromWindow(window_, MONITOR_DEFAULTTOPRIMARY), &monitor);
+        const RECT& work = monitor.rcWork;
+        const int width = std::min(window.right - window.left, work.right - work.left);
+        const int height = std::min(window.bottom - window.top, work.bottom - work.top);
+        ::SetWindowPos(window_, nullptr, work.left + (work.right - work.left - width) / 2,
+                       work.top + (work.bottom - work.top - height) / 2, width, height, SWP_NOZORDER | SWP_NOACTIVATE);
+        return;
+    }
+    treeWidth96_ = treeWidth;
+    WINDOWPLACEMENT data{sizeof(data)};
+    data.rcNormalPosition = rect;
+    data.showCmd = SW_HIDE;
+    ::SetWindowPlacement(window_, &data);
+    if (storedShow == SW_SHOWMAXIMIZED && showCommand == SW_SHOWNORMAL) {
+        initialShowCommand_ = SW_SHOWMAXIMIZED;
     }
 }
 
