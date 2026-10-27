@@ -65,7 +65,7 @@ bool CategoryDialog::OnInit()
     if (category_.builtin) {
         ::SendMessageW(Item(IDC_CAT_NAME), EM_SETREADONLY, TRUE, 0);  // built-in names stay
     }
-    ::SetWindowTextW(Handle(), category_.id.value == 0 ? L"Add category" : L"Category properties");
+    SetTitle(category_.id.value == 0 ? L"Add category" : L"Category properties");
     return true;
 }
 
