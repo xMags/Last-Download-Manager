@@ -393,6 +393,14 @@ TEST(BrowserProtocol, ParsesSitePages)
     EXPECT_FALSE(ldm::browser::ParseMessage(with(R"("incognito":false,)", "")));
     EXPECT_FALSE(ldm::browser::ParseMessage(with(R"(,"userAgent":"Mozilla/5.0")", "")));
     EXPECT_FALSE(ldm::browser::ParseMessage(with("Bunny - YouTube", "Bunny\n")));
+    EXPECT_FALSE(page->postUrl) << "sent only for a page that plays a post";
+    const auto withPost =
+        ldm::browser::ParseMessage(with(R"("userAgent")", R"("postUrl":"https://www.instagram.com/p/Df73FH-z-SF/","userAgent")"));
+    ASSERT_TRUE(withPost);
+    EXPECT_EQ(std::get<ldm::browser::SitePage>(withPost->message).postUrl, "https://www.instagram.com/p/Df73FH-z-SF/");
+    EXPECT_FALSE(ldm::browser::ParseMessage(with(R"("userAgent")", R"("postUrl":"javascript:void","userAgent")")));
+    EXPECT_FALSE(ldm::browser::ParseMessage(
+        with(R"("userAgent")", R"("postUrl":"https://a.test/)" + std::string(2100, 'x') + R"(","userAgent")")));
 }
 
 TEST(BrowserProtocol, ParsesSiteRequests)

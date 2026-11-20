@@ -56,6 +56,38 @@ TEST(SiteList, OtherListedSitesGiveTheirVideoPagesWithoutWhatThePageAdded)
     EXPECT_EQ(Listed("https://www.instagram.com/reels/C9x5pUZvXmD/"), "https://www.instagram.com/reel/C9x5pUZvXmD/");
 }
 
+// The post a page plays, as the media panel looks it up; "(none)" when the link is not taken.
+std::string Played(const std::string& page, const std::string& post)
+{
+    const auto found = ldm::core::CheckPlayedPost(page, post);
+    return found && found->automatic ? found->address : std::string("(none)");
+}
+
+TEST(SiteList, APostAFeedPlaysIsLookedUpAtTheAddressBuiltFromItsId)
+{
+    const std::string feed = "https://www.instagram.com/";
+    EXPECT_EQ(Played(feed, "https://www.instagram.com/p/Df73FH-z-SF/"), "https://www.instagram.com/p/Df73FH-z-SF/");
+    EXPECT_EQ(Played(feed, "https://www.instagram.com/reels/Df73FH-z-SF/"), "https://www.instagram.com/reel/Df73FH-z-SF/");
+    EXPECT_EQ(Played(feed, "https://www.instagram.com/reel/Df73FH-z-SF"), "https://www.instagram.com/reel/Df73FH-z-SF/");
+    EXPECT_EQ(Played(feed, "https://www.instagram.com/tv/Df73FH-z-SF/"), "https://www.instagram.com/p/Df73FH-z-SF/");
+    EXPECT_EQ(Played("https://www.instagram.com/someone/", "https://instagram.com/someone/p/Df73FH-z-SF/?img_index=2#x"),
+              "https://www.instagram.com/p/Df73FH-z-SF/");
+}
+
+TEST(SiteList, OnlyAPostOfTheSameListedSiteIsTakenFromAPage)
+{
+    const std::string feed = "https://www.instagram.com/";
+    EXPECT_EQ(Played(feed, "https://www.instagram.com/someone/"), "(none)");
+    EXPECT_EQ(Played(feed, "https://www.instagram.com/reels/audio/289899292054200/"), "(none)");
+    EXPECT_EQ(Played(feed, "https://www.instagram.com/p/Df73FH-z-SF/liked_by/"), "(none)");
+    EXPECT_EQ(Played(feed, "https://www.instagram.com/p/bad%20id/"), "(none)");
+    EXPECT_EQ(Played(feed, "https://www.instagram.com:8443/p/Df73FH-z-SF/"), "(none)");
+    EXPECT_EQ(Played(feed, "https://evil.test/p/Df73FH-z-SF/"), "(none)") << "another site";
+    EXPECT_EQ(Played(feed, "https://user:pw@www.instagram.com/p/Df73FH-z-SF/"), "(none)");
+    EXPECT_EQ(Played("https://evil.test/", "https://www.instagram.com/p/Df73FH-z-SF/"), "(none)") << "a page of another site";
+    EXPECT_EQ(Played("https://www.youtube.com/", "https://www.instagram.com/p/Df73FH-z-SF/"), "(none)");
+}
+
 TEST(SiteList, PagesThatAreNotCertainlyOneVideoAreNotListed)
 {
     for (const char* page : {

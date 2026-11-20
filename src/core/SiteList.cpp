@@ -416,6 +416,43 @@ std::optional<SitePage> CheckSitePage(std::string_view pageUrl)
     return page;
 }
 
+std::optional<SitePage> CheckPlayedPost(std::string_view pageUrl, std::string_view postUrl)
+{
+    // Both pass the checks of any page asked about (a public http(s) host, no user name, no spaces).
+    if (!CheckSitePage(pageUrl) || !CheckSitePage(postUrl)) {
+        return std::nullopt;
+    }
+    const auto page = ParseUrl(pageUrl);
+    const auto post = ParseUrl(postUrl.substr(0, postUrl.find('#')));
+    if (!page || !post) {
+        return std::nullopt;
+    }
+    const auto isInstagram = [](const Url& url) {
+        return HostIs(url.host, {"instagram.com", "www.instagram.com"}) && (!url.port || *url.port == 443 || *url.port == 80);
+    };
+    const auto path = Segments(post->path);
+    if (!isInstagram(*page) || !isInstagram(*post) || !path) {
+        return std::nullopt;
+    }
+    // "/p/<id>/", or "/<account>/p/<id>/" as some of the site's links have it.
+    std::vector<std::string_view> segments = *path;
+    if (segments.size() == 3) {
+        segments.erase(segments.begin());
+    }
+    if (segments.size() != 2 || !IsSlug(segments[1])) {
+        return std::nullopt;
+    }
+    std::string kind;
+    if (segments[0] == "p" || segments[0] == "tv") {
+        kind = "p";
+    } else if (segments[0] == "reel" || segments[0] == "reels") {
+        kind = "reel";
+    } else {
+        return std::nullopt;
+    }
+    return SitePage{"https://www.instagram.com/" + kind + "/" + std::string(segments[1]) + "/", true};
+}
+
 const std::vector<SignInSite>& SignInSites()
 {
     static const std::vector<SignInSite> sites{

@@ -81,11 +81,83 @@
       const playing = !video.paused && !video.ended && video.readyState > 2;
       const score = visibleWidth * visibleHeight * (playing ? 4 : 1);
       if (score > bestScore) {
-        best = { rect, playing };
+        best = { video, rect, playing };
         bestScore = score;
       }
     }
     return best ? { ...best, score: bestScore } : null;
+  }
+
+  // A post's address on the listed sites that play posts in a feed (Instagram): "/p/<id>/",
+  // "/reel/<id>/", "/reels/<id>/" or "/tv/<id>/", some with the account's name first.
+  const POST_PATH = /^\/(?:[\w.-]+\/)?(?:p|reel|reels|tv)\/([\w-]+)\/?$/;
+  // How far up from the video the link to its post is looked for.
+  const MAX_POST_DEPTH = 25;
+  // How often the top frame checks which post plays, while the background asks it to.
+  const POST_CHECK_MS = 1000;
+  let watchingPosts = false;
+  let postTimer = 0;
+  let sentPost;  // the post last sent: undefined before the first, null for none
+  let seenPost;  // the post of the last check, sent once a second check agrees
+
+  /**
+   * The link to the post that holds `video`: the nearest enclosing element with links to posts of
+   * this site, when they all name one post. Nothing once an enclosing element holds another video
+   * as well (the feed around the post) or links to several posts.
+   */
+  function postLinkOf(video) {
+    let element = video.parentElement;
+    for (let depth = 0; element && depth < MAX_POST_DEPTH; depth++, element = element.parentElement) {
+      if (element.querySelectorAll('video').length > 1) {
+        return null;
+      }
+      let link = null;
+      const ids = new Set();
+      for (const anchor of element.querySelectorAll('a[href]')) {
+        let address;
+        try {
+          address = new URL(anchor.href, location.href);
+        } catch {
+          continue;
+        }
+        const id = address.hostname === location.hostname ? POST_PATH.exec(address.pathname)?.[1] : undefined;
+        if (id) {
+          ids.add(id);
+          link ??= address.origin + address.pathname;
+        }
+      }
+      if (ids.size > 0) {
+        return ids.size === 1 ? link : null;
+      }
+    }
+    return null;
+  }
+
+  function checkPost() {
+    if (!watchingPosts || document.visibilityState !== 'visible') {
+      return;
+    }
+    const found = bestVideo();
+    const post = found ? postLinkOf(found.video) : null;
+    // Sent once two checks agree, so scrolling past a video does not look it up.
+    if (post !== seenPost) {
+      seenPost = post;
+      return;
+    }
+    if (post !== sentPost) {
+      sentPost = post;
+      send({ type: 'video-post', url: post });
+    }
+  }
+
+  function setWatchingPosts(on) {
+    watchingPosts = on && isTop;
+    clearInterval(postTimer);
+    sentPost = undefined;
+    seenPost = undefined;
+    if (watchingPosts) {
+      postTimer = setInterval(checkPost, POST_CHECK_MS);
+    }
   }
 
   /** Tells each child frame where it sits in the top frame's viewport. */
@@ -187,6 +259,8 @@
   api.runtime.onMessage.addListener((message) => {
     if (message?.type === 'ldm-track-video' && typeof message.on === 'boolean') {
       setTracking(message.on);
+    } else if (message?.type === 'ldm-watch-posts' && typeof message.on === 'boolean') {
+      setWatchingPosts(message.on);
     }
   });
 

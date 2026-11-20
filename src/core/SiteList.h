@@ -28,6 +28,13 @@ struct SitePage {
 // of at most kMaxSitePageBytes and without control characters or spaces.
 [[nodiscard]] std::optional<SitePage> CheckSitePage(std::string_view pageUrl);
 
+// The post whose video a page of a listed site plays, from `postUrl`: the link to the post that the
+// browser extension found next to the video (a feed or profile, whose own address is no video).
+// The link comes from the page, so it is taken only as a post address of the same site as
+// `pageUrl` (Instagram's /p/, /reel/, /reels/ and /tv/ posts), rebuilt from the post's id. The
+// result is automatic; nothing when the link is not such a post.
+[[nodiscard]] std::optional<SitePage> CheckPlayedPost(std::string_view pageUrl, std::string_view postUrl);
+
 // The hosts of the listed sites, for the browser extension to report pages of (the panel's
 // automatic offer). A host matches itself and its subdomains.
 [[nodiscard]] std::vector<std::string> AutomaticSiteHosts();

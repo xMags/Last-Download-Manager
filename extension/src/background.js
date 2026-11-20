@@ -50,6 +50,8 @@ const connection = new LdmConnection(api, {
     // LDM hears the open tabs' site addresses again (it ignores a video it already knows).
     if (config.sitePages) {
       sitePages.announceAll().catch((error) => console.warn('LDM: site pages failed', error));
+    } else {
+      sitePages.stopWatching();
     }
   },
   onMessage: (message) => {
@@ -356,6 +358,11 @@ function onPageMessage(message, sender, reply) {
       break;
     case 'video-finder-ready':
       videoPositions.frameReady(sender);
+      sitePages.frameReady(sender.tab?.id, sender.frameId);
+      break;
+    case 'video-post':
+      sitePages.onPostFound(sender.tab?.id, sender.frameId, message.url)
+        .catch((error) => console.warn('LDM: site page failed', error));
       break;
     case 'keys':
       clicks.recordKeys(cleanKeys(message.keys));

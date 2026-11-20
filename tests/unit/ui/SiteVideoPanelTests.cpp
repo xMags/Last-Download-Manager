@@ -182,6 +182,44 @@ TEST_F(SiteCatalogTest, PagesThatAreNotVideosStartNothing)
     EXPECT_TRUE(changes_.empty());
 }
 
+TEST_F(SiteCatalogTest, AFeedOffersThePostWhoseVideoItPlays)
+{
+    SitePage feed = Page("https://www.instagram.com/");
+    catalog_.OnSitePage(1, feed);
+    EXPECT_TRUE(lookups_.empty()) << "no video yet";
+
+    feed.postUrl = "https://www.instagram.com/reels/Df73FH-z-SF/";
+    catalog_.OnSitePage(1, feed);
+    ASSERT_EQ(lookups_.size(), 1u);
+    EXPECT_EQ(lookups_[0].pageUrl, "https://www.instagram.com/reel/Df73FH-z-SF/");
+    ASSERT_NE(SiteItem(), nullptr);
+
+    feed.postUrl = "https://www.instagram.com/p/Df-K2IWoRbs/";  // scrolled to the next video
+    catalog_.OnSitePage(1, feed);
+    ASSERT_EQ(lookups_.size(), 2u);
+    EXPECT_EQ(lookups_[1].pageUrl, "https://www.instagram.com/p/Df-K2IWoRbs/");
+    EXPECT_EQ(cancelled_, std::vector<std::int64_t>{lookups_[0].lookupId});
+
+    feed.postUrl.reset();  // no video on screen
+    catalog_.OnSitePage(1, feed);
+    EXPECT_EQ(SiteItem(), nullptr);
+    EXPECT_EQ(cancelled_.size(), 2u);
+}
+
+TEST_F(SiteCatalogTest, AVideoPageIsLookedUpForItselfWhateverPostItLinks)
+{
+    SitePage reel = Page("https://www.instagram.com/reels/C9x5pUZvXmD/");
+    reel.postUrl = "https://www.instagram.com/p/Df73FH-z-SF/";
+    catalog_.OnSitePage(1, reel);
+    ASSERT_EQ(lookups_.size(), 1u);
+    EXPECT_EQ(lookups_[0].pageUrl, "https://www.instagram.com/reel/C9x5pUZvXmD/");
+
+    SitePage elsewhere = Page("https://www.youtube.com/feed/subscriptions", 6);
+    elsewhere.postUrl = "https://www.instagram.com/p/Df73FH-z-SF/";
+    catalog_.OnSitePage(1, elsewhere);
+    EXPECT_EQ(lookups_.size(), 1u) << "a post of another site";
+}
+
 TEST(SiteVideoCapture, AQualityGivesASiteVideoWithEachTracksFormatAndTheVideosTitle)
 {
     ldm::ui::TabMedia tab;

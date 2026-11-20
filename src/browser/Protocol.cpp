@@ -22,6 +22,7 @@ constexpr size_t kChromiumIdChars = 32;
 constexpr size_t kMaxFirefoxIdChars = 80;
 constexpr std::wstring_view kChromiumOriginPrefix = L"chrome-extension://";
 constexpr size_t kMaxUrl = 16 * 1024;
+constexpr size_t kMaxPostUrl = 2048;  // core::kMaxSitePageBytes: a longer link is never looked up
 constexpr size_t kMaxFileName = 1024;
 constexpr size_t kMaxUserAgent = 1024;
 constexpr size_t kMaxMimeType = 256;
@@ -550,6 +551,10 @@ std::optional<SitePage> ParseSitePage(const nlohmann::json& object)
     page.tabId = *tabId;
     page.incognito = *incognito;
     page.url = url->get<std::string>();
+    const auto postAddress = [](const std::string& text) { return text.size() <= kMaxPostUrl && IsWebAddress(text); };
+    if (!OptionalField(object, "postUrl", postAddress, page.postUrl)) {
+        return std::nullopt;
+    }
     std::optional<std::string> title;
     const auto plainTitle = [](const std::string& text) {
         return !text.empty() && text.size() <= kMaxPageTitle && HasNoControlCharacters(text);

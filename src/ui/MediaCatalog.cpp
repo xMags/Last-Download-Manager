@@ -113,7 +113,8 @@ void MediaCatalog::OnSitePage(BrowserConnectionId connection, browser::SitePage 
 {
     auto video = core::CheckSitePage(page.url);
     if (video && !video->automatic) {
-        video.reset();  // looked up only when the user asks for it
+        // Looked up only when the user asks for it, unless it plays a post of the site (a feed).
+        video = page.postUrl ? core::CheckPlayedPost(page.url, *page.postUrl) : std::nullopt;
     }
     const TabKey key{connection, page.tabId};
     auto existing = tabs_.find(key);

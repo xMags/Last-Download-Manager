@@ -340,6 +340,8 @@ export function isLinksDone(message, id) {
 }
 
 const MAX_PAGE_TITLE_BYTES = 1024;
+// LDM never looks up a longer address (core::kMaxSitePageBytes); it is ASCII once the URL is parsed.
+const MAX_POST_URL_CHARS = 2048;
 const MEDIA_KINDS = new Set(['hls', 'dash', 'file']);
 
 /** True for a tab or frame id LDM accepts. */
@@ -396,8 +398,10 @@ export function makeMedia(media) {
 /**
  * The address of a tab on a supported video site (video-sites design, section 7), or null when LDM
  * would refuse it. Sent only to an LDM whose config asked for them: an older one ends the
- * connection on a message type it does not know.
- * @param {{tabId: number, incognito: boolean, url: string, pageTitle?: string, userAgent: string}} page
+ * connection on a message type it does not know. `postUrl` is the link to the post whose video the
+ * page plays (src/video-finder.js); an older LDM ignores it.
+ * @param {{tabId: number, incognito: boolean, url: string, postUrl?: string, pageTitle?: string,
+ *          userAgent: string}} page
  */
 export function makeSitePage(page) {
   if (!isBrowserId(page.tabId) || !isWebAddress(page.url)) {
@@ -410,6 +414,7 @@ export function makeSitePage(page) {
     tabId: page.tabId,
     incognito: Boolean(page.incognito),
     url: page.url,
+    postUrl: isWebAddress(page.postUrl) && page.postUrl.length <= MAX_POST_URL_CHARS ? page.postUrl : undefined,
     pageTitle: cleanPageText(page.pageTitle, MAX_PAGE_TITLE_BYTES) || undefined,
     userAgent: cleanText(page.userAgent, 1024) || 'Mozilla/5.0',
     cookies: Array.isArray(page.cookies) ? cookieList(page.cookies) : undefined,

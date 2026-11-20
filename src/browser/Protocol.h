@@ -179,6 +179,10 @@ struct SitePage {
     int tabId = 0;
     bool incognito = false;
     std::string url;  // http or https
+    // The link to the post whose video the page plays, found next to the video by the extension's
+    // page script when the page itself is no video (a feed): page-controlled, so only a hint LDM
+    // checks (core::CheckPlayedPost). LDM 5.4 and older ignore it.
+    std::optional<std::string> postUrl;
     std::string pageTitle;
     std::string userAgent;
     // The cookies the browser sends to the page, only for a site of Config::signInHosts.

@@ -144,3 +144,53 @@ test('a site the user let sign in goes with its cookies, other sites without', a
   assert.equal(vimeo.cookies[0].name, 'vuid');
   assert.equal(dailymotion.cookies, undefined);
 });
+
+test('a feed is sent with the post whose video plays, and its page script looks for it', async () => {
+  const connection = recorder();
+  const feed = { id: 7, url: 'https://www.instagram.com/', title: 'Instagram' };
+  const told = [];
+  const api = {
+    tabs: {
+      query: async () => [feed],
+      get: async () => feed,
+      sendMessage: async (tabId, message, options) => { told.push({ tabId, ...message, frameId: options.frameId }); },
+    },
+  };
+  const sitePages = new SitePages(api, connection, { ready: Promise.resolve(), isEnabled: () => true,
+    hosts: () => ['instagram.com'], userAgent: 'UA/1' });
+  await sitePages.onPostFound(7, 0, 'https://www.instagram.com/p/Df73FH-z-SF/');
+  assert.equal(connection.posted.length, 0, 'not watched yet: the page is not known as a site page');
+
+  await sitePages.onUpdated(7, { status: 'complete' }, feed);
+  assert.deepEqual(told, [{ tabId: 7, type: 'ldm-watch-posts', on: true, frameId: 0 }]);
+  assert.equal(connection.posted.at(-1).postUrl, undefined);
+
+  await sitePages.onPostFound(7, 0, 'https://www.instagram.com/p/Df73FH-z-SF/');
+  await sitePages.onPostFound(7, 0, 'https://www.instagram.com/p/Df73FH-z-SF/');  // the same post again
+  await sitePages.onPostFound(7, 3, 'https://www.instagram.com/p/Other/');  // not the top frame
+  await sitePages.onPostFound(7, 0, 'https://evil.test/p/Df73FH-z-SF/');  // another site: no post
+  await sitePages.onPostFound(7, 0, null);  // still none
+  await sitePages.onPostFound(7, 0, 'https://www.instagram.com/reels/Df-K2IWoRbs/');
+  assert.deepEqual(connection.posted.map((m) => [m.url, m.postUrl]), [
+    ['https://www.instagram.com/', undefined],
+    ['https://www.instagram.com/', 'https://www.instagram.com/p/Df73FH-z-SF/'],
+    ['https://www.instagram.com/', undefined],
+    ['https://www.instagram.com/', 'https://www.instagram.com/reels/Df-K2IWoRbs/'],
+  ]);
+
+  sitePages.frameReady(7, 0);  // the top frame's script started again
+  assert.equal(told.length, 2);
+  sitePages.stopWatching();
+  assert.deepEqual(told.at(-1), { tabId: 7, type: 'ldm-watch-posts', on: false, frameId: 0 });
+
+  sitePages.reset(7);
+  await sitePages.onPostFound(7, 0, 'https://www.instagram.com/p/Df73FH-z-SF/');
+  assert.equal(connection.posted.length, 4, 'a tab that loads another page is no longer watched');
+});
+
+test('the post link LDM gets is checked like any address', () => {
+  const page = { tabId: 1, incognito: false, url: 'https://www.instagram.com/', userAgent: 'UA' };
+  assert.equal(makeSitePage({ ...page, postUrl: 'https://www.instagram.com/p/A/' }).postUrl, 'https://www.instagram.com/p/A/');
+  assert.equal(makeSitePage({ ...page, postUrl: 'javascript:alert(1)' }).postUrl, undefined);
+  assert.equal(makeSitePage({ ...page, postUrl: `https://www.instagram.com/${'x'.repeat(2100)}` }).postUrl, undefined);
+});
