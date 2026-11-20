@@ -249,6 +249,8 @@ void MediaPanelController::OpenMenu(POINT anchor)
 {
     while (ShowMenu(anchor)) {
     }
+    // The panel matched the menu's width while it was open; closed, it goes back to its own.
+    panel_.SetMinWidth(0);
     Place();
 }
 
@@ -278,6 +280,8 @@ bool MediaPanelController::ShowMenu(POINT anchor)
         }
         // Until a menu was seen, a guess; MenuShown corrects it while the menu is open.
         const int edge = menuEdge_ >= 0 ? menuEdge_ : ::GetSystemMetricsForDpi(SM_CXMENUCHECK, panel_.Dpi()) + 6;
+        // Measured from the panel's own width, not the width an earlier, wider menu gave it.
+        panel_.SetMinWidth(0);
         RECT panelRect = panel_.WindowRect();
         const int width = std::max<int>(panelRect.right - panelRect.left, painter.NaturalWidth(items) + edge);
         panel_.SetMinWidth(width);
