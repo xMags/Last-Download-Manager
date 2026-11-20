@@ -134,7 +134,7 @@ void DownloadInfoDialog::Update(const core::DownloadView& view)
     } else if (view.stream && view.stream->live) {
         size += L"live recording, " + FormatRecordedLength(view.stream->recordedUs) + L" so far";
     } else if (view.stream && view.stream->estimatedBytes) {
-        size += L"about " + FormatSize(*view.stream->estimatedBytes);
+        size += FormatSize(*view.stream->estimatedBytes);  // an estimate, shown as a plain size
     } else {
         size += view.receivedBytes > 0 ? L"unknown" : L"checking...";
     }
