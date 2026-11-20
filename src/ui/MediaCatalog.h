@@ -46,6 +46,7 @@ struct MediaItem {
     std::optional<double> seconds;           // the stream's length, when known
     media::QualityList qualities;            // what the panel lists for a stream
     std::string failure;                     // why it failed, for the log
+    std::string hint;                        // what may help when it failed; empty when nothing
     // A video of a supported site (video-sites design): `url` is its page as core::CheckSitePage
     // gives it, and the offer is the site resolver's. Offered while it is looked up and when that
     // failed too, so the panel can say so; `failure` is then shown.

@@ -106,6 +106,9 @@ std::vector<PanelMenuItem> StreamLines(const MediaItem& item)
     }
     if (item.siteVideo && item.state == MediaItem::State::Failed) {
         lines.push_back(Notice(base::ToUtf16(item.failure)));
+        if (!item.hint.empty()) {
+            lines.push_back(Notice(base::ToUtf16(item.hint), PanelGlyph::None));
+        }
         return lines;
     }
     if (item.qualities.drm) {

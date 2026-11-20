@@ -265,4 +265,16 @@ TEST(SiteList, SignInIsOnlyForTheSitesTheUserChecked)
     EXPECT_TRUE(youtube->flagsAccounts);
 }
 
+TEST(SiteList, APageBelongsToTheSignInSiteOfItsHost)
+{
+    using ldm::core::SignInSiteOf;
+    ASSERT_TRUE(SignInSiteOf("https://www.instagram.com/p/Df73FH-z-SF/"));
+    EXPECT_EQ(SignInSiteOf("https://www.instagram.com/p/Df73FH-z-SF/")->name, "Instagram");
+    EXPECT_EQ(SignInSiteOf("https://twitter.com/someone/status/1")->name, "X (Twitter)") << "the site's second host";
+    EXPECT_EQ(SignInSiteOf("https://youtu.be/jNQXAC9IVRw")->key, "youtube");
+    EXPECT_FALSE(SignInSiteOf("https://instagram.com.example.test/p/1/"));
+    EXPECT_FALSE(SignInSiteOf("https://example.test/video"));
+    EXPECT_FALSE(SignInSiteOf("not an address"));
+}
+
 }  // namespace

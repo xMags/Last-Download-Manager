@@ -220,6 +220,43 @@ TEST_F(SiteCatalogTest, AVideoPageIsLookedUpForItselfWhateverPostItLinks)
     EXPECT_EQ(lookups_.size(), 1u) << "a post of another site";
 }
 
+TEST(SiteVideoFailure, AVideoRefusedWithoutSignInSaysSigningInMayHelp)
+{
+    SiteLookupFinished refused;
+    refused.problem = SiteLookupFinished::Problem::Video;
+    refused.failure = "This content isn't available to everyone";
+
+    MediaItem item;
+    item.kind = MediaKind::Dash;  // as the catalog makes site videos
+    item.siteVideo = true;
+    item.url = "https://www.instagram.com/p/Df73FH-z-SF/";
+    ldm::ui::FillSiteItem(item, refused);
+    EXPECT_EQ(item.state, MediaItem::State::Failed);
+    EXPECT_EQ(item.hint, "Signing in may help: turn on Instagram in Options > Site videos.");
+    const auto menu = ldm::ui::BuildPanelMenu({&item}, false);
+    ASSERT_GE(menu.size(), 2u);
+    EXPECT_EQ(menu[1].text, L"Signing in may help: turn on Instagram in Options > Site videos.");
+    EXPECT_FALSE(menu[1].enabled);
+
+    MediaItem signedIn;
+    signedIn.url = item.url;
+    signedIn.cookies.push_back(ldm::model::Cookie{"instagram.com", false, "/", true, 0, "sessionid", "x"});
+    ldm::ui::FillSiteItem(signedIn, refused);
+    EXPECT_TRUE(signedIn.hint.empty()) << "it already asked with the sign-in";
+
+    SiteLookupFinished unreachable = refused;
+    unreachable.problem = SiteLookupFinished::Problem::Unreachable;
+    MediaItem offline;
+    offline.url = item.url;
+    ldm::ui::FillSiteItem(offline, unreachable);
+    EXPECT_TRUE(offline.hint.empty()) << "signing in does not help a network problem";
+
+    MediaItem elsewhere;
+    elsewhere.url = "https://www.ted.com/talks/dan_dennett_on_our_consciousness";
+    ldm::ui::FillSiteItem(elsewhere, refused);
+    EXPECT_TRUE(elsewhere.hint.empty()) << "a site LDM cannot sign in to";
+}
+
 TEST(SiteVideoCapture, AQualityGivesASiteVideoWithEachTracksFormatAndTheVideosTitle)
 {
     ldm::ui::TabMedia tab;

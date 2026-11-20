@@ -501,6 +501,16 @@ std::vector<std::string> SignInHosts(std::string_view setting)
     return hosts;
 }
 
+namespace {
+
+// `host` is `site` or one of its subdomains.
+bool OnHost(std::string_view host, std::string_view site)
+{
+    return host == site || (host.size() > site.size() && host.ends_with(site) && host[host.size() - site.size() - 1] == '.');
+}
+
+}  // namespace
+
 bool UsesSignIn(std::string_view setting, std::string_view pageUrl)
 {
     const auto url = ParseUrl(pageUrl);
@@ -508,12 +518,30 @@ bool UsesSignIn(std::string_view setting, std::string_view pageUrl)
         return false;
     }
     for (const std::string& host : SignInHosts(setting)) {
-        if (url->host == host || (url->host.size() > host.size() && url->host.ends_with(host) &&
-                                  url->host[url->host.size() - host.size() - 1] == '.')) {
+        if (OnHost(url->host, host)) {
             return true;
         }
     }
     return false;
+}
+
+std::optional<SignInSite> SignInSiteOf(std::string_view pageUrl)
+{
+    const auto url = ParseUrl(pageUrl);
+    if (!url) {
+        return std::nullopt;
+    }
+    for (const SignInSite& site : SignInSites()) {
+        std::string_view hosts = site.hosts;
+        while (!hosts.empty()) {
+            const size_t space = hosts.find(' ');
+            if (OnHost(url->host, hosts.substr(0, space))) {
+                return site;
+            }
+            hosts = space == std::string_view::npos ? std::string_view() : hosts.substr(space + 1);
+        }
+    }
+    return std::nullopt;
 }
 
 std::vector<std::string> AutomaticSiteHosts()

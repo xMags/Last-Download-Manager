@@ -166,6 +166,13 @@ void FillSiteItem(MediaItem& item, const core::SiteLookupFinished& finished)
     if (!finished.video) {
         item.state = MediaItem::State::Failed;
         item.failure = finished.failure.empty() ? std::string("This video could not be looked up.") : finished.failure;
+        // Sites limit some videos to signed-in viewers (an age limit, a country, the uploader's
+        // choice) and refuse them to LDM, which asks as nobody unless the user let it sign in.
+        if (finished.problem == core::SiteLookupFinished::Problem::Video && item.cookies.empty()) {
+            if (const auto site = core::SignInSiteOf(item.url)) {
+                item.hint = "Signing in may help: turn on " + std::string(site->name) + " in Options > Site videos.";
+            }
+        }
         return;
     }
     item.offer = finished.video->offer;

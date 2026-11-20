@@ -57,4 +57,7 @@ struct SignInSite {
 // Whether `setting` turns sign-in on for the site of `pageUrl`.
 [[nodiscard]] bool UsesSignIn(std::string_view setting, std::string_view pageUrl);
 
+// The site in SignInSites() that `pageUrl` belongs to, whether or not sign-in is on for it.
+[[nodiscard]] std::optional<SignInSite> SignInSiteOf(std::string_view pageUrl);
+
 }  // namespace ldm::core
