@@ -34,6 +34,7 @@ constexpr UINT kFolderChangedMessage = WM_APP + 0x110;
 constexpr wchar_t kAddGlyph = 0xE710;     // Add
 constexpr wchar_t kFolderGlyph = 0xE8B7;  // Folder
 constexpr wchar_t kLinkGlyph = 0xE71B;    // Link
+constexpr wchar_t kRemoveGlyph = 0xE711;  // Cancel (a cross)
 // Heights of the drawn text boxes and pickers at 96 DPI, matching their template rectangles.
 constexpr int kNameField96 = 36;
 constexpr int kBoxField96 = 32;
@@ -111,6 +112,8 @@ bool DownloadInfoDialog::OnInit()
     surface_.AddButton(IDC_INFO_BROWSE, ButtonRole::Secondary);
     surface_.AddButton(IDC_INFO_COPY, ButtonRole::Link);
     surface_.AddButton(IDC_INFO_ADD_DESCRIPTION, ButtonRole::Link);
+    surface_.AddButton(IDC_INFO_DESCRIPTION_CLOSE, ButtonRole::Quiet);
+    surface_.SetButtonGlyph(IDC_INFO_DESCRIPTION_CLOSE, kRemoveGlyph);
     surface_.AddChip(IDC_INFO_SIZE);
     surface_.AddChip(IDC_INFO_TYPE);
     surface_.AddIcon(IDC_INFO_LINK_ICON, kLinkGlyph);
@@ -126,7 +129,8 @@ bool DownloadInfoDialog::OnInit()
     surface_.AddField(IDC_INFO_NAME, kNameField96);
     surface_.AddField(IDC_INFO_FOLDER, kBoxField96);
     surface_.AddField(IDC_INFO_DESCRIPTION, kBoxField96);
-    Edit_SetCueBannerText(Item(IDC_INFO_DESCRIPTION), L"Description");
+    // Shown while the box has the focus too: it opens focused, right after "Add description".
+    Edit_SetCueBannerTextFocused(Item(IDC_INFO_DESCRIPTION), L"Description", TRUE);
 
     settingText_ = true;
     nameEdited_ = initial_.fileNameFixed;
@@ -271,21 +275,50 @@ void DownloadInfoDialog::ChooseFolder()
 
 void DownloadInfoDialog::EditFolder()
 {
+    folderBeforeEdit_ = Text(IDC_INFO_FOLDER);
+    folderEditedBeforeEdit_ = folderEdited_;
     Show(IDC_INFO_FOLDER_PICKER, false);
     Show(IDC_INFO_FOLDER, true);
     ::SetFocus(Item(IDC_INFO_FOLDER));
     Edit_SetSel(Item(IDC_INFO_FOLDER), 0, -1);
 }
 
-void DownloadInfoDialog::EndFolderEdit()
+bool DownloadInfoDialog::EditingFolder() const
 {
-    if (!::IsWindowVisible(Item(IDC_INFO_FOLDER))) {
+    return ::IsWindowVisible(Item(IDC_INFO_FOLDER)) != FALSE;
+}
+
+void DownloadInfoDialog::EndFolderEdit(bool focusPicker)
+{
+    if (!EditingFolder()) {
         return;
     }
-    Show(IDC_INFO_FOLDER, false);
     Show(IDC_INFO_FOLDER_PICKER, true);
+    if (focusPicker) {
+        ::SetFocus(Item(IDC_INFO_FOLDER_PICKER));
+    }
+    Show(IDC_INFO_FOLDER, false);
     ShowFolder();
     UpdateFreeSpace();
+}
+
+void DownloadInfoDialog::ShowDescription(bool show)
+{
+    if (!show) {
+        SetText(IDC_INFO_DESCRIPTION, L"");
+    }
+    // What gets the focus is shown before what loses it disappears, so the focus never drops.
+    Show(IDC_INFO_LINK_ICON, !show);
+    Show(IDC_INFO_URL, !show);
+    Show(IDC_INFO_COPY, !show);
+    Show(IDC_INFO_ADD_DESCRIPTION, !show);
+    Show(IDC_INFO_DESCRIPTION, show);
+    Show(IDC_INFO_DESCRIPTION_CLOSE, show);
+    if (show) {
+        ::SetFocus(Item(IDC_INFO_DESCRIPTION));
+    } else if (const HWND focus = ::GetFocus(); focus == nullptr || !::IsWindowVisible(focus)) {
+        ::SetFocus(Item(IDC_INFO_ADD_DESCRIPTION));
+    }
 }
 
 void DownloadInfoDialog::UpdateFreeSpace()
@@ -382,7 +415,7 @@ void DownloadInfoDialog::Update(const core::DownloadView& view)
     } else if (view.stream && view.stream->live) {
         size = L"live, " + FormatRecordedLength(view.stream->recordedUs) + L" so far";
     } else if (view.stream && view.stream->estimatedBytes) {
-        size = L"about " + FormatSize(*view.stream->estimatedBytes);
+        size = FormatSize(*view.stream->estimatedBytes);  // an estimate, shown as a plain size
     } else {
         size = view.receivedBytes > 0 ? L"size unknown" : L"checking\u2026";
     }
@@ -417,14 +450,31 @@ bool DownloadInfoDialog::Finish(Action action)
 
 bool DownloadInfoDialog::OnCommand(int id, int code, HWND control)
 {
+    const HWND focus = ::GetFocus();
     switch (id) {
     case IDC_INFO_START:
+        // Enter while typing a folder confirms the folder, as in an address bar.
+        if (EditingFolder() && focus == Item(IDC_INFO_FOLDER)) {
+            EndFolderEdit(true);
+            return true;
+        }
         Finish(Action::Start);
         return true;
     case IDC_INFO_LATER:
         Finish(Action::Later);
         return true;
     case IDCANCEL:
+        // Esc while typing a folder puts the folder back; in the description it takes it away.
+        if (EditingFolder() && focus == Item(IDC_INFO_FOLDER)) {
+            SetFolder(folderBeforeEdit_);
+            folderEdited_ = folderEditedBeforeEdit_;
+            EndFolderEdit(true);
+            return true;
+        }
+        if (focus == Item(IDC_INFO_DESCRIPTION)) {
+            ShowDescription(false);
+            return true;
+        }
         Finish(Action::Cancel);
         return true;
     case IDC_INFO_CATEGORY:
@@ -451,13 +501,16 @@ bool DownloadInfoDialog::OnCommand(int id, int code, HWND control)
         }
         return true;
     case IDC_INFO_ADD_DESCRIPTION:
-        // The description box takes the address line's place.
-        Show(IDC_INFO_LINK_ICON, false);
-        Show(IDC_INFO_URL, false);
-        Show(IDC_INFO_COPY, false);
-        Show(IDC_INFO_ADD_DESCRIPTION, false);
-        Show(IDC_INFO_DESCRIPTION, true);
-        ::SetFocus(Item(IDC_INFO_DESCRIPTION));
+        ShowDescription(true);
+        return true;
+    case IDC_INFO_DESCRIPTION_CLOSE:
+        ShowDescription(false);
+        return true;
+    case IDC_INFO_DESCRIPTION:
+        // Left empty, the box goes away again.
+        if (code == EN_KILLFOCUS && Text(IDC_INFO_DESCRIPTION).empty()) {
+            ShowDescription(false);
+        }
         return true;
     case IDC_INFO_ADD_CATEGORY:
         if (addCategory_) {
@@ -478,7 +531,7 @@ bool DownloadInfoDialog::OnCommand(int id, int code, HWND control)
             folderEdited_ = true;
             ::PostMessageW(Handle(), kFolderChangedMessage, 0, 0);
         } else if (code == EN_KILLFOCUS) {
-            EndFolderEdit();
+            EndFolderEdit(false);  // the focus is going elsewhere already
         }
         return true;
     default:
@@ -490,6 +543,17 @@ bool DownloadInfoDialog::OnMessage(UINT message, WPARAM wParam, LPARAM lParam, L
 {
     (void)wParam;
     (void)lParam;
+    if (message == WM_LBUTTONDOWN) {
+        // A click on the dialog's background moves no focus by itself, so it ends the editing
+        // here: the folder goes back to its picker, an empty description away.
+        if (EditingFolder()) {
+            EndFolderEdit(true);
+        }
+        if (::IsWindowVisible(Item(IDC_INFO_DESCRIPTION)) && Text(IDC_INFO_DESCRIPTION).empty()) {
+            ShowDescription(false);
+        }
+        return false;
+    }
     if (message != kFolderChangedMessage) {
         return false;
     }

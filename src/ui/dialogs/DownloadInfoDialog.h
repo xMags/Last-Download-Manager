@@ -67,9 +67,13 @@ private:
     // The folder picker's value: the folder as people name it ("Downloads › Video").
     void ShowFolder();
     void ChooseFolder();
-    // Swaps the folder picker for the edit holding the folder's full path, and back.
+    // Swaps the folder picker for the edit holding the folder's full path, and back; `focusPicker`
+    // when the edit had the focus and nothing else is taking it.
     void EditFolder();
-    void EndFolderEdit();
+    void EndFolderEdit(bool focusPicker);
+    [[nodiscard]] bool EditingFolder() const;
+    // The description box in the address line's place, or (cleared) the address line back.
+    void ShowDescription(bool show);
     void SetFolder(const std::wstring& folder);
     void Browse();
     bool Finish(Action action);
@@ -88,6 +92,8 @@ private:
     Choice choice_;
     std::optional<model::CategoryId> category_;  // the picker's choice
     std::filesystem::path downloads_;            // the user's Downloads folder, for ShowFolder
+    std::wstring folderBeforeEdit_;              // put back when Esc ends the folder edit
+    bool folderEditedBeforeEdit_ = false;        // with folderEdited_ as it was
     bool nameEdited_ = false;
     bool folderEdited_ = false;
     bool settingText_ = false;
