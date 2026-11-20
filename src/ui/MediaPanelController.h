@@ -21,6 +21,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace ldm::ui {
 
@@ -71,6 +72,10 @@ private:
     void OnCatalogChanged(BrowserConnectionId connection, int tabId);
     void Place();
     void OpenMenu(POINT anchor);
+    // Shows the menu once; true when it closed only to open again with new lines.
+    [[nodiscard]] bool ShowMenu(POINT anchor);
+    // The open menu's tab changed: close the menu when its lines are no longer what it shows.
+    void RefreshOpenMenu(const TabKey& key);
     void MenuShown(HWND menuWindow);
     void Run(const PanelAction& action, const TabKey& key);
     [[nodiscard]] bool Offers(const TabMedia& tab) const;
@@ -86,6 +91,11 @@ private:
     std::map<TabKey, bool> told_;     // what each extension was last told per tab
     std::set<TabKey> hiddenForPage_;  // closed by the user until the tab loads another page
     bool menuOpen_ = false;
+    // While the menu is open: its tab and its lines. When what the tab offers changes the lines
+    // (a lookup finished, a stream was read), the menu closes and opens again with the new ones.
+    std::optional<TabKey> menuTab_;
+    std::vector<PanelMenuItem> menuLines_;
+    bool reopenMenu_ = false;
     // The menu window's width beyond its lines' width (its border and the space Windows keeps for
     // a check mark), learned from the first menu shown at `menuEdgeDpi_`; -1 while unknown.
     int menuEdge_ = -1;

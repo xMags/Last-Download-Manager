@@ -45,6 +45,18 @@ void AppendItems(HMENU menu, const std::vector<PanelMenuItem>& items, std::vecto
     }
 }
 
+// True when two menus show the same lines and do the same things.
+bool SameLines(const std::vector<PanelMenuItem>& a, const std::vector<PanelMenuItem>& b)
+{
+    return std::equal(a.begin(), a.end(), b.begin(), b.end(), [](const PanelMenuItem& x, const PanelMenuItem& y) {
+        const bool sameAction = x.action.has_value() == y.action.has_value() &&
+                                (!x.action || (x.action->kind == y.action->kind && x.action->itemKey == y.action->itemKey &&
+                                               x.action->entry == y.action->entry));
+        return x.text == y.text && x.glyph == y.glyph && x.badge == y.badge && x.quietDetail == y.quietDetail &&
+               x.enabled == y.enabled && x.separator == y.separator && sameAction && SameLines(x.children, y.children);
+    });
+}
+
 // "<page title>.<extension of the address>", or nothing when either is missing.
 std::optional<std::string> FileNameFor(const TabMedia& tab, const MediaItem& item)
 {
@@ -122,9 +134,25 @@ void MediaPanelController::OnCatalogChanged(BrowserConnectionId connection, int 
     if (tab == nullptr) {
         told_.erase(key);
     }
+    if (menuOpen_ && menuTab_ == key) {
+        RefreshOpenMenu(key);
+    }
     if (followed_ && followed_->tab == key) {
         Place();
     }
+}
+
+void MediaPanelController::RefreshOpenMenu(const TabKey& key)
+{
+    const TabMedia* tab = catalog_.Find(key.first, key.second);
+    if (tab != nullptr && Offers(*tab) &&
+        SameLines(BuildPanelMenu(catalog_.Offered(*tab, drmNotice_), panel_.Mini()), menuLines_)) {
+        return;
+    }
+    // Closed from inside its own message loop: ShowMenu's TrackPopupMenuEx returns, and OpenMenu
+    // shows the menu again with the tab's new lines (or not at all when the tab offers nothing).
+    reopenMenu_ = true;
+    ::EndMenu();
 }
 
 void MediaPanelController::OnMediaReset(BrowserConnectionId connection, int tabId)
@@ -219,15 +247,24 @@ void MediaPanelController::Place()
 
 void MediaPanelController::OpenMenu(POINT anchor)
 {
+    while (ShowMenu(anchor)) {
+    }
+    Place();
+}
+
+bool MediaPanelController::ShowMenu(POINT anchor)
+{
     if (!followed_) {
-        return;
+        return false;
     }
     const TabKey key = followed_->tab;
     const TabMedia* tab = catalog_.Find(key.first, key.second);
-    if (tab == nullptr) {
-        return;
+    if (tab == nullptr || !Offers(*tab)) {
+        return false;
     }
-    const std::vector<PanelMenuItem> items = BuildPanelMenu(catalog_.Offered(*tab, drmNotice_), panel_.Mini());
+    // A member, unchanged while the menu shows: each line's item data points into it.
+    menuLines_ = BuildPanelMenu(catalog_.Offered(*tab, drmNotice_), panel_.Mini());
+    const std::vector<PanelMenuItem>& items = menuLines_;
     UniqueMenu menu(::CreatePopupMenu());
     std::vector<PanelAction> actions;
     AppendItems(menu.get(), items, actions);
@@ -257,18 +294,26 @@ void MediaPanelController::OpenMenu(POINT anchor)
     // A menu needs its owner in front to close when the user clicks elsewhere. The click on the
     // panel gives LDM the right to come to the front; the browser gets it back when the menu closes.
     menuOpen_ = true;
+    menuTab_ = key;
+    reopenMenu_ = false;
     ::SetForegroundWindow(panel_.Handle());
     const UINT command = static_cast<UINT>(::TrackPopupMenuEx(menu.get(), TPM_RETURNCMD | TPM_LEFTALIGN | TPM_TOPALIGN,
                                                               anchor.x, anchor.y, panel_.Handle(), nullptr));
     ::PostMessageW(panel_.Handle(), WM_NULL, 0, 0);
     panel_.SetMenuPainter(nullptr);
     menuOpen_ = false;
+    menuTab_.reset();
     menuLineWidth_ = 0;
+    menu.reset();  // before its lines go
+    menuLines_.clear();
+    if (std::exchange(reopenMenu_, false) && command == 0) {
+        return true;
+    }
     // Browser events ran while the menu was open; the tab may be gone, so only its key is kept.
     if (command >= 1 && command <= actions.size()) {
         Run(actions[command - 1], key);
     }
-    Place();
+    return false;
 }
 
 void MediaPanelController::MenuShown(HWND menuWindow)
