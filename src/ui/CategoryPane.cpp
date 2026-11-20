@@ -2,6 +2,7 @@
 
 #include "base/Utf.h"
 #include "ui/Dpi.h"
+#include "ui/FileKinds.h"
 #include "ui/GlyphIcons.h"
 
 #include <commctrl.h>
@@ -55,18 +56,19 @@ constexpr std::array<Glyph, 11> kTreeGlyphs{{
 // Built-in categories are seeded with these names; renamed or user categories get a folder.
 int CategoryImage(const model::Category& category)
 {
-    if (!category.builtin) {
-        return kImageFolder;
-    }
-    const struct {
-        std::string_view name;
-        Image image;
-    } known[] = {{"Compressed", kImageCompressed}, {"Documents", kImageDocuments}, {"Music", kImageMusic},
-                 {"Programs", kImagePrograms},     {"Video", kImageVideo}};
-    for (const auto& entry : known) {
-        if (category.name == entry.name) {
-            return entry.image;
-        }
+    switch (KindOfCategory(category)) {
+    case FileKind::Compressed:
+        return kImageCompressed;
+    case FileKind::Documents:
+        return kImageDocuments;
+    case FileKind::Music:
+        return kImageMusic;
+    case FileKind::Programs:
+        return kImagePrograms;
+    case FileKind::Video:
+        return kImageVideo;
+    case FileKind::Other:
+        break;
     }
     return kImageFolder;
 }
