@@ -3,6 +3,7 @@
 #include "core/Snapshot.h"
 #include "model/Category.h"
 #include "ui/Dialog.h"
+#include "ui/DialogSurface.h"
 #include "ui/Handles.h"
 
 #include <functional>
@@ -57,20 +58,32 @@ public:
 private:
     bool OnInit() override;
     bool OnCommand(int id, int code, HWND control) override;
+    bool OnMessage(UINT message, WPARAM wParam, LPARAM lParam, LRESULT& result) override;
     void FillCategories();
     void OnCategoryChanged();
     void Browse();
     bool Finish(Action action);
     [[nodiscard]] std::optional<model::CategoryId> SelectedCategory() const;
+    // The tile's icon and the type tag, when the name's extension changed.
+    void ShowFileType(const std::wstring& fileName);
+    // The size tag and the line after the tags (where it comes from, or why it failed).
+    void ShowDetails(const std::wstring& size, const std::wstring& note, bool failed);
+    void UpdateFreeSpace();
+    void UpdateRememberText();
 
     Initial initial_;
     std::function<std::optional<model::Category>(HWND)> addCategory_;
+    DialogSurface surface_;
     Choice choice_;
     bool nameEdited_ = false;
     bool folderEdited_ = false;
     bool settingText_ = false;
     UniqueIcon fileIcon_;
     std::wstring fileIconExtension_;  // the type fileIcon_ shows
+    std::wstring source_;             // "from example.com", the line after the tags
+    std::wstring shownSize_;
+    std::wstring shownNote_;
+    bool shownFailed_ = false;
 };
 
 }  // namespace ldm::ui

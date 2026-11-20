@@ -2,6 +2,7 @@
 
 #include "core/Snapshot.h"
 #include "ui/Dialog.h"
+#include "ui/DialogSurface.h"
 #include "ui/Handles.h"
 #include "ui/ShellActions.h"
 
@@ -33,6 +34,7 @@ private:
     ShellActions& shell_;
     core::DownloadCompleted completed_;
     Callbacks callbacks_;
+    DialogSurface surface_;
     UniqueIcon icon_;
 };
 

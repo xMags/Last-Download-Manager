@@ -2,21 +2,64 @@
 
 #include "base/Utf.h"
 #include "core/FileNames.h"
+#include "core/Url.h"
 #include "resource.h"
-#include "ui/Format.h"
+#include "ui/Clipboard.h"
+#include "ui/Dpi.h"
 #include "ui/FileDialogs.h"
+#include "ui/FileTypeInfo.h"
+#include "ui/Format.h"
 
-#include <shellapi.h>
+#include <commctrl.h>
 #include <windowsx.h>
 
+#include <algorithm>
+#include <cstdint>
 #include <filesystem>
+#include <limits>
 
 namespace ldm::ui {
 
+namespace {
+
+// Dialog units of the footer band, from the template's layout.
+constexpr int kFooterDialogUnits = 37;
+// Between the tags and the line after them, in dialog units.
+constexpr int kTagGap = 3;
+// The file icon on the tile, at 96 DPI.
+constexpr int kTileIcon96 = 48;
+// Posted when the folder box changed, to show the free space of the new folder's drive.
+constexpr UINT kFolderChangedMessage = WM_APP + 0x110;
+
+// "212 GB free" for the drive holding `folder`; empty for a network drive (asking could block the
+// window) or when Windows cannot tell.
+std::wstring FreeSpaceText(const std::wstring& folder)
+{
+    const std::filesystem::path path(folder);
+    if (!path.is_absolute() || folder.starts_with(L"\\\\")) {
+        return {};
+    }
+    const std::wstring root = path.root_path().wstring();
+    const UINT type = ::GetDriveTypeW(root.c_str());
+    if (type == DRIVE_REMOTE || type == DRIVE_NO_ROOT_DIR || type == DRIVE_UNKNOWN) {
+        return {};
+    }
+    ULARGE_INTEGER available{};
+    if (!::GetDiskFreeSpaceExW(root.c_str(), &available, nullptr, nullptr)) {
+        return {};
+    }
+    const auto bytes = static_cast<std::int64_t>(
+        std::min<unsigned long long>(available.QuadPart, static_cast<unsigned long long>(std::numeric_limits<std::int64_t>::max())));
+    return FormatSize(bytes) + L" free";
+}
+
+}  // namespace
+
 DownloadInfoDialog::DownloadInfoDialog(const Theme& theme, Initial initial,
                                        std::function<std::optional<model::Category>(HWND)> addCategory)
-    : Dialog(IDD_DOWNLOAD_INFO, theme), initial_(std::move(initial)), addCategory_(std::move(addCategory))
+    : Dialog(IDD_DOWNLOAD_INFO, theme), initial_(std::move(initial)), addCategory_(std::move(addCategory)), surface_(theme)
 {
+    UseSurface(&surface_);
 }
 
 DownloadInfoDialog::Choice DownloadInfoDialog::Run(HWND owner)
@@ -27,6 +70,25 @@ DownloadInfoDialog::Choice DownloadInfoDialog::Run(HWND owner)
 
 bool DownloadInfoDialog::OnInit()
 {
+    surface_.Attach(Handle());
+    surface_.SetFooterHeight(kFooterDialogUnits);
+    surface_.AddPanel(IDC_INFO_PANEL);
+    surface_.AddButton(IDC_INFO_START, ButtonRole::Primary);
+    surface_.AddButton(IDC_INFO_LATER, ButtonRole::Secondary);
+    surface_.AddButton(IDCANCEL, ButtonRole::Secondary);
+    surface_.AddButton(IDC_INFO_ADD_CATEGORY, ButtonRole::Secondary);
+    surface_.AddButton(IDC_INFO_BROWSE, ButtonRole::Secondary);
+    surface_.AddButton(IDC_INFO_COPY, ButtonRole::Quiet);
+    surface_.AddChip(IDC_INFO_SIZE);
+    surface_.AddChip(IDC_INFO_TYPE);
+    surface_.SetTextRole(IDC_INFO_NAME, TextRole::Heading);
+    surface_.SetTextRole(IDC_INFO_HOST, TextRole::Muted);
+    surface_.SetTextRole(IDC_INFO_URL, TextRole::Muted);
+    surface_.SetTextRole(IDC_INFO_FREE, TextRole::Muted);
+    surface_.SetTextRole(IDC_INFO_CATEGORY_LABEL, TextRole::Muted);
+    surface_.SetTextRole(IDC_INFO_FOLDER_LABEL, TextRole::Muted);
+    Edit_SetCueBannerText(Item(IDC_INFO_DESCRIPTION), L"Description (optional)");
+
     settingText_ = true;
     nameEdited_ = initial_.fileNameFixed;
     folderEdited_ = initial_.saveDirFixed;
@@ -41,6 +103,14 @@ bool DownloadInfoDialog::OnInit()
     SetText(IDC_INFO_FOLDER, base::ToUtf16(initial_.saveDir));
     settingText_ = false;
     FillCategories();
+
+    if (const auto url = core::ParseUrl(initial_.url); url && !url->host.empty()) {
+        source_ = L"from " + base::ToUtf16(url->host);
+    }
+    ShowFileType(base::ToUtf16(initial_.fileName));
+    ShowDetails(L"checking\u2026", source_, false);
+    UpdateFreeSpace();
+    UpdateRememberText();
     ::SetFocus(Item(IDC_INFO_START));
     return false;
 }
@@ -72,6 +142,7 @@ std::optional<model::CategoryId> DownloadInfoDialog::SelectedCategory() const
 
 void DownloadInfoDialog::OnCategoryChanged()
 {
+    UpdateRememberText();
     // A category brings its folder, unless the user typed a folder of their own.
     const auto id = SelectedCategory();
     if (!id || folderEdited_) {
@@ -84,6 +155,24 @@ void DownloadInfoDialog::OnCategoryChanged()
             settingText_ = false;
         }
     }
+    UpdateFreeSpace();
+}
+
+void DownloadInfoDialog::UpdateRememberText()
+{
+    const auto id = SelectedCategory();
+    for (const model::Category& category : initial_.categories) {
+        if (id && category.id == *id) {
+            SetText(IDC_INFO_REMEMBER, L"&Always use this folder for " + base::ToUtf16(category.name));
+            return;
+        }
+    }
+    SetText(IDC_INFO_REMEMBER, L"&Remember this folder for the category");
+}
+
+void DownloadInfoDialog::UpdateFreeSpace()
+{
+    SetText(IDC_INFO_FREE, FreeSpaceText(Text(IDC_INFO_FOLDER)));
 }
 
 void DownloadInfoDialog::Browse()
@@ -91,6 +180,7 @@ void DownloadInfoDialog::Browse()
     if (auto folder = PickFolder(Handle(), Text(IDC_INFO_FOLDER))) {
         SetText(IDC_INFO_FOLDER, *folder);
         folderEdited_ = true;
+        UpdateFreeSpace();
     }
 }
 
@@ -105,7 +195,43 @@ void DownloadInfoDialog::SetCategories(std::vector<model::Category> categories, 
     if (select) {
         folderEdited_ = false;
         OnCategoryChanged();
+    } else {
+        UpdateRememberText();
     }
+}
+
+void DownloadInfoDialog::ShowFileType(const std::wstring& fileName)
+{
+    // Updates come several times a second; the icon and type change only with the extension.
+    const std::wstring extension = base::ToUtf16(core::FileExtension(base::ToUtf8(fileName)));
+    if (fileIcon_ && extension == fileIconExtension_) {
+        return;
+    }
+    UniqueIcon icon = FileTypeIcon(extension, Scale(kTileIcon96, DpiOf(Handle())));
+    // Shown before the old icon is destroyed, so the tile never draws a freed one.
+    surface_.SetFileTile(IDC_INFO_ICON, icon.get(), false);
+    fileIcon_ = std::move(icon);
+    fileIconExtension_ = extension;
+    SetText(IDC_INFO_TYPE, FileTypeName(extension));
+    Show(IDC_INFO_TYPE, !Text(IDC_INFO_TYPE).empty());
+    surface_.ArrangeRow({IDC_INFO_SIZE, IDC_INFO_TYPE, IDC_INFO_HOST}, kTagGap);
+}
+
+void DownloadInfoDialog::ShowDetails(const std::wstring& size, const std::wstring& note, bool failed)
+{
+    if (size == shownSize_ && note == shownNote_ && failed == shownFailed_) {
+        return;
+    }
+    shownSize_ = size;
+    shownNote_ = note;
+    if (failed != shownFailed_) {
+        surface_.SetTextRole(IDC_INFO_HOST, failed ? TextRole::Error : TextRole::Muted);
+        shownFailed_ = failed;
+    }
+    SetText(IDC_INFO_SIZE, size);
+    Show(IDC_INFO_SIZE, !size.empty());
+    SetText(IDC_INFO_HOST, note);
+    surface_.ArrangeRow({IDC_INFO_SIZE, IDC_INFO_TYPE, IDC_INFO_HOST}, kTagGap);
 }
 
 void DownloadInfoDialog::Update(const core::DownloadView& view)
@@ -118,6 +244,7 @@ void DownloadInfoDialog::Update(const core::DownloadView& view)
     if (!nameEdited_) {
         SetText(IDC_INFO_NAME, base::ToUtf16(d.fileName));
     }
+    bool folderChanged = false;
     if (!folderEdited_ && d.categoryId && SelectedCategory() != d.categoryId) {
         for (int i = 0; i < ComboBox_GetCount(Item(IDC_INFO_CATEGORY)); ++i) {
             if (ComboBox_GetItemData(Item(IDC_INFO_CATEGORY), i) == d.categoryId->value) {
@@ -125,39 +252,27 @@ void DownloadInfoDialog::Update(const core::DownloadView& view)
             }
         }
         SetText(IDC_INFO_FOLDER, base::ToUtf16(d.saveDir));
+        folderChanged = true;
     }
     settingText_ = false;
+    if (folderChanged) {
+        UpdateFreeSpace();
+        UpdateRememberText();
+    }
 
-    std::wstring size = L"Size: ";
+    std::wstring size;
     if (d.totalSize) {
-        size += FormatSize(*d.totalSize);
+        size = FormatSize(*d.totalSize);
     } else if (view.stream && view.stream->live) {
-        size += L"live recording, " + FormatRecordedLength(view.stream->recordedUs) + L" so far";
+        size = L"live, " + FormatRecordedLength(view.stream->recordedUs) + L" so far";
     } else if (view.stream && view.stream->estimatedBytes) {
-        size += L"about " + FormatSize(*view.stream->estimatedBytes);
+        size = L"about " + FormatSize(*view.stream->estimatedBytes);
     } else {
-        size += view.receivedBytes > 0 ? L"unknown" : L"checking...";
+        size = view.receivedBytes > 0 ? L"size unknown" : L"checking\u2026";
     }
-    if (d.status == model::DownloadStatus::Failed && d.lastResult) {
-        size = base::ToUtf16(*d.lastResult);
-    }
-    SetText(IDC_INFO_SIZE, size);
-    if (d.contentType) {
-        SetText(IDC_INFO_TYPE, L"Type: " + base::ToUtf16(*d.contentType));
-    }
-    // Updates come several times a second; the icon changes only with the type.
-    const std::wstring extension = base::ToUtf16(core::FileExtension(d.fileName));
-    if (!fileIcon_ || extension != fileIconExtension_) {
-        SHFILEINFOW info{};
-        const std::wstring probe = L"file." + extension;
-        if (::SHGetFileInfoW(probe.c_str(), FILE_ATTRIBUTE_NORMAL, &info, sizeof(info),
-                             SHGFI_USEFILEATTRIBUTES | SHGFI_ICON | SHGFI_LARGEICON) != 0) {
-            // Set before the old icon is destroyed, so the control never shows a freed one.
-            ::SendMessageW(Item(IDC_INFO_ICON), STM_SETICON, reinterpret_cast<WPARAM>(info.hIcon), 0);
-            fileIcon_.reset(info.hIcon);
-            fileIconExtension_ = extension;
-        }
-    }
+    const bool failed = d.status == model::DownloadStatus::Failed && d.lastResult.has_value();
+    ShowDetails(size, failed ? base::ToUtf16(*d.lastResult) : source_, failed);
+    ShowFileType(base::ToUtf16(d.fileName));
 }
 
 bool DownloadInfoDialog::Finish(Action action)
@@ -199,6 +314,11 @@ bool DownloadInfoDialog::OnCommand(int id, int code, HWND control)
     case IDC_INFO_BROWSE:
         Browse();
         return true;
+    case IDC_INFO_COPY:
+        if (!WriteClipboardText(Handle(), Text(IDC_INFO_URL))) {
+            Warn(L"The address could not be copied: another program is using the clipboard.");
+        }
+        return true;
     case IDC_INFO_ADD_CATEGORY:
         if (addCategory_) {
             if (auto category = addCategory_(Handle())) {
@@ -215,16 +335,33 @@ bool DownloadInfoDialog::OnCommand(int id, int code, HWND control)
     case IDC_INFO_NAME:
         if (code == EN_CHANGE && !settingText_) {
             nameEdited_ = true;
+            ShowFileType(Text(IDC_INFO_NAME));
         }
         return true;
     case IDC_INFO_FOLDER:
         if ((code == CBN_EDITCHANGE || code == CBN_SELCHANGE) && !settingText_) {
             folderEdited_ = true;
         }
+        if (code == CBN_EDITCHANGE || code == CBN_SELCHANGE) {
+            // A picked entry reaches the box's text only after CBN_SELCHANGE returns.
+            ::PostMessageW(Handle(), kFolderChangedMessage, 0, 0);
+        }
         return true;
     default:
         return Dialog::OnCommand(id, code, control);
     }
+}
+
+bool DownloadInfoDialog::OnMessage(UINT message, WPARAM wParam, LPARAM lParam, LRESULT& result)
+{
+    (void)wParam;
+    (void)lParam;
+    if (message != kFolderChangedMessage) {
+        return false;
+    }
+    UpdateFreeSpace();
+    result = 0;
+    return true;
 }
 
 }  // namespace ldm::ui
