@@ -23,6 +23,22 @@ const FILE_TYPES = new Map([
 const SEGMENT_EXTENSIONS = new Set(['ts', 'm4s', 'aac', 'vtt', 'webvtt', 'm4a', 'm4v', 'mp4', 'cmfv', 'cmfa']);
 
 /**
+ * True when the address asks for a byte range of a larger file in its query instead of a Range
+ * header: `bytestart`/`byteend` (Instagram, Facebook) or `range=<from>-<to>` (YouTube's media
+ * servers). Players of those sites read each track of a video in slices, every slice at its own
+ * address, so the answer is a slice: never a file of its own, and its size is the slice's.
+ */
+export function isRangeSlice(url) {
+  let params;
+  try {
+    params = new URL(url).searchParams;
+  } catch {
+    return false;
+  }
+  return params.has('bytestart') || params.has('byteend') || /^\d+-\d*$/.test(params.get('range') ?? '');
+}
+
+/**
  * The panel's rules from the cached config (already checked by parseConfig). An LDM that sends
  * none gets no reports: without types nothing is media.
  */
@@ -103,7 +119,7 @@ export function classifyMedia(response, pageUrl, rules, streamSeen) {
     return { kind: 'dash', mimeType };
   }
   const type = FILE_TYPES.get(mimeType) ?? extension;
-  if (!type || !rules.types.includes(type)) {
+  if (!type || !rules.types.includes(type) || isRangeSlice(response.url)) {
     return null;
   }
   // Pieces of a stream: parts of the tab's manifest, or byte ranges a player asks for one by one.

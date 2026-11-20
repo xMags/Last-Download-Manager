@@ -51,6 +51,19 @@ test('once a tab plays a stream, its pieces are not offered as files', () => {
   assert.equal(classifyMedia(response('https://a.test/song.mp3', 'audio/mpeg', 5000), undefined, rules, true).kind, 'file');
 });
 
+test('slices a player asks for by address are never offered as files', () => {
+  const slice = 'https://cdn.test/o1/v/clip.mp4?_nc_cat=104&oh=abc&bytestart=886&byteend=2985241';
+  assert.equal(classifyMedia(response(slice, 'video/mp4', 2984356), undefined, rules, false), null, 'bytestart/byteend');
+  assert.equal(classifyMedia(response('https://cdn.test/v.mp4?byteend=5000', 'video/mp4', 5001), undefined, rules, false), null);
+  assert.equal(classifyMedia(response('https://rr1.cdn.test/videoplayback?itag=137&range=0-1999999', 'video/mp4', 2000000),
+    undefined, rules, false), null, 'range=<from>-<to>');
+  assert.equal(classifyMedia(response('https://a.test/v.mp4?range=all', 'video/mp4', 5000), undefined, rules, false).kind,
+    'file', 'a range parameter that is no byte range');
+  assert.equal(classifyMedia(response('https://a.test/v.mp4?start=10', 'video/mp4', 5000), undefined, rules, false).kind, 'file');
+  assert.equal(classifyMedia(response('https://a.test/live.m3u8?bytestart=0', ''), undefined, rules, false).kind, 'hls',
+    'manifests are read whole by LDM');
+});
+
 test('sizes come from Content-Length, or from the total of a partial answer', () => {
   assert.equal(responseSize(headers('video/mp4', 42), 200), 42);
   assert.equal(responseSize([{ name: 'Content-Range', value: 'bytes 0-99/123456' }], 206), 123456);
