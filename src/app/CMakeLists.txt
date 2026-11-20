@@ -30,6 +30,14 @@ target_compile_definitions(ldm PRIVATE "LDM_VERSION=\"${PROJECT_VERSION}\"")
 # The manifest is embedded through ldm.rc, so the linker must not generate a second one.
 target_link_options(ldm PRIVATE /MANIFEST:NO)
 
+# The resource compiler reports no dependencies, so the files ldm.rc embeds are named here: a
+# changed icon or manifest then rebuilds the resources instead of leaving the old ones in ldm.exe.
+file(GLOB LDM_EMBEDDED_RESOURCES CONFIGURE_DEPENDS
+    "${PROJECT_SOURCE_DIR}/src/resources/*.ico"
+    "${PROJECT_SOURCE_DIR}/src/resources/toolbar/*.ico"
+    "${PROJECT_SOURCE_DIR}/src/resources/*.manifest"
+    "${PROJECT_SOURCE_DIR}/src/resources/resource.h")
 set_source_files_properties(${PROJECT_SOURCE_DIR}/src/resources/ldm.rc PROPERTIES
+    OBJECT_DEPENDS "${LDM_EMBEDDED_RESOURCES}"
     COMPILE_DEFINITIONS
     "LDM_VERSION_MAJOR=${PROJECT_VERSION_MAJOR};LDM_VERSION_MINOR=${PROJECT_VERSION_MINOR};LDM_VERSION_PATCH=${PROJECT_VERSION_PATCH};LDM_VERSION_STRING=\"${PROJECT_VERSION}\"")
