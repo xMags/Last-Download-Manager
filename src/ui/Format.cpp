@@ -204,4 +204,33 @@ std::wstring FormatResumable(std::optional<bool> resumable)
     return *resumable ? L"Yes" : L"No";
 }
 
+std::wstring FriendlyFolder(const std::filesystem::path& folder, const std::filesystem::path& downloads)
+{
+    const auto same = [](const std::filesystem::path& a, const std::filesystem::path& b) {
+        return ::CompareStringOrdinal(a.c_str(), -1, b.c_str(), -1, TRUE) == CSTR_EQUAL;
+    };
+    const std::filesystem::path normalFolder = folder.lexically_normal();
+    const std::filesystem::path normalDownloads = downloads.lexically_normal();
+    auto part = normalFolder.begin();
+    for (const std::filesystem::path& expected : normalDownloads) {
+        if (expected.empty()) {
+            continue;  // the empty element after a trailing separator
+        }
+        if (part == normalFolder.end() || !same(*part, expected)) {
+            return folder.wstring();
+        }
+        ++part;
+    }
+    if (normalDownloads.empty()) {
+        return folder.wstring();
+    }
+    std::wstring shown = L"Downloads";
+    for (; part != normalFolder.end(); ++part) {
+        if (!part->empty()) {
+            shown.append(L" › ").append(part->wstring());
+        }
+    }
+    return shown;
+}
+
 }  // namespace ldm::ui

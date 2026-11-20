@@ -23,6 +23,8 @@ add_library(ldm_ui STATIC
     DarkControls.h
     Dialog.cpp
     Dialog.h
+    DialogSurface.cpp
+    DialogSurface.h
     Dpi.cpp
     Dpi.h
     DownloadListView.cpp
@@ -33,6 +35,8 @@ add_library(ldm_ui STATIC
     ExportFormat.h
     FileDialogs.cpp
     FileDialogs.h
+    FileTypeInfo.cpp
+    FileTypeInfo.h
     Format.cpp
     Format.h
     GlyphIcons.cpp
@@ -83,6 +87,8 @@ add_library(ldm_ui STATIC
     ShellActions.h
     SmallFile.cpp
     SmallFile.h
+    SmoothShapes.cpp
+    SmoothShapes.h
     StartupRegistration.h
     StatusBar.cpp
     StreamChoice.cpp
@@ -152,6 +158,6 @@ add_library(ldm_ui STATIC
     dialogs/UpdateDialog.h)
 target_link_libraries(ldm_ui
     PUBLIC ldm_browser ldm_core ldm_grabber ldm_media
-    PRIVATE nlohmann_json::nlohmann_json comctl32 uxtheme dwmapi shell32 comdlg32 ole32 shcore)
+    PRIVATE nlohmann_json::nlohmann_json comctl32 uxtheme dwmapi shell32 comdlg32 ole32 shcore gdiplus)
 target_include_directories(ldm_ui PRIVATE ${PROJECT_SOURCE_DIR}/src/resources)
 target_compile_definitions(ldm_ui PRIVATE "LDM_VERSION_WIDE=L\"${PROJECT_VERSION}\"")

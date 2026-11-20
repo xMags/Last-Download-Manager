@@ -27,4 +27,29 @@ std::wstring ReadClipboardText(HWND owner, size_t maxChars)
     return text;
 }
 
+bool WriteClipboardText(HWND owner, std::wstring_view text)
+{
+    if (!::OpenClipboard(owner)) {
+        return false;
+    }
+    bool written = false;
+    if (::EmptyClipboard()) {
+        const HGLOBAL memory = ::GlobalAlloc(GMEM_MOVEABLE, (text.size() + 1) * sizeof(wchar_t));
+        if (memory != nullptr) {
+            if (auto* chars = static_cast<wchar_t*>(::GlobalLock(memory)); chars != nullptr) {
+                std::copy(text.begin(), text.end(), chars);
+                chars[text.size()] = L'\0';
+                ::GlobalUnlock(memory);
+                // On success the clipboard owns the memory.
+                written = ::SetClipboardData(CF_UNICODETEXT, memory) != nullptr;
+            }
+            if (!written) {
+                ::GlobalFree(memory);
+            }
+        }
+    }
+    ::CloseClipboard();
+    return written;
+}
+
 }  // namespace ldm::ui

@@ -11,6 +11,8 @@
 
 namespace ldm::ui {
 
+class DialogSurface;
+
 // Base for DIALOGEX-template dialogs (design section 6): routes messages to virtual handlers,
 // applies the theme, and offers typed control helpers. Modal through RunModal(); modeless through
 // CreateModeless() with the caller keeping the object alive until the window is destroyed.
@@ -52,6 +54,10 @@ protected:
     virtual void OnDestroying() {}
     virtual void OnDestroyed() {}
 
+    // Draws this dialog with `surface` (not owned; a member of the derived dialog): it gets the
+    // painting and color messages before the theme and OnMessage do. Call from the constructor.
+    void UseSurface(DialogSurface* surface) noexcept { surface_ = surface; }
+
     void Close(INT_PTR result);
     // Shows `title` followed by the program name, so every window says which program it is from.
     void SetTitle(const std::wstring& title);
@@ -81,6 +87,7 @@ private:
 
     int templateId_;
     const Theme& theme_;
+    DialogSurface* surface_ = nullptr;
     HWND window_ = nullptr;
     bool modal_ = false;
     std::wstring title_;

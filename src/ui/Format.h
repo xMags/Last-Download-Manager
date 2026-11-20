@@ -3,6 +3,7 @@
 #include "core/Snapshot.h"
 
 #include <cstdint>
+#include <filesystem>
 #include <optional>
 #include <string>
 
@@ -27,5 +28,8 @@ namespace ldm::ui {
 [[nodiscard]] std::wstring FormatDateTime(std::optional<std::int64_t> unixMs);
 // Resume capability for the progress window (checklist P-02).
 [[nodiscard]] std::wstring FormatResumable(std::optional<bool> resumable);
+// A folder as people name it: "Downloads" for `downloads` itself, "Downloads › Video" for a
+// folder inside it (letter case does not matter), otherwise the folder's full path.
+[[nodiscard]] std::wstring FriendlyFolder(const std::filesystem::path& folder, const std::filesystem::path& downloads);
 
 }  // namespace ldm::ui

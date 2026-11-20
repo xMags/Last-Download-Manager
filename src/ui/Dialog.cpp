@@ -1,6 +1,7 @@
 #include "ui/Dialog.h"
 
 #include "resource.h"
+#include "ui/DialogSurface.h"
 #include "ui/dialogs/MessageDialog.h"
 
 #include <commctrl.h>
@@ -155,6 +156,13 @@ INT_PTR Dialog::Dispatch(HWND window, UINT message, WPARAM wParam, LPARAM lParam
     case WM_CTLCOLORBTN:
     case WM_CTLCOLOREDIT:
     case WM_CTLCOLORLISTBOX: {
+        if (surface_ != nullptr) {
+            // WM_CTLCOLOR* passes the control's DC and handle.
+            if (const HBRUSH brush = surface_->CtlColor(message, reinterpret_cast<HDC>(wParam), reinterpret_cast<HWND>(lParam));
+                brush != nullptr) {
+                return reinterpret_cast<INT_PTR>(brush);
+            }
+        }
         if (!theme_.IsDark()) {
             return FALSE;
         }
@@ -171,6 +179,10 @@ INT_PTR Dialog::Dispatch(HWND window, UINT message, WPARAM wParam, LPARAM lParam
         break;
     }
     LRESULT result = 0;
+    if (surface_ != nullptr && surface_->HandleMessage(message, wParam, lParam, result)) {
+        ::SetWindowLongPtrW(window, DWLP_MSGRESULT, result);
+        return TRUE;
+    }
     if (OnMessage(message, wParam, lParam, result)) {
         ::SetWindowLongPtrW(window, DWLP_MSGRESULT, result);
         return TRUE;
