@@ -19,13 +19,14 @@ enum class ButtonRole {
     Link,       // text in the link color, underlined under the mouse
 };
 
-// How a static text (or a read-only edit) reads.
+// How a control's text reads.
 enum class TextRole {
     Heading,  // larger and semibold: the file name
-    Muted,    // secondary information
-    Caption,  // small and muted: hints under icons
-    Success,  // semibold, green
-    Error,    // red
+    Muted,    // labels: the normal size, muted
+    Small,    // secondary information and links: smaller
+    Caption,  // smaller and muted
+    Success,  // smaller, semibold and green
+    Error,    // smaller and red
 };
 
 // The surface's colors, in light or dark mode.
@@ -34,6 +35,7 @@ struct SurfaceColors {
     COLORREF footer;
     COLORREF panel;
     COLORREF field;
+    COLORREF fieldBorder;
     COLORREF text;
     COLORREF muted;
     COLORREF success;
@@ -75,6 +77,12 @@ public:
     void AddPanel(int placeholderId);
     // Draws the push button `id` itself. The Primary button becomes the dialog's default.
     void AddButton(int id, ButtonRole role);
+    // Shows the icon-font `glyph` on button `id` instead of its text (which stays its name).
+    void SetButtonGlyph(int id, wchar_t glyph);
+    // Draws a rounded box `height96` pixels high (at 96 DPI) around the borderless edit `id`, its
+    // text centred in it, outlined in the accent color while it has the focus. The edit's template
+    // rectangle is the box; the edit itself shrinks to the line of text inside it.
+    void AddField(int id, int height96);
     // Draws the static `id` as a pill around its text.
     void AddChip(int id);
     void SetTextRole(int id, TextRole role);
@@ -93,7 +101,12 @@ public:
 private:
     struct Button {
         ButtonRole role = ButtonRole::Secondary;
-        bool hot = false;  // under the mouse
+        bool hot = false;    // under the mouse
+        wchar_t glyph = 0;  // 0: the text
+    };
+    struct Field {
+        int id = 0;
+        int height96 = 0;
     };
     struct Tile {
         HICON icon = nullptr;
@@ -107,6 +120,12 @@ private:
 
     static LRESULT CALLBACK ButtonProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam, UINT_PTR id,
                                        DWORD_PTR data);
+    static LRESULT CALLBACK FieldProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam, UINT_PTR id,
+                                      DWORD_PTR data);
+    // Fits the edit to one line of its font, centred where it is.
+    void FitField(const Field& field);
+    [[nodiscard]] RECT FieldBox(const Field& field) const;
+    void RedrawArea(const RECT& rect);
     void Arrange(const Row& row);
     void RefreshColors();
     void ApplyFonts();
@@ -129,6 +148,7 @@ private:
     std::map<int, Button> buttons_;
     std::vector<int> chips_;
     std::vector<Row> rows_;
+    std::vector<Field> fields_;
     std::map<int, TextRole> roles_;
     std::map<int, Tile> tiles_;
     bool colorsDark_ = false;
@@ -139,8 +159,10 @@ private:
     UniqueBrush panelBrush_;
     UniqueBrush fieldBrush_;
     UniqueFont headingFont_;
-    UniqueFont strongFont_;
-    UniqueFont captionFont_;
+    UniqueFont strongFont_;       // the primary button
+    UniqueFont smallFont_;        // Small, Caption, Error and the tags
+    UniqueFont smallStrongFont_;  // Success
+    UniqueFont glyphFont_;        // button glyphs
 };
 
 }  // namespace ldm::ui

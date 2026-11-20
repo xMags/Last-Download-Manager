@@ -156,6 +156,7 @@
 #define IDC_INFO_COPY 1036
 #define IDC_INFO_CATEGORY_LABEL 1037
 #define IDC_INFO_FOLDER_LABEL 1038
+#define IDC_INFO_ADD_DESCRIPTION 1039
 
 // Delete confirmation (checklist L-07)
 #define IDC_DELETE_TEXT 1040

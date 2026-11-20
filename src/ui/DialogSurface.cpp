@@ -1,9 +1,11 @@
 #include "ui/DialogSurface.h"
 
 #include "ui/Dpi.h"
+#include "ui/GlyphIcons.h"
 #include "ui/SmoothShapes.h"
 
 #include <commctrl.h>
+#include <windowsx.h>
 
 #include <algorithm>
 #include <optional>
@@ -14,7 +16,11 @@ namespace ldm::ui {
 namespace {
 
 constexpr UINT_PTR kButtonSubclassId = 0x4C44;  // "LD"
+constexpr UINT_PTR kFieldSubclassId = 0x4C45;
 constexpr int kButtonRadius96 = 6;
+constexpr int kFieldRadius96 = 6;
+constexpr int kFieldPadding96 = 10;
+constexpr int kGlyph96 = 12;
 constexpr int kPanelRadius96 = 8;
 constexpr int kTileRadius96 = 12;
 constexpr int kChipPadding96 = 8;
@@ -57,7 +63,7 @@ SurfaceColors SurfaceColorsFor(bool dark) noexcept
     if (dark) {
         return SurfaceColors{
             RGB(0x26, 0x26, 0x26), RGB(0x1F, 0x1F, 0x1F), RGB(0x2E, 0x2E, 0x2E), RGB(0x2C, 0x2C, 0x2C),
-            RGB(0xFF, 0xFF, 0xFF), RGB(0xC5, 0xC5, 0xC5), RGB(0x6C, 0xCB, 0x5F), RGB(0xFF, 0x99, 0xA4),
+            RGB(0x4A, 0x4A, 0x4A), RGB(0xFF, 0xFF, 0xFF), RGB(0xC5, 0xC5, 0xC5), RGB(0x6C, 0xCB, 0x5F), RGB(0xFF, 0x99, 0xA4),
             RGB(0x8F, 0xB4, 0xFF), RGB(0x8F, 0xB4, 0xFF), RGB(0xA6, 0xC4, 0xFF), RGB(0x7C, 0xA2, 0xF0),
             RGB(0x0A, 0x15, 0x30), RGB(0x3A, 0x3A, 0x3A), RGB(0x45, 0x45, 0x45), RGB(0x33, 0x33, 0x33),
             RGB(0x35, 0x35, 0x35), RGB(0x2F, 0x2F, 0x2F), RGB(0x33, 0x33, 0x33), RGB(0x8A, 0x8A, 0x8A),
@@ -66,7 +72,7 @@ SurfaceColors SurfaceColorsFor(bool dark) noexcept
     }
     return SurfaceColors{
         RGB(0xFF, 0xFF, 0xFF), RGB(0xF3, 0xF3, 0xF3), RGB(0xF6, 0xF6, 0xF6), RGB(0xFF, 0xFF, 0xFF),
-        RGB(0x1A, 0x1A, 0x1A), RGB(0x5C, 0x5C, 0x5C), RGB(0x0E, 0x7A, 0x0D), RGB(0xC4, 0x2B, 0x1C),
+        RGB(0xD4, 0xD4, 0xD4), RGB(0x1A, 0x1A, 0x1A), RGB(0x5C, 0x5C, 0x5C), RGB(0x0E, 0x7A, 0x0D), RGB(0xC4, 0x2B, 0x1C),
         RGB(0x25, 0x59, 0xD9), RGB(0x25, 0x59, 0xD9), RGB(0x1F, 0x4F, 0xC8), RGB(0x1A, 0x44, 0xAD),
         RGB(0xFF, 0xFF, 0xFF), RGB(0xE8, 0xE8, 0xE8), RGB(0xDE, 0xDE, 0xDE), RGB(0xD2, 0xD2, 0xD2),
         RGB(0xEB, 0xEB, 0xEB), RGB(0xE0, 0xE0, 0xE0), RGB(0xEE, 0xEE, 0xEE), RGB(0x9E, 0x9E, 0x9E),
@@ -120,7 +126,93 @@ void DialogSurface::AddChip(int id)
     chips_.push_back(id);
     const LONG_PTR style = ::GetWindowLongPtrW(chip, GWL_STYLE);
     ::SetWindowLongPtrW(chip, GWL_STYLE, (style & ~static_cast<LONG_PTR>(SS_TYPEMASK)) | SS_OWNERDRAW);
+    SetTextRole(id, TextRole::Small);
     ::InvalidateRect(chip, nullptr, TRUE);
+}
+
+void DialogSurface::SetButtonGlyph(int id, wchar_t glyph)
+{
+    if (const auto button = buttons_.find(id); button != buttons_.end()) {
+        button->second.glyph = glyph;
+        ::InvalidateRect(::GetDlgItem(dialog_, id), nullptr, TRUE);
+    }
+}
+
+void DialogSurface::AddField(int id, int height96)
+{
+    const HWND edit = ::GetDlgItem(dialog_, id);
+    if (edit == nullptr) {
+        return;
+    }
+    // The box is drawn here, so the edit loses its own border, and its width the box's padding.
+    ::SetWindowLongPtrW(edit, GWL_STYLE, ::GetWindowLongPtrW(edit, GWL_STYLE) & ~static_cast<LONG_PTR>(WS_BORDER));
+    ::SetWindowLongPtrW(edit, GWL_EXSTYLE,
+                        ::GetWindowLongPtrW(edit, GWL_EXSTYLE) & ~static_cast<LONG_PTR>(WS_EX_CLIENTEDGE));
+    const RECT box = ClientRectOf(edit);
+    const int padding = Px(kFieldPadding96);
+    ::SetWindowPos(edit, nullptr, box.left + padding, box.top, std::max<LONG>(0, box.right - box.left - 2 * padding),
+                   box.bottom - box.top, SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+    fields_.push_back(Field{id, height96});
+    FitField(fields_.back());
+    ::SetWindowSubclass(edit, &DialogSurface::FieldProc, kFieldSubclassId, reinterpret_cast<DWORD_PTR>(this));
+}
+
+void DialogSurface::FitField(const Field& field)
+{
+    const HWND edit = ::GetDlgItem(dialog_, field.id);
+    if (edit == nullptr) {
+        return;
+    }
+    TEXTMETRICW metrics{};
+    const HDC dc = ::GetDC(edit);
+    if (dc == nullptr) {
+        return;
+    }
+    {
+        const SelectObjectScope selectFont(dc, reinterpret_cast<HFONT>(::SendMessageW(edit, WM_GETFONT, 0, 0)));
+        ::GetTextMetricsW(dc, &metrics);
+    }
+    ::ReleaseDC(edit, dc);
+    const RECT rect = ClientRectOf(edit);
+    const LONG middle = (rect.top + rect.bottom) / 2;
+    const LONG height = metrics.tmHeight + 2;
+    ::SetWindowPos(edit, nullptr, rect.left, middle - height / 2, rect.right - rect.left, height,
+                   SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
+RECT DialogSurface::FieldBox(const Field& field) const
+{
+    const RECT edit = ClientRectOf(::GetDlgItem(dialog_, field.id));
+    const LONG middle = (edit.top + edit.bottom) / 2;
+    const int padding = Px(kFieldPadding96);
+    const int height = Px(field.height96);
+    return RECT{edit.left - padding, middle - height / 2, edit.right + padding, middle - height / 2 + height};
+}
+
+void DialogSurface::RedrawArea(const RECT& rect)
+{
+    // The children too: a dialog does not clip them, so its background covers them when erased.
+    ::RedrawWindow(dialog_, &rect, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN);
+}
+
+LRESULT CALLBACK DialogSurface::FieldProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam, UINT_PTR id,
+                                          DWORD_PTR data)
+{
+    const LRESULT result = ::DefSubclassProc(window, message, wParam, lParam);
+    auto* self = reinterpret_cast<DialogSurface*>(data);  // set by SetWindowSubclass in AddField
+    if (message == WM_SETFOCUS || message == WM_KILLFOCUS || message == WM_SHOWWINDOW) {
+        const int controlId = ::GetDlgCtrlID(window);
+        for (const Field& field : self->fields_) {
+            if (field.id == controlId) {
+                RECT box = self->FieldBox(field);
+                ::InflateRect(&box, 1, 1);
+                self->RedrawArea(box);
+            }
+        }
+    } else if (message == WM_NCDESTROY) {
+        ::RemoveWindowSubclass(window, &DialogSurface::FieldProc, id);
+    }
+    return result;
 }
 
 void DialogSurface::SetTextRole(int id, TextRole role)
@@ -223,6 +315,7 @@ HBRUSH DialogSurface::CtlColor(UINT message, HDC dc, HWND control)
                 text = colors_.error;
                 break;
             case TextRole::Heading:
+            case TextRole::Small:
                 break;
             }
         }
@@ -266,10 +359,26 @@ bool DialogSurface::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam, LR
         ::PostMessageW(dialog_, FontsMessage(), 0, 0);
         return false;  // the dialog manager rescales the dialog and its controls
     }
+    if (message == WM_LBUTTONDOWN) {
+        // A click in a field's box beside its edit puts the caret in the edit.
+        const POINT point{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
+        for (const Field& field : fields_) {
+            const HWND edit = ::GetDlgItem(dialog_, field.id);
+            const RECT box = FieldBox(field);
+            if (edit != nullptr && (::GetWindowLongPtrW(edit, GWL_STYLE) & WS_VISIBLE) != 0 && ::PtInRect(&box, point)) {
+                ::SetFocus(edit);
+                result = 0;
+                return true;
+            }
+        }
+        return false;
+    }
     if (message == FontsMessage()) {
         headingFont_.reset();
         strongFont_.reset();
-        captionFont_.reset();
+        smallFont_.reset();
+        smallStrongFont_.reset();
+        glyphFont_.reset();
         ApplyFonts();
         // The text grew or shrank with the new DPI, so the rows are measured again.
         for (const Row& row : rows_) {
@@ -346,9 +455,11 @@ void DialogSurface::ApplyFonts()
     }
     const auto base = reinterpret_cast<HFONT>(::SendMessageW(dialog_, WM_GETFONT, 0, 0));
     if (headingFont_ == nullptr) {
-        headingFont_ = DeriveFont(base, 140, FW_SEMIBOLD);
+        headingFont_ = DeriveFont(base, 125, FW_SEMIBOLD);
         strongFont_ = DeriveFont(base, 100, FW_SEMIBOLD);
-        captionFont_ = DeriveFont(base, 90, FW_NORMAL);
+        smallFont_ = DeriveFont(base, 90, FW_NORMAL);
+        smallStrongFont_ = DeriveFont(base, 90, FW_SEMIBOLD);
+        glyphFont_ = CreateIconFont(Px(kGlyph96));
     }
     for (const auto& [id, role] : roles_) {
         if (const HFONT font = FontFor(role); font != nullptr) {
@@ -360,6 +471,10 @@ void DialogSurface::ApplyFonts()
             ::SendDlgItemMessageW(dialog_, id, WM_SETFONT, reinterpret_cast<WPARAM>(strongFont_.get()), TRUE);
         }
     }
+    // A new font changes the height of a field's line of text.
+    for (const Field& field : fields_) {
+        FitField(field);
+    }
 }
 
 HFONT DialogSurface::FontFor(TextRole role) const
@@ -368,11 +483,12 @@ HFONT DialogSurface::FontFor(TextRole role) const
     case TextRole::Heading:
         return headingFont_.get();
     case TextRole::Success:
-        return strongFont_.get();
+        return smallStrongFont_.get();
+    case TextRole::Small:
     case TextRole::Caption:
-        return captionFont_.get();
-    case TextRole::Muted:
     case TextRole::Error:
+        return smallFont_.get();
+    case TextRole::Muted:
         return nullptr;  // the dialog's font
     }
     return nullptr;
@@ -391,6 +507,17 @@ void DialogSurface::PaintBackground(HDC dc)
         if (const HWND placeholder = ::GetDlgItem(dialog_, id); placeholder != nullptr) {
             FillRoundedRect(dc, ClientRectOf(placeholder), Px(kPanelRadius96), colors_.panel);
         }
+    }
+    for (const Field& field : fields_) {
+        const HWND edit = ::GetDlgItem(dialog_, field.id);
+        if (edit == nullptr || (::GetWindowLongPtrW(edit, GWL_STYLE) & WS_VISIBLE) == 0) {
+            continue;
+        }
+        const RECT box = FieldBox(field);
+        const int radius = Px(kFieldRadius96);
+        FillRoundedRect(dc, box, radius, colors_.field);
+        const bool focused = ::GetFocus() == edit;
+        FrameRoundedRect(dc, box, radius, focused ? std::max(2, Px(2)) : 1, focused ? colors_.primary : colors_.fieldBorder);
     }
 }
 
@@ -427,6 +554,19 @@ void DialogSurface::DrawButton(const DRAWITEMSTRUCT& item, const Button& button)
     const int radius = Px(kButtonRadius96);
     if (fill) {
         FillRoundedRect(dc, rect, radius, *fill);
+    }
+
+    if (button.glyph != 0 && glyphFont_ != nullptr) {
+        const SelectObjectScope selectGlyph(dc, glyphFont_.get());
+        ::SetBkMode(dc, TRANSPARENT);
+        ::SetTextColor(dc, text);
+        const wchar_t glyph = button.glyph;
+        RECT glyphRect = rect;
+        ::DrawTextW(dc, &glyph, 1, &glyphRect, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
+        if ((item.itemState & ODS_FOCUS) != 0 && (item.itemState & ODS_NOFOCUSRECT) == 0) {
+            FrameRoundedRect(dc, rect, radius, std::max(2, Px(2)), colors_.text);
+        }
+        return;
     }
 
     const std::wstring label = WindowText(item.hwndItem);

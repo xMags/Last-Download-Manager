@@ -30,6 +30,11 @@ constexpr int kTagGap = 3;
 constexpr int kTileIcon96 = 48;
 // Posted when the folder box changed, to show the free space of the new folder's drive.
 constexpr UINT kFolderChangedMessage = WM_APP + 0x110;
+// The icon font's Add glyph, for the new-category button.
+constexpr wchar_t kAddGlyph = 0xE710;
+// Heights of the drawn text boxes at 96 DPI, matching their template rectangles.
+constexpr int kNameField96 = 36;
+constexpr int kDescriptionField96 = 32;
 
 // "212 GB free" for the drive holding `folder`; empty for a network drive (asking could block the
 // window) or when Windows cannot tell.
@@ -78,16 +83,23 @@ bool DownloadInfoDialog::OnInit()
     surface_.AddButton(IDCANCEL, ButtonRole::Secondary);
     surface_.AddButton(IDC_INFO_ADD_CATEGORY, ButtonRole::Secondary);
     surface_.AddButton(IDC_INFO_BROWSE, ButtonRole::Secondary);
-    surface_.AddButton(IDC_INFO_COPY, ButtonRole::Quiet);
+    surface_.SetButtonGlyph(IDC_INFO_ADD_CATEGORY, kAddGlyph);
+    surface_.AddButton(IDC_INFO_COPY, ButtonRole::Link);
+    surface_.AddButton(IDC_INFO_ADD_DESCRIPTION, ButtonRole::Link);
     surface_.AddChip(IDC_INFO_SIZE);
     surface_.AddChip(IDC_INFO_TYPE);
     surface_.SetTextRole(IDC_INFO_NAME, TextRole::Heading);
-    surface_.SetTextRole(IDC_INFO_HOST, TextRole::Muted);
-    surface_.SetTextRole(IDC_INFO_URL, TextRole::Muted);
-    surface_.SetTextRole(IDC_INFO_FREE, TextRole::Muted);
+    surface_.SetTextRole(IDC_INFO_HOST, TextRole::Caption);
+    surface_.SetTextRole(IDC_INFO_URL, TextRole::Caption);
+    surface_.SetTextRole(IDC_INFO_FREE, TextRole::Caption);
+    surface_.SetTextRole(IDC_INFO_COPY, TextRole::Small);
+    surface_.SetTextRole(IDC_INFO_ADD_DESCRIPTION, TextRole::Small);
     surface_.SetTextRole(IDC_INFO_CATEGORY_LABEL, TextRole::Muted);
     surface_.SetTextRole(IDC_INFO_FOLDER_LABEL, TextRole::Muted);
-    Edit_SetCueBannerText(Item(IDC_INFO_DESCRIPTION), L"Description (optional)");
+    // After the heading font, so the box fits the larger line of text.
+    surface_.AddField(IDC_INFO_NAME, kNameField96);
+    surface_.AddField(IDC_INFO_DESCRIPTION, kDescriptionField96);
+    Edit_SetCueBannerText(Item(IDC_INFO_DESCRIPTION), L"Description");
 
     settingText_ = true;
     nameEdited_ = initial_.fileNameFixed;
@@ -318,6 +330,14 @@ bool DownloadInfoDialog::OnCommand(int id, int code, HWND control)
         if (!WriteClipboardText(Handle(), Text(IDC_INFO_URL))) {
             Warn(L"The address could not be copied: another program is using the clipboard.");
         }
+        return true;
+    case IDC_INFO_ADD_DESCRIPTION:
+        // The description box takes the address line's place.
+        Show(IDC_INFO_URL, false);
+        Show(IDC_INFO_COPY, false);
+        Show(IDC_INFO_ADD_DESCRIPTION, false);
+        Show(IDC_INFO_DESCRIPTION, true);
+        ::SetFocus(Item(IDC_INFO_DESCRIPTION));
         return true;
     case IDC_INFO_ADD_CATEGORY:
         if (addCategory_) {

@@ -76,7 +76,8 @@ bool CompleteDialog::OnInit()
     surface_.SetTextRole(IDC_DONE_STATUS, TextRole::Success);
     surface_.SetTextRole(IDC_DONE_NAME, TextRole::Heading);
     surface_.SetTextRole(IDC_DONE_HINT, TextRole::Caption);
-    surface_.SetTextRole(IDC_DONE_SAVED_IN, TextRole::Muted);
+    surface_.SetTextRole(IDC_DONE_SAVED_IN, TextRole::Caption);
+    surface_.SetTextRole(IDC_DONE_FOLDER_LINK, TextRole::Small);
 
     const std::filesystem::path path(base::ToUtf16(completed_.finalPath));
     SetText(IDC_DONE_NAME, path.filename().wstring());
