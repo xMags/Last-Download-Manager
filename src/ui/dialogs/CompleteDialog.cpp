@@ -3,8 +3,8 @@
 #include "base/Utf.h"
 #include "core/FileNames.h"
 #include "resource.h"
-#include "ui/Dpi.h"
-#include "ui/FileTypeInfo.h"
+#include "ui/FileDialogs.h"
+#include "ui/FileKinds.h"
 #include "ui/Format.h"
 
 #include <commctrl.h>
@@ -13,6 +13,8 @@
 #include <shobjidl.h>
 #include <wrl/client.h>
 
+#include <algorithm>
+#include <cwctype>
 #include <filesystem>
 
 namespace ldm::ui {
@@ -25,28 +27,14 @@ constexpr UINT_PTR kCountdownTimer = 1;
 constexpr int kFooterDialogUnits = 34;
 // Between the size tag, "saved in" and the folder, in dialog units.
 constexpr int kDetailGap = 3;
-// The file icon on the tile, at 96 DPI.
-constexpr int kTileIcon96 = 48;
-
-// The user's Downloads folder; empty when Windows cannot say.
-std::filesystem::path DownloadsFolder()
-{
-    PWSTR path = nullptr;
-    std::filesystem::path folder;
-    if (SUCCEEDED(::SHGetKnownFolderPath(FOLDERID_Downloads, KF_FLAG_DEFAULT, nullptr, &path)) && path != nullptr) {
-        folder = path;
-    }
-    ::CoTaskMemFree(path);
-    return folder;
-}
-
 }  // namespace
 
 CompleteDialog::CompleteDialog(const Theme& theme, ShellActions& shell, core::DownloadCompleted completed,
-                               Callbacks callbacks)
+                               std::vector<model::Category> categories, Callbacks callbacks)
     : Dialog(IDD_COMPLETE, theme),
       shell_(shell),
       completed_(std::move(completed)),
+      categories_(std::move(categories)),
       callbacks_(std::move(callbacks)),
       surface_(theme)
 {
@@ -87,11 +75,14 @@ bool CompleteDialog::OnInit()
     SetText(IDC_DONE_FOLDER_LINK, FriendlyFolder(path.parent_path(), DownloadsFolder()));
     surface_.ArrangeRow({IDC_DONE_SIZE, IDC_DONE_SAVED_IN, IDC_DONE_FOLDER_LINK}, kDetailGap);
 
-    // The type's icon, as Properties shows it: reading the file itself for its own icon can block
-    // the window on a large program or a network folder.
-    icon_ = FileTypeIcon(base::ToUtf16(core::FileExtension(base::ToUtf8(path.filename().wstring()))),
-                         Scale(kTileIcon96, DpiOf(Handle())));
-    surface_.SetFileTile(IDC_DONE_ICON, icon_.get(), true);
+    const std::string name = base::ToUtf8(path.filename().wstring());
+    FileTile tile;
+    tile.badge = FileBadgeGlyph(KindOfFile(name, categories_));
+    tile.label = base::ToUtf16(core::FileExtension(name)).substr(0, 4);
+    std::transform(tile.label.begin(), tile.label.end(), tile.label.begin(),
+                   [](wchar_t c) { return static_cast<wchar_t>(std::towupper(c)); });
+    tile.completed = true;
+    surface_.SetFileTile(IDC_DONE_ICON, std::move(tile));
     ::SetWindowSubclass(Item(IDC_DONE_ICON), &CompleteDialog::IconProc, kIconSubclassId, reinterpret_cast<DWORD_PTR>(this));
     ::SetFocus(Item(IDC_DONE_OPEN));
     return false;

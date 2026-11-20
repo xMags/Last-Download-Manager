@@ -1,9 +1,21 @@
 #include "ui/FileDialogs.h"
 
+#include <shlobj.h>
 #include <shobjidl.h>
 #include <wrl/client.h>
 
 namespace ldm::ui {
+
+std::filesystem::path DownloadsFolder()
+{
+    PWSTR path = nullptr;
+    std::filesystem::path folder;
+    if (SUCCEEDED(::SHGetKnownFolderPath(FOLDERID_Downloads, KF_FLAG_DEFAULT, nullptr, &path)) && path != nullptr) {
+        folder = path;
+    }
+    ::CoTaskMemFree(path);
+    return folder;
+}
 
 namespace {
 

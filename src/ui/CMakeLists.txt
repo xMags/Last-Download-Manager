@@ -35,6 +35,8 @@ add_library(ldm_ui STATIC
     ExportFormat.h
     FileDialogs.cpp
     FileDialogs.h
+    FileKinds.cpp
+    FileKinds.h
     FileTypeInfo.cpp
     FileTypeInfo.h
     Format.cpp

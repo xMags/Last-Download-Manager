@@ -3,6 +3,7 @@
 #include "ui/Handles.h"
 
 #include <algorithm>
+#include <vector>
 #include <objidl.h>
 
 // GDI+ uses unqualified min and max, which NOMINMAX (set for the whole build) removes.
@@ -128,14 +129,26 @@ void FillCircle(HDC dc, const RECT& bounds, COLORREF color)
 
 void DrawCheckMark(HDC dc, POINT start, POINT corner, POINT end, int width, COLORREF color)
 {
+    const POINT points[] = {start, corner, end};
+    DrawLines(dc, points, width, color);
+}
+
+void DrawLines(HDC dc, std::span<const POINT> points, int width, COLORREF color)
+{
+    if (points.size() < 2) {
+        return;
+    }
     Gdiplus::Graphics graphics(dc);
     if (Ready(graphics)) {
         Prepare(graphics);
         Gdiplus::Pen pen(ToColor(color), static_cast<Gdiplus::REAL>(width));
         pen.SetLineCap(Gdiplus::LineCapRound, Gdiplus::LineCapRound, Gdiplus::DashCapRound);
         pen.SetLineJoin(Gdiplus::LineJoinRound);
-        const Gdiplus::Point points[] = {{start.x, start.y}, {corner.x, corner.y}, {end.x, end.y}};
-        if (graphics.DrawLines(&pen, points, 3) == Gdiplus::Ok) {
+        std::vector<Gdiplus::Point> path;
+        for (const POINT& point : points) {
+            path.emplace_back(point.x, point.y);
+        }
+        if (graphics.DrawLines(&pen, path.data(), static_cast<INT>(path.size())) == Gdiplus::Ok) {
             return;
         }
     }
@@ -143,8 +156,34 @@ void DrawCheckMark(HDC dc, POINT start, POINT corner, POINT end, int width, COLO
     UniquePen pen(::ExtCreatePen(PS_GEOMETRIC | PS_SOLID | PS_ENDCAP_ROUND | PS_JOIN_ROUND, static_cast<DWORD>(width),
                                  &brush, 0, nullptr));
     const SelectObjectScope selectPen(dc, pen.get());
-    const POINT points[] = {start, corner, end};
-    ::Polyline(dc, points, 3);
+    ::Polyline(dc, points.data(), static_cast<int>(points.size()));
+}
+
+void FillPolygon(HDC dc, std::span<const POINT> points, COLORREF fill, COLORREF line, int width)
+{
+    if (points.size() < 3) {
+        return;
+    }
+    Gdiplus::Graphics graphics(dc);
+    if (Ready(graphics)) {
+        Prepare(graphics);
+        std::vector<Gdiplus::Point> path;
+        for (const POINT& point : points) {
+            path.emplace_back(point.x, point.y);
+        }
+        Gdiplus::SolidBrush brush(ToColor(fill));
+        Gdiplus::Pen pen(ToColor(line), static_cast<Gdiplus::REAL>(width));
+        pen.SetLineJoin(Gdiplus::LineJoinRound);
+        if (graphics.FillPolygon(&brush, path.data(), static_cast<INT>(path.size())) == Gdiplus::Ok &&
+            graphics.DrawPolygon(&pen, path.data(), static_cast<INT>(path.size())) == Gdiplus::Ok) {
+            return;
+        }
+    }
+    UniqueBrush brush(::CreateSolidBrush(fill));
+    UniquePen pen(::CreatePen(PS_SOLID, width, line));
+    const SelectObjectScope selectBrush(dc, brush.get());
+    const SelectObjectScope selectPen(dc, pen.get());
+    ::Polygon(dc, points.data(), static_cast<int>(points.size()));
 }
 
 }  // namespace ldm::ui

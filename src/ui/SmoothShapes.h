@@ -2,6 +2,8 @@
 
 #include <windows.h>
 
+#include <span>
+
 namespace ldm::ui {
 
 // GDI+ for the process, for the smooth (anti-aliased) shapes below. Create one before the first
@@ -25,5 +27,9 @@ void FrameRoundedRect(HDC dc, const RECT& rect, int radius, int width, COLORREF 
 void FillCircle(HDC dc, const RECT& bounds, COLORREF color);
 // A check mark through three points, `width` pixels wide, with round ends.
 void DrawCheckMark(HDC dc, POINT start, POINT corner, POINT end, int width, COLORREF color);
+// A polygon filled with `fill` and outlined `width` pixels wide in `line`, with round joins.
+void FillPolygon(HDC dc, std::span<const POINT> points, COLORREF fill, COLORREF line, int width);
+// Connected lines `width` pixels wide with round joins.
+void DrawLines(HDC dc, std::span<const POINT> points, int width, COLORREF color);
 
 }  // namespace ldm::ui

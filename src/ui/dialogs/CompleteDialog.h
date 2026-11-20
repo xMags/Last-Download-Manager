@@ -8,6 +8,7 @@
 
 #include <functional>
 #include <string>
+#include <vector>
 
 namespace ldm::ui {
 
@@ -20,7 +21,9 @@ public:
         std::function<void(CompleteDialog*)> closed;  // the owner deletes the object
     };
 
-    CompleteDialog(const Theme& theme, ShellActions& shell, core::DownloadCompleted completed, Callbacks callbacks);
+    // `categories` tell which kind of file it is, for the badge on its tile.
+    CompleteDialog(const Theme& theme, ShellActions& shell, core::DownloadCompleted completed,
+                   std::vector<model::Category> categories, Callbacks callbacks);
     void Open(HWND owner);
 
 private:
@@ -33,9 +36,9 @@ private:
 
     ShellActions& shell_;
     core::DownloadCompleted completed_;
+    std::vector<model::Category> categories_;
     Callbacks callbacks_;
     DialogSurface surface_;
-    UniqueIcon icon_;
 };
 
 // The cancellable countdown before a power action after a download completes (checklist P-05).

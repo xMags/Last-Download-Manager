@@ -6,6 +6,7 @@
 #include "ui/DialogSurface.h"
 #include "ui/Handles.h"
 
+#include <filesystem>
 #include <functional>
 #include <optional>
 #include <string>
@@ -59,12 +60,22 @@ private:
     bool OnInit() override;
     bool OnCommand(int id, int code, HWND control) override;
     bool OnMessage(UINT message, WPARAM wParam, LPARAM lParam, LRESULT& result) override;
-    void FillCategories();
+    // The category picker's value and icon, from the chosen category.
+    void ShowCategory();
+    void ChooseCategory();
     void OnCategoryChanged();
+    // The folder picker's value: the folder as people name it ("Downloads › Video").
+    void ShowFolder();
+    void ChooseFolder();
+    // Swaps the folder picker for the edit holding the folder's full path, and back.
+    void EditFolder();
+    void EndFolderEdit();
+    void SetFolder(const std::wstring& folder);
     void Browse();
     bool Finish(Action action);
     [[nodiscard]] std::optional<model::CategoryId> SelectedCategory() const;
-    // The tile's icon and the type tag, when the name's extension changed.
+    [[nodiscard]] const model::Category* FindCategory(std::optional<model::CategoryId> id) const;
+    // The tile and the type tag, when the name's extension changed.
     void ShowFileType(const std::wstring& fileName);
     // The size tag and the line after the tags (where it comes from, or why it failed).
     void ShowDetails(const std::wstring& size, const std::wstring& note, bool failed);
@@ -75,12 +86,13 @@ private:
     std::function<std::optional<model::Category>(HWND)> addCategory_;
     DialogSurface surface_;
     Choice choice_;
+    std::optional<model::CategoryId> category_;  // the picker's choice
+    std::filesystem::path downloads_;            // the user's Downloads folder, for ShowFolder
     bool nameEdited_ = false;
     bool folderEdited_ = false;
     bool settingText_ = false;
-    UniqueIcon fileIcon_;
-    std::wstring fileIconExtension_;  // the type fileIcon_ shows
-    std::wstring source_;             // "from example.com", the line after the tags
+    std::wstring tileExtension_ = L"\n";  // the extension the tile and type tag show ("\n": none yet)
+    std::wstring source_;         // "from example.com", the line after the tags
     std::wstring shownSize_;
     std::wstring shownNote_;
     bool shownFailed_ = false;
