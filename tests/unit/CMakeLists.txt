@@ -49,8 +49,6 @@ add_executable(ldm_unit_tests
     ui/BrowserSessionsTests.cpp
     ui/CaptureFollowUpTests.cpp
     ui/ExportAndLaunchTests.cpp
-    ui/FileKindsTests.cpp
-    ui/FriendlyFolderTests.cpp
     ui/GrabberViewTests.cpp
     ui/ListModelTests.cpp
     ui/MediaCatalogTests.cpp

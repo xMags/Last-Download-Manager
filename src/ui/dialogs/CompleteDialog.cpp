@@ -3,8 +3,6 @@
 #include "base/Utf.h"
 #include "core/FileNames.h"
 #include "resource.h"
-#include "ui/FileDialogs.h"
-#include "ui/FileKinds.h"
 #include "ui/Format.h"
 
 #include <commctrl.h>
@@ -13,32 +11,19 @@
 #include <shobjidl.h>
 #include <wrl/client.h>
 
-#include <algorithm>
-#include <cwctype>
-#include <filesystem>
-
 namespace ldm::ui {
 
 namespace {
 
 constexpr UINT_PTR kIconSubclassId = 1;
 constexpr UINT_PTR kCountdownTimer = 1;
-// Dialog units of the footer band, from the template's layout.
-constexpr int kFooterDialogUnits = 34;
-// Between the size tag, "saved in" and the folder, in dialog units.
-constexpr int kDetailGap = 3;
+
 }  // namespace
 
 CompleteDialog::CompleteDialog(const Theme& theme, ShellActions& shell, core::DownloadCompleted completed,
-                               std::vector<model::Category> categories, Callbacks callbacks)
-    : Dialog(IDD_COMPLETE, theme),
-      shell_(shell),
-      completed_(std::move(completed)),
-      categories_(std::move(categories)),
-      callbacks_(std::move(callbacks)),
-      surface_(theme)
+                               Callbacks callbacks)
+    : Dialog(IDD_COMPLETE, theme), shell_(shell), completed_(std::move(completed)), callbacks_(std::move(callbacks))
 {
-    UseSurface(&surface_);
 }
 
 void CompleteDialog::Open(HWND owner)
@@ -53,36 +38,20 @@ void CompleteDialog::Open(HWND owner)
 
 bool CompleteDialog::OnInit()
 {
-    surface_.Attach(Handle());
-    surface_.SetFooterHeight(kFooterDialogUnits);
-    surface_.AddButton(IDC_DONE_OPEN, ButtonRole::Primary);
-    surface_.AddButton(IDC_DONE_OPEN_WITH, ButtonRole::Secondary);
-    surface_.AddButton(IDC_DONE_FOLDER, ButtonRole::Secondary);
-    surface_.AddButton(IDCANCEL, ButtonRole::Quiet);
-    surface_.AddButton(IDC_DONE_FOLDER_LINK, ButtonRole::Link);
-    surface_.AddChip(IDC_DONE_SIZE);
-    surface_.SetTextRole(IDC_DONE_STATUS, TextRole::Success);
-    surface_.SetTextRole(IDC_DONE_NAME, TextRole::Heading);
-    surface_.SetTextRole(IDC_DONE_HINT, TextRole::Caption);
-    surface_.SetTextRole(IDC_DONE_SAVED_IN, TextRole::Caption);
-    surface_.SetTextRole(IDC_DONE_FOLDER_LINK, TextRole::Small);
-
-    const std::filesystem::path path(base::ToUtf16(completed_.finalPath));
-    SetText(IDC_DONE_NAME, path.filename().wstring());
+    SetText(IDC_DONE_URL, base::ToUtf16(completed_.url));
+    SetText(IDC_DONE_PATH, base::ToUtf16(completed_.finalPath));
     SetText(IDC_DONE_SIZE, completed_.size ? FormatSize(*completed_.size) : L"");
-    Show(IDC_DONE_SIZE, completed_.size.has_value());
-    SetText(IDC_DONE_SAVED_IN, completed_.size ? L"saved in" : L"Saved in");
-    SetText(IDC_DONE_FOLDER_LINK, FriendlyFolder(path.parent_path(), DownloadsFolder()));
-    surface_.ArrangeRow({IDC_DONE_SIZE, IDC_DONE_SAVED_IN, IDC_DONE_FOLDER_LINK}, kDetailGap);
-
-    const std::string name = base::ToUtf8(path.filename().wstring());
-    FileTile tile;
-    tile.badge = FileBadgeGlyph(KindOfFile(name, categories_));
-    tile.label = base::ToUtf16(core::FileExtension(name)).substr(0, 4);
-    std::transform(tile.label.begin(), tile.label.end(), tile.label.begin(),
-                   [](wchar_t c) { return static_cast<wchar_t>(std::towupper(c)); });
-    tile.completed = true;
-    surface_.SetFileTile(IDC_DONE_ICON, std::move(tile));
+    // The type's icon, as Properties shows it: reading the file itself for its own icon can block
+    // the window on a large program or a network folder.
+    SHFILEINFOW info{};
+    const std::string& path = completed_.finalPath;
+    const std::string name = path.substr(path.find_last_of("\\/") + 1);  // npos + 1: the whole path
+    const std::wstring probe = L"file." + base::ToUtf16(core::FileExtension(name));
+    if (::SHGetFileInfoW(probe.c_str(), FILE_ATTRIBUTE_NORMAL, &info, sizeof(info),
+                         SHGFI_USEFILEATTRIBUTES | SHGFI_ICON | SHGFI_LARGEICON) != 0) {
+        icon_.reset(info.hIcon);
+        ::SendMessageW(Item(IDC_DONE_ICON), STM_SETICON, reinterpret_cast<WPARAM>(icon_.get()), 0);
+    }
     ::SetWindowSubclass(Item(IDC_DONE_ICON), &CompleteDialog::IconProc, kIconSubclassId, reinterpret_cast<DWORD_PTR>(this));
     ::SetFocus(Item(IDC_DONE_OPEN));
     return false;
@@ -140,7 +109,6 @@ bool CompleteDialog::OnCommand(int id, int code, HWND control)
         Close(IDOK);
         return true;
     case IDC_DONE_FOLDER:
-    case IDC_DONE_FOLDER_LINK:
         shell_.ShowInFolder(path);
         Close(IDOK);
         return true;

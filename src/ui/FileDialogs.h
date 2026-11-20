@@ -2,14 +2,10 @@
 
 #include <windows.h>
 
-#include <filesystem>
 #include <optional>
 #include <string>
 
 namespace ldm::ui {
-
-// The user's Downloads folder; empty when Windows cannot say.
-[[nodiscard]] std::filesystem::path DownloadsFolder();
 
 // The Windows folder picker, starting in `initial` when it exists.
 [[nodiscard]] std::optional<std::wstring> PickFolder(HWND owner, const std::wstring& initial);

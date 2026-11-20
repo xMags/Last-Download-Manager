@@ -122,7 +122,7 @@ void TransferWindows::OnCompleted(const core::DownloadCompleted& completed)
     }
     if (settings.showCompleteDialog) {
         auto dialog = std::make_unique<CompleteDialog>(
-            *context_.theme, *context_.shell, completed, snapshot->categories,
+            *context_.theme, *context_.shell, completed,
             CompleteDialog::Callbacks{
                 [this] {
                     context_.commands->Post(

@@ -23,7 +23,6 @@
 #include "storage/SqliteStore.h"
 #include "ui/GrabberBridge.h"
 #include "ui/MainWindow.h"
-#include "ui/SmoothShapes.h"
 #include "ui/Theme.h"
 #include "ui/UiBridge.h"
 
@@ -174,8 +173,6 @@ int WINAPI wWinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ PWSTR, _In_ int sho
     }
 
     OleScope ole;
-    // Smooth shapes in the redesigned dialogs; stopped after every window is gone (declared early).
-    const ldm::ui::GdiPlusSession gdiPlus;
     INITCOMMONCONTROLSEX controls{sizeof(controls), ICC_WIN95_CLASSES | ICC_STANDARD_CLASSES | ICC_TAB_CLASSES |
                                                         ICC_PROGRESS_CLASS | ICC_UPDOWN_CLASS | ICC_LINK_CLASS |
                                                         ICC_DATE_CLASSES};
