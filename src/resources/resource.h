@@ -2,6 +2,7 @@
 #pragma once
 
 #define IDI_LDM 100
+#define IDI_LDM_REVERSED 101
 #define IDI_TOOLBAR_RESUME 110
 #define IDI_TOOLBAR_STOP 111
 #define IDI_TOOLBAR_STOP_ALL 112

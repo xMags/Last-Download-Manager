@@ -83,7 +83,8 @@ private:
     const PanelMenuPainter* menuPainter_ = nullptr;
     Callbacks callbacks_;
     UniqueFont font_;
-    UniqueFont glyphs_;      // the icon, at full size
+    UniqueFont glyphs_;      // the lock of a protected video, at the logo's size
+    UniqueIcon logo_;        // the logo in white, its arrow see-through; null if it failed to load
     UniqueFont smallGlyphs_; // the menu arrow and the side buttons
     UINT dpi_ = USER_DEFAULT_SCREEN_DPI;
     bool visible_ = false;

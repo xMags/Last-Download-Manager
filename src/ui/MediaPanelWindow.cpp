@@ -1,5 +1,6 @@
 #include "ui/MediaPanelWindow.h"
 
+#include "resource.h"
 #include "ui/Dpi.h"
 #include "ui/GlyphIcons.h"
 #include "ui/MediaPanelMenuPainter.h"
@@ -17,7 +18,7 @@ namespace {
 
 constexpr wchar_t kClassName[] = L"LdmMediaPanel";
 // Icon font glyphs (GlyphIcons).
-constexpr wchar_t kDownloadGlyph = 0xE896;     // Download
+constexpr wchar_t kDownloadGlyph = 0xE896;     // Download: only if the logo failed to load
 constexpr wchar_t kLockGlyph = 0xE72E;         // Lock
 constexpr wchar_t kChevronDownGlyph = 0xE70D;  // ChevronDown
 constexpr wchar_t kMinimizeGlyph = 0xE921;     // ChromeMinimize
@@ -27,13 +28,13 @@ constexpr std::wstring_view kDownloadText = L"Download this video";
 constexpr std::wstring_view kProtectedText = L"Protected video";
 
 // Sizes at 96 DPI.
-constexpr int kHeight96 = 32;
+constexpr int kHeight96 = 26;
 constexpr int kPadding96 = 10;
 constexpr int kIcon96 = 16;
 constexpr int kGap96 = 8;
 constexpr int kArrow96 = 10;
-constexpr int kSideButton96 = 30;
-constexpr int kDividerInset96 = 8;
+constexpr int kSideButton96 = 26;
+constexpr int kDividerInset96 = 6;
 constexpr int kTextSlack96 = 4;
 
 // The panel sits on a web video, not in LDM's window, so it has one look in light and dark
@@ -150,6 +151,14 @@ void MediaPanelWindow::UpdateFont(UINT dpi)
     dpi_ = dpi;
     font_ = CreateLabelFont(dpi);
     glyphs_ = CreateIconFont(Scale(kIcon96, dpi));
+    // The icon file holds sizes for every common scale; Windows picks the nearest and scales it.
+    const int logoSize = Scale(kIcon96, dpi);
+    HICON logo = nullptr;
+    if (FAILED(::LoadIconWithScaleDown(::GetModuleHandleW(nullptr), MAKEINTRESOURCEW(IDI_LDM_REVERSED), logoSize,
+                                       logoSize, &logo))) {
+        logo = nullptr;
+    }
+    logo_.reset(logo);
     smallGlyphs_ = CreateIconFont(Scale(kArrow96, dpi));
 }
 
@@ -468,8 +477,13 @@ void MediaPanelWindow::Paint()
         const int arrow = Scale(kArrow96, dpi_);
         ::SetBkMode(dc, TRANSPARENT);
         ::SetTextColor(dc, kInk);
-        DrawGlyph(dc, glyphs_.get(), protected_ ? kLockGlyph : kDownloadGlyph,
-                  RECT{padding, client.top, padding + iconSize, client.bottom});
+        if (!protected_ && logo_) {
+            const int top = (client.bottom - iconSize) / 2;
+            ::DrawIconEx(dc, padding, top, logo_.get(), iconSize, iconSize, 0, nullptr, DI_NORMAL);
+        } else {
+            DrawGlyph(dc, glyphs_.get(), protected_ ? kLockGlyph : kDownloadGlyph,
+                      RECT{padding, client.top, padding + iconSize, client.bottom});
+        }
 
         const RECT main = PartRect(Part::Main);
         int x = padding + iconSize + gap;

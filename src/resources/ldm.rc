@@ -6,6 +6,7 @@
 LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
 
 IDI_LDM ICON "ldm.ico"
+IDI_LDM_REVERSED ICON "ldm-reversed.ico"
 IDI_TOOLBAR_RESUME ICON "toolbar/resume.ico"
 IDI_TOOLBAR_STOP ICON "toolbar/stop.ico"
 IDI_TOOLBAR_STOP_ALL ICON "toolbar/stop-all.ico"

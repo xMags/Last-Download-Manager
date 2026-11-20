@@ -6,8 +6,9 @@ each size is sharp. Sizes up to 24 px use their own geometry, a little larger in
 with the shaft on whole pixels: scaled down from the large one, the arrow would blur.
 
 Run from anywhere, with Pillow installed:  python src/resources/logo/make-logo.py
-Writes src/resources/ldm.ico (the app, its windows, tray and installer) and the browser
-extension's icons in extension/icons/ (on, and grey for a tab where LDM is turned off).
+Writes src/resources/ldm.ico (the app, its windows, tray and installer), ldm-reversed.ico (white
+with the arrow cut out, for the media panel over web videos) and the browser extension's icons
+in extension/icons/ (on, and grey for a tab where LDM is turned off).
 """
 
 import io
@@ -43,7 +44,11 @@ SMALL = {
 SMALL_UP_TO = 24  # px: the largest size drawn from SMALL
 
 
-def draw(size, color):
+CLEAR = (0, 0, 0, 0)
+
+
+def draw(size, color, arrow=WHITE):
+    """The logo in `color`; `arrow` CLEAR cuts the arrow out, so what is behind shows through."""
     spec = SMALL if size <= SMALL_UP_TO else LARGE
     scale = size * SUPERSAMPLE / spec["grid"]
     canvas = Image.new("RGBA", (size * SUPERSAMPLE,) * 2, (0, 0, 0, 0))
@@ -68,7 +73,7 @@ def draw(size, color):
     pen.polygon([at(p) for p in shape], fill=color)
     stroke(shape + [shape[0]], spec["corner"] * 2, color)
     for part in spec["arrow"]:
-        stroke(part, spec["stroke"], WHITE)
+        stroke(part, spec["stroke"], arrow)  # ImageDraw replaces pixels, so CLEAR erases
     return canvas.resize((size, size), Image.LANCZOS)
 
 
@@ -78,9 +83,9 @@ def png_bytes(image):
     return out.getvalue()
 
 
-def write_ico(path, sizes):
+def write_ico(path, sizes, color=BLUE, arrow=WHITE):
     """An .ico with one PNG per size, as Windows Vista and later read them."""
-    images = [png_bytes(draw(size, BLUE)) for size in sizes]
+    images = [png_bytes(draw(size, color, arrow)) for size in sizes]
     header = struct.pack("<HHH", 0, 1, len(sizes))
     offset = len(header) + 16 * len(sizes)
     entries = b""
@@ -93,6 +98,8 @@ def write_ico(path, sizes):
 
 def main():
     write_ico(ROOT / "src" / "resources" / "ldm.ico", [16, 20, 24, 32, 40, 48, 64, 128, 256])
+    # White with the arrow cut out, for the blue media panel: the arrow takes the panel's color.
+    write_ico(ROOT / "src" / "resources" / "ldm-reversed.ico", [16, 20, 24, 28, 32, 40, 48], WHITE, CLEAR)
     icons = ROOT / "extension" / "icons"
     for size in (16, 32, 48, 128):
         draw(size, BLUE).save(icons / f"ldm-{size}.png", optimize=True)
