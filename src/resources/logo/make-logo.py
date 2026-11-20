@@ -1,9 +1,9 @@
 """Draws the Last Download Manager logo and writes every file that carries it.
 
-The logo is a rounded triangle pointing down with a white download arrow inside. It is drawn
-from the geometry below, 8 times larger than needed, then scaled down, so each size is sharp.
-Sizes up to 24 px use their own geometry, laid on the pixel grid with thicker lines: scaled
-down from the large one, the arrow would blur into the triangle.
+The logo is a rounded square turned on its corner (a diamond) with a white download arrow
+inside. It is drawn from the geometry below, 8 times larger than needed, then scaled down, so
+each size is sharp. Sizes up to 24 px use their own geometry, a little larger in the icon and
+with the shaft on whole pixels: scaled down from the large one, the arrow would blur.
 
 Run from anywhere, with Pillow installed:  python src/resources/logo/make-logo.py
 Writes src/resources/ldm.ico (the app, its windows, tray and installer) and the browser
@@ -22,20 +22,22 @@ GREY = (138, 144, 153, 255)  # #8A9099: the extension's "off" look
 WHITE = (255, 255, 255, 255)
 SUPERSAMPLE = 8
 
-# Coordinates on a grid of `grid` units across the icon.
+# Coordinates on a grid of `grid` units across the icon. The shape is the polygon `shape`
+# grown by `corner` all round, which rounds its corners: here a square of side 28 with corners
+# of radius 7, turned 45 degrees about the middle of the icon.
 LARGE = {
     "grid": 48,
-    "triangle": [(8, 9.5), (40, 9.5), (24, 39.5)],
-    "corner": 3,  # corner radius of the triangle
-    "arrow": [[(24, 13), (24, 25)], [(19, 20.5), (24, 25.5), (29, 20.5)]],
-    "stroke": 3.4,
+    "shape": [(24, 14.1), (33.9, 24), (24, 33.9), (14.1, 24)],
+    "corner": 7,
+    "arrow": [[(24, 12.5), (24, 29.5)], [(17.5, 23), (24, 29.5), (30.5, 23)]],
+    "stroke": 4,
 }
 SMALL = {
     "grid": 16,
-    "triangle": [(2.6, 3.2), (13.4, 3.2), (8, 13.6)],
-    "corner": 1.1,
+    "shape": [(8, 4.4), (11.6, 8), (8, 11.6), (4.4, 8)],
+    "corner": 2.4,
     # The shaft is 2 units wide around x = 8, so at 16 px it covers whole pixels 7 and 8.
-    "arrow": [[(8, 4.2), (8, 8.8)], [(5.2, 6.4), (8, 9.2), (10.8, 6.4)]],
+    "arrow": [[(8, 4.7), (8, 9.8)], [(5.5, 7.4), (8, 9.9), (10.5, 7.4)]],
     "stroke": 2.0,
 }
 SMALL_UP_TO = 24  # px: the largest size drawn from SMALL
@@ -62,10 +64,9 @@ def draw(size, color):
         for point in points:
             dot(point, width / 2, fill)
 
-    # The rounded triangle: the triangle grown by `corner` all round.
-    triangle = spec["triangle"]
-    pen.polygon([at(p) for p in triangle], fill=color)
-    stroke(triangle + [triangle[0]], spec["corner"] * 2, color)
+    shape = spec["shape"]
+    pen.polygon([at(p) for p in shape], fill=color)
+    stroke(shape + [shape[0]], spec["corner"] * 2, color)
     for part in spec["arrow"]:
         stroke(part, spec["stroke"], WHITE)
     return canvas.resize((size, size), Image.LANCZOS)
