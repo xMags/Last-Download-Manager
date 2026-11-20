@@ -315,6 +315,10 @@ api.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (changeInfo.status === 'loading' && offTabs.switchedTabs().includes(tabId)) {
     renderTab(tabId);
   }
+  // First and at once: LDM starts the tab's media again before it hears the new site page.
+  if (changeInfo.url !== undefined) {
+    mediaDetector.addressChanged(tabId, changeInfo.url);
+  }
   sitePages.onUpdated(tabId, changeInfo, tab).catch((error) => console.warn('LDM: site page failed', error));
 });
 api.tabs.onActivated.addListener(() => videoPositions.refreshAll());

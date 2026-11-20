@@ -147,6 +147,38 @@ function fakeApi({ tab = { id: 7, url: 'https://a.test/watch', title: 'Watch', i
   };
 }
 
+test('a single-page site moving to another page starts its media again, keeping what just came', async () => {
+  let now = 0;
+  const tab = { id: 7, url: 'https://www.imdb.test/video/vi1/?listId=ls1', title: 'Video', incognito: false };
+  const { api, connection, sent } = fakeApi({ tab });
+  const detector = new MediaDetector(api, connection, { ready: Promise.resolve(), isEnabled: () => true,
+    rules: () => ({ media: { types: ['mp4'], minimumBytes: 1000 } }), userAgent: 'UA', now: () => now });
+  const clip = (name) => ({ tabId: 7, frameId: 0, type: 'media', ...response(`https://cdn.imdb.test/${name}.mp4`, 'video/mp4', 5000) });
+  const posts = () => sent.filter(([kind]) => kind === 'post').map(([, message]) => message);
+
+  await detector.onHeadersReceived(clip('first'));
+  now = 10_000;
+  detector.addressChanged(7, 'https://www.imdb.test/video/vi1/?listId=ls1&t=30');
+  detector.addressChanged(7, 'https://www.imdb.test/video/vi1/?listId=ls1#comments');
+  assert.equal(posts().length, 1, 'a new query or fragment is the same page');
+
+  await detector.onHeadersReceived(clip('second'));  // the next video, asked for just before the address changed
+  now = 11_000;
+  detector.addressChanged(7, 'https://www.imdb.test/video/vi2/?listId=ls1');
+  const after = posts().slice(2);
+  assert.equal(after[0].type, 'media-reset', 'the old page\'s media goes');
+  assert.deepEqual(after.slice(1).map((m) => m.url), ['https://cdn.imdb.test/second.mp4'], 'the new page\'s comes back');
+  assert.equal(after[1].pageUrl, 'https://www.imdb.test/video/vi2/?listId=ls1');
+
+  await detector.onHeadersReceived(clip('first'));
+  assert.equal(posts().at(-1).url, 'https://cdn.imdb.test/first.mp4', 'the old video counts again if the new page plays it');
+  await detector.onHeadersReceived(clip('second'));
+  assert.equal(posts().filter((m) => m.url === 'https://cdn.imdb.test/second.mp4').length, 2, 'still reported once per page');
+
+  detector.addressChanged(8, 'https://www.imdb.test/video/vi3/');
+  assert.equal(posts().filter((m) => m.type === 'media-reset').length, 1, 'a tab without media is left alone');
+});
+
 test('each media address of a tab is reported once, and a reset forgets them', async () => {
   const { api, connection, sent } = fakeApi();
   const detector = new MediaDetector(api, connection, { ready: Promise.resolve(), isEnabled: () => true,
